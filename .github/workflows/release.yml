@@ -30,5 +30,8 @@ jobs:
       contents: read
     uses: greenticai/.github/.github/workflows/crates-publish.yml@main
     with:
-      crates: "greentic-extension-sdk-contract greentic-extension-sdk-state greentic-extension-sdk-registry greentic-extension-sdk-testing greentic-extension-sdk-cli"
+      # Order matters: testing is a dev-dep of registry + cli, so it must be
+      # published before them or the verification step can't resolve it from
+      # crates.io.
+      crates: "greentic-extension-sdk-contract greentic-extension-sdk-state greentic-extension-sdk-testing greentic-extension-sdk-registry greentic-extension-sdk-cli"
     secrets: inherit
