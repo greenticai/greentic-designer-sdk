@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/greentic-ext-contract",
-    "crates/greentic-ext-state",
-    "crates/greentic-ext-registry",
-    "crates/greentic-ext-testing",
-    "crates/greentic-ext-cli",
+    "crates/greentic-extension-sdk-contract",
+    "crates/greentic-extension-sdk-state",
+    "crates/greentic-extension-sdk-registry",
+    "crates/greentic-extension-sdk-testing",
+    "crates/greentic-extension-sdk-cli",
 ]
 
 [workspace.package]

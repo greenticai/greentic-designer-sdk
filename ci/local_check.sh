@@ -14,8 +14,8 @@ echo "==> cargo build (release)"
 cargo build --workspace --locked --release
 
 echo "==> cargo publish --dry-run (leaf crates only — internal-dep crates verified post-publish ordering)"
-cargo publish --dry-run --allow-dirty -p greentic-ext-contract
-cargo publish --dry-run --allow-dirty -p greentic-ext-state
+cargo publish --dry-run --allow-dirty -p greentic-extension-sdk-contract
+cargo publish --dry-run --allow-dirty -p greentic-extension-sdk-state
 
 echo
 echo "All checks passed."

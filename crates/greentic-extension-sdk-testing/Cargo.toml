@@ -1,0 +1,21 @@
+[package]
+name = "greentic-extension-sdk-testing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Test utilities for Greentic Designer Extensions"
+
+[dependencies]
+anyhow = { workspace = true }
+ciborium = { workspace = true }
+greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "0.4" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+zip = { workspace = true }
+
+[lints]
+workspace = true
