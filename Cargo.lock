@@ -922,7 +922,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "greentic-ext-cli"
+name = "greentic-extension-sdk-cli"
 version = "0.4.0"
 dependencies = [
  "anstyle",
@@ -933,10 +933,10 @@ dependencies = [
  "dialoguer",
  "directories",
  "ed25519-dalek",
- "greentic-ext-contract",
- "greentic-ext-registry",
- "greentic-ext-state",
- "greentic-ext-testing",
+ "greentic-extension-sdk-contract",
+ "greentic-extension-sdk-registry",
+ "greentic-extension-sdk-state",
+ "greentic-extension-sdk-testing",
  "include_dir",
  "jsonschema",
  "notify-debouncer-full",
@@ -960,7 +960,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "greentic-ext-contract"
+name = "greentic-extension-sdk-contract"
 version = "0.4.0"
 dependencies = [
  "anyhow",
@@ -979,7 +979,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "greentic-ext-registry"
+name = "greentic-extension-sdk-registry"
 version = "0.4.0"
 dependencies = [
  "anyhow",
@@ -988,8 +988,8 @@ dependencies = [
  "ciborium",
  "dialoguer",
  "fs2",
- "greentic-ext-contract",
- "greentic-ext-testing",
+ "greentic-extension-sdk-contract",
+ "greentic-extension-sdk-testing",
  "oci-client",
  "reqwest",
  "semver",
@@ -1006,7 +1006,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "greentic-ext-state"
+name = "greentic-extension-sdk-state"
 version = "0.4.0"
 dependencies = [
  "fs2",
@@ -1017,12 +1017,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "greentic-ext-testing"
+name = "greentic-extension-sdk-testing"
 version = "0.4.0"
 dependencies = [
  "anyhow",
  "ciborium",
- "greentic-ext-contract",
+ "greentic-extension-sdk-contract",
  "serde",
  "serde_json",
  "sha2",

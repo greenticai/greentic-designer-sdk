@@ -1,0 +1,29 @@
+[package]
+name = "greentic-extension-sdk-contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Contract types and describe.json schema for Greentic Designer Extensions"
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+ed25519-dalek = { workspace = true }
+jsonschema = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_jcs = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+
+[lints]
+workspace = true

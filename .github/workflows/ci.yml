@@ -36,5 +36,5 @@ jobs:
 
       - name: cargo publish dry-run (leaf crates)
         run: |
-          cargo publish --dry-run --allow-dirty -p greentic-ext-contract
-          cargo publish --dry-run --allow-dirty -p greentic-ext-state
+          cargo publish --dry-run --allow-dirty -p greentic-extension-sdk-contract
+          cargo publish --dry-run --allow-dirty -p greentic-extension-sdk-state

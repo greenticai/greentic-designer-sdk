@@ -8,11 +8,11 @@ A workspace containing the public-facing tooling and types for building Greentic
 
 | Crate | Description |
 |---|---|
-| `greentic-ext-contract` | Type definitions, `describe.json` schema, signing/verification primitives |
-| `greentic-ext-state` | Persistent enable/disable state for installed extensions |
-| `greentic-ext-registry` | Registry client (HTTP + OCI) and install lifecycle |
-| `greentic-ext-testing` | Test utilities: fixtures, gtxpack helpers |
-| `greentic-ext-cli` | The `gtdx` command-line tool: scaffold, build, validate, sign, publish |
+| `greentic-extension-sdk-contract` | Type definitions, `describe.json` schema, signing/verification primitives |
+| `greentic-extension-sdk-state` | Persistent enable/disable state for installed extensions |
+| `greentic-extension-sdk-registry` | Registry client (HTTP + OCI) and install lifecycle |
+| `greentic-extension-sdk-testing` | Test utilities: fixtures, gtxpack helpers |
+| `greentic-extension-sdk-cli` | The `gtdx` command-line tool: scaffold, build, validate, sign, publish |
 
 The runtime engine that *executes* WASM extensions is part of the commercial Greentic Designer platform and is not included here. This SDK gives developers everything they need to author, validate, sign, and publish extensions; execution happens on the Greentic platform.
 
@@ -21,7 +21,7 @@ The runtime engine that *executes* WASM extensions is part of the commercial Gre
 ### Install the CLI
 
 ```bash
-cargo install greentic-ext-cli
+cargo install greentic-extension-sdk-cli
 # or, when binary release pipeline is up:
 # cargo binstall gtdx
 # or download from GitHub Releases
@@ -59,7 +59,7 @@ The canonical WebAssembly Component Model interface specifications for all exten
 - `extension-deploy.wit` — `DeployExtension` world (deployment)
 - `extension-provider.wit` — `ProviderExtension` world
 
-Versions are pinned at `0.4.0`. The `gtdx` binary embeds a copy under `crates/greentic-ext-cli/embedded-wit/` for offline scaffolding.
+Versions are pinned at `0.4.0`. The `gtdx` binary embeds a copy under `crates/greentic-extension-sdk-cli/embedded-wit/` for offline scaffolding.
 
 ## Local development
 
