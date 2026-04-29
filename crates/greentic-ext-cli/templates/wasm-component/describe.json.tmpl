@@ -1,0 +1,54 @@
+{
+  "$schema": "https://store.greentic.ai/schemas/describe-v1.json",
+  "apiVersion": "greentic.ai/v1",
+  "kind": "DesignExtension",
+  "metadata": {
+    "id": "{{id}}",
+    "name": "{{name}}",
+    "version": "{{version}}",
+    "summary": "A Greentic Designer extension that wraps a WASM component as a node.",
+    "author": {
+      "name": "{{author}}"
+    },
+    "license": "{{license}}"
+  },
+  "engine": {
+    "greenticDesigner": "^{{contract_version}}",
+    "extRuntime": "^{{contract_version}}"
+  },
+  "capabilities": {
+    "offered": [],
+    "required": []
+  },
+  "contributions": {
+    "nodeTypes": [
+      {
+        "type_id": "{{node_type_id}}",
+        "label": "{{label}}",
+        "category": "tools",
+        "icon": "puzzle",
+        "color": "#0d9488",
+        "complexity": "simple",
+        "config_schema": "{}",
+        "output_ports": [
+          { "name": "success", "label": "Success" },
+          { "name": "error", "label": "Error" }
+        ]
+      }
+    ]
+  },
+  "runtime": {
+    "component": "extension.wasm",
+    "gtpack": {
+      "file": "runtime/REPLACE_ME.gtpack",
+      "sha256": "REPLACE_AT_BUILD",
+      "pack_id": "{{id}}",
+      "component_version": "0.1.0"
+    },
+    "permissions": {
+      "network": [],
+      "secrets": [],
+      "callExtensionKinds": []
+    }
+  }
+}

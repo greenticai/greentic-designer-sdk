@@ -1,0 +1,87 @@
+// Provider extension guest for {{id}}.
+//
+// This scaffold implements the messaging-only provider contract as TODO stubs.
+// Two extra steps a provider author must complete before `gtdx publish`:
+//
+// 1. Replace the bundled `.gtpack` runtime: set
+//    `runtime.gtpack.file`/`sha256` in `describe.json` to your real pack.
+// 2. If your provider also sources events / sinks them, switch `wit/world.wit`
+//    to one of the `*-and-*-provider` or `full-provider` worlds from
+//    `wit/deps/greentic/extension-provider/world.wit`, and add the
+//    corresponding `impl ... ::Guest for Component` blocks below.
+
+#[allow(warnings)]
+mod bindings;
+
+use bindings::exports::greentic::extension_base::{lifecycle, manifest};
+use bindings::exports::greentic::extension_provider::messaging;
+use bindings::greentic::extension_base::types;
+use bindings::greentic::extension_provider::types as provider_types;
+
+struct Component;
+
+// ---- extension-base/manifest ----
+impl manifest::Guest for Component {
+    fn get_identity() -> types::ExtensionIdentity {
+        types::ExtensionIdentity {
+            id: "{{id}}".to_string(),
+            version: "{{version}}".to_string(),
+            kind: types::Kind::Provider,
+        }
+    }
+
+    fn get_offered() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+
+    fn get_required() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+}
+
+// ---- extension-base/lifecycle ----
+impl lifecycle::Guest for Component {
+    fn init(_config_json: String) -> Result<(), types::ExtensionError> {
+        // TODO: initialize any state the provider needs (clients, caches, etc.).
+        Ok(())
+    }
+
+    fn shutdown() {
+        // TODO: flush/close whatever `init` set up.
+    }
+}
+
+// ---- extension-provider/messaging ----
+impl messaging::Guest for Component {
+    fn list_channels() -> Vec<messaging::ChannelProfile> {
+        // TODO: return every channel this provider can talk to.
+        Vec::new()
+    }
+
+    fn describe_channel(
+        id: String,
+    ) -> Result<messaging::ChannelProfile, provider_types::Error> {
+        // TODO: look up and return the channel profile.
+        Err(provider_types::Error::NotFound(id))
+    }
+
+    fn secret_schema(id: String) -> Result<String, provider_types::Error> {
+        // TODO: return a JSON Schema for the channel's credentials.
+        Err(provider_types::Error::NotFound(id))
+    }
+
+    fn config_schema(id: String) -> Result<String, provider_types::Error> {
+        // TODO: return a JSON Schema for per-channel configuration.
+        Err(provider_types::Error::NotFound(id))
+    }
+
+    fn dry_run_encode(
+        id: String,
+        _sample: Vec<u8>,
+    ) -> Result<Vec<u8>, provider_types::Error> {
+        // TODO: encode the sample as this channel's outbound envelope.
+        Err(provider_types::Error::NotFound(id))
+    }
+}
+
+bindings::export!(Component with_types_in bindings);

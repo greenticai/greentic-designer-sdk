@@ -1,0 +1,18 @@
+[package]
+name = "{{name_cargo}}-extension"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.36"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[package.metadata.component]
+package = "{{id_wit}}"
+target = { path = "wit", world = "extension" }

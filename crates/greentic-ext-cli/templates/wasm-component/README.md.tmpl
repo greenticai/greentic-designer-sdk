@@ -1,0 +1,14 @@
+# {{label}}
+
+A Greentic Designer Extension that wraps a WASM component as a node.
+
+## Quickstart
+
+1. Edit `describe.json` — fill in `category`, `icon`, `config_schema`, and
+   optional `permissions` for your node.
+2. Drop your pre-built `.gtpack` into `runtime/` and update the
+   `runtime.gtpack.file` path in `describe.json`.
+3. Run `gtdx dev` to build the design-time `extension.wasm`, sign, install
+   locally, and watch for changes.
+4. Open the designer — your node should appear in the palette.
+5. When ready, `gtdx publish`.

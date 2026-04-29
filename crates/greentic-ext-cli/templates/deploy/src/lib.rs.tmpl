@@ -1,0 +1,100 @@
+// Deploy extension guest for {{id}}.
+//
+// This scaffold implements every export required by the extension-deploy
+// contract as a TODO stub. Replace each body with real logic before shipping.
+
+#[allow(warnings)]
+mod bindings;
+
+use bindings::exports::greentic::extension_base::{lifecycle, manifest};
+use bindings::exports::greentic::extension_deploy::{deployment, targets};
+use bindings::greentic::extension_base::types;
+
+struct Component;
+
+// ---- extension-base/manifest ----
+impl manifest::Guest for Component {
+    fn get_identity() -> types::ExtensionIdentity {
+        types::ExtensionIdentity {
+            id: "{{id}}".to_string(),
+            version: "{{version}}".to_string(),
+            kind: types::Kind::Deploy,
+        }
+    }
+
+    fn get_offered() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+
+    fn get_required() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+}
+
+// ---- extension-base/lifecycle ----
+impl lifecycle::Guest for Component {
+    fn init(_config_json: String) -> Result<(), types::ExtensionError> {
+        // TODO: initialize any state the extension needs.
+        Ok(())
+    }
+
+    fn shutdown() {
+        // TODO: release any resources the extension owns.
+    }
+}
+
+// ---- extension-deploy/targets ----
+impl targets::Guest for Component {
+    fn list_targets() -> Vec<targets::TargetSummary> {
+        // TODO: return every deploy target this extension supports.
+        Vec::new()
+    }
+
+    fn credential_schema(
+        target_id: String,
+    ) -> Result<String, types::ExtensionError> {
+        // TODO: return the JSON Schema describing required credentials.
+        Err(types::ExtensionError::InvalidInput(format!(
+            "unknown target: {target_id}"
+        )))
+    }
+
+    fn config_schema(target_id: String) -> Result<String, types::ExtensionError> {
+        // TODO: return the JSON Schema describing required config.
+        Err(types::ExtensionError::InvalidInput(format!(
+            "unknown target: {target_id}"
+        )))
+    }
+
+    fn validate_credentials(
+        _target_id: String,
+        _credentials_json: String,
+    ) -> Vec<types::Diagnostic> {
+        // TODO: emit credential diagnostics.
+        Vec::new()
+    }
+}
+
+// ---- extension-deploy/deployment ----
+impl deployment::Guest for Component {
+    fn deploy(
+        _req: deployment::DeployRequest,
+    ) -> Result<deployment::DeployJob, types::ExtensionError> {
+        // TODO: launch the deployment and return a job handle.
+        Err(types::ExtensionError::Internal("deploy not implemented".into()))
+    }
+
+    fn poll(job_id: String) -> Result<deployment::DeployJob, types::ExtensionError> {
+        // TODO: fetch current status for `job_id`.
+        Err(types::ExtensionError::InvalidInput(format!(
+            "unknown job: {job_id}"
+        )))
+    }
+
+    fn rollback(_job_id: String) -> Result<(), types::ExtensionError> {
+        // TODO: roll back the deployment.
+        Err(types::ExtensionError::Internal("rollback not implemented".into()))
+    }
+}
+
+bindings::export!(Component with_types_in bindings);

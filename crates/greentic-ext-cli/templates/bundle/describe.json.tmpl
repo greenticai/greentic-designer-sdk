@@ -1,0 +1,32 @@
+{
+  "$schema": "https://store.greentic.ai/schemas/describe-v1.json",
+  "apiVersion": "greentic.ai/v1",
+  "kind": "BundleExtension",
+  "metadata": {
+    "id": "{{id}}",
+    "name": "{{name}}",
+    "version": "{{version}}",
+    "summary": "A Greentic Designer bundle extension.",
+    "author": {
+      "name": "{{author}}"
+    },
+    "license": "{{license}}"
+  },
+  "engine": {
+    "greenticDesigner": "^{{contract_version}}",
+    "extRuntime": "^{{contract_version}}"
+  },
+  "capabilities": {
+    "offered": [],
+    "required": []
+  },
+  "runtime": {
+    "component": "extension.wasm",
+    "permissions": {
+      "network": [],
+      "secrets": [],
+      "callExtensionKinds": []
+    }
+  },
+  "contributions": {}
+}
