@@ -61,17 +61,47 @@ pub fn run_build(project_dir: &Path, profile: Profile) -> anyhow::Result<BuildOu
     })
 }
 
+/// Resolve the cargo target directory for `project_dir`. Honors workspace
+/// inheritance — for a workspace member, `cargo metadata` reports the
+/// workspace-root target, which is where `cargo component build` actually
+/// writes artifacts.
+fn cargo_target_dir(project_dir: &Path) -> anyhow::Result<PathBuf> {
+    let output = Command::new("cargo")
+        .arg("metadata")
+        .arg("--no-deps")
+        .arg("--format-version=1")
+        .current_dir(project_dir)
+        .stderr(Stdio::null())
+        .output()?;
+    if !output.status.success() {
+        // Fall back to <project_dir>/target. Standalone crates work fine that
+        // way; workspace members will hit the bail! below if there's nothing.
+        return Ok(project_dir.join("target"));
+    }
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let target = json
+        .get("target_directory")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("cargo metadata missing target_directory"))?;
+    Ok(PathBuf::from(target))
+}
+
 /// Locate the wasm component produced by the most recent build. Searches
-/// `target/wasm32-wasip2/<profile>/` first, then `target/wasm32-wasip1/<profile>/`
-/// (cargo-component 0.21 emits wasip2 components under the wasip1 directory
-/// because it compiles guests against wasip1 and applies the p2 adapter at
-/// component-creation time). Returns the first lexicographic `.wasm` so multi-
-/// target workspaces get deterministic behavior.
+/// `<target>/wasm32-wasip2/<profile>/` first, then
+/// `<target>/wasm32-wasip1/<profile>/` (cargo-component 0.21 emits wasip2
+/// components under the wasip1 directory because it compiles guests against
+/// wasip1 and applies the p2 adapter at component-creation time).
+///
+/// `<target>` is resolved via `cargo metadata` so workspace members find
+/// artifacts at the workspace root, not a non-existent crate-local
+/// `target/`. Returns the first lexicographic `.wasm` so multi-target
+/// workspaces get deterministic behavior.
 pub fn find_wasm_artifact(project_dir: &Path, profile: Profile) -> anyhow::Result<PathBuf> {
-    let profile = profile.as_str();
+    let profile_name = profile.as_str();
+    let target_dir = cargo_target_dir(project_dir)?;
     let candidates_dirs = [
-        project_dir.join("target/wasm32-wasip2").join(profile),
-        project_dir.join("target/wasm32-wasip1").join(profile),
+        target_dir.join("wasm32-wasip2").join(profile_name),
+        target_dir.join("wasm32-wasip1").join(profile_name),
     ];
     for dir in &candidates_dirs {
         if !dir.exists() {
@@ -88,8 +118,9 @@ pub fn find_wasm_artifact(project_dir: &Path, profile: Profile) -> anyhow::Resul
         }
     }
     anyhow::bail!(
-        "no .wasm artifact under target/wasm32-wasip2/{profile}/ or target/wasm32-wasip1/{profile}/ in {}",
-        project_dir.display()
+        "no .wasm artifact under {}/wasm32-wasip2/{profile_name}/ or {}/wasm32-wasip1/{profile_name}/",
+        target_dir.display(),
+        target_dir.display()
     )
 }
 
@@ -132,8 +163,10 @@ mod tests {
     #[test]
     fn find_wasm_artifact_errors_when_dir_missing() {
         let tmp = tempfile::tempdir().unwrap();
+        // cargo_target_dir falls back to <project_dir>/target when there's no
+        // cargo manifest, so the error mentions that path.
         let err = find_wasm_artifact(tmp.path(), Profile::Debug).unwrap_err();
-        assert!(err.to_string().contains("no .wasm artifact"));
+        assert!(err.to_string().contains("no .wasm"));
     }
 
     #[test]
