@@ -48,7 +48,8 @@ fn describe_with_kind_provider_and_gtpack_roundtrips() {
         },
         "contributions": {}
     });
-    let describe: greentic_extension_sdk_contract::DescribeJson = serde_json::from_value(json).unwrap();
+    let describe: greentic_extension_sdk_contract::DescribeJson =
+        serde_json::from_value(json).unwrap();
     assert_eq!(
         describe.kind,
         greentic_extension_sdk_contract::ExtensionKind::Provider
@@ -202,7 +203,10 @@ const BUNDLE_STANDARD_FIXTURE: &str = r#"{
 fn bundle_extension_with_execution_parses() {
     let d: DescribeJson = serde_json::from_str(BUNDLE_STANDARD_FIXTURE).unwrap();
     assert_eq!(d.metadata.id, "greentic.bundle-standard");
-    assert_eq!(d.kind, greentic_extension_sdk_contract::ExtensionKind::Bundle);
+    assert_eq!(
+        d.kind,
+        greentic_extension_sdk_contract::ExtensionKind::Bundle
+    );
     let exec = d.execution.as_ref().expect("execution present");
     assert_eq!(exec["kind"], "builtin");
     assert_eq!(exec["builtinId"], "standard");
@@ -219,7 +223,10 @@ fn bundle_extension_without_execution_also_parses() {
     );
     let d: DescribeJson = serde_json::from_str(&json).unwrap();
     assert!(d.execution.is_none());
-    assert_eq!(d.kind, greentic_extension_sdk_contract::ExtensionKind::Bundle);
+    assert_eq!(
+        d.kind,
+        greentic_extension_sdk_contract::ExtensionKind::Bundle
+    );
 }
 
 #[test]

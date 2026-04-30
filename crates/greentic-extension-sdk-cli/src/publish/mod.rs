@@ -88,8 +88,10 @@ impl Backend {
     async fn publish(
         &self,
         req: greentic_extension_sdk_registry::publish::PublishRequest,
-    ) -> Result<greentic_extension_sdk_registry::publish::PublishReceipt, greentic_extension_sdk_registry::RegistryError>
-    {
+    ) -> Result<
+        greentic_extension_sdk_registry::publish::PublishReceipt,
+        greentic_extension_sdk_registry::RegistryError,
+    > {
         match self {
             Backend::Local(r) => r.publish(req).await,
             Backend::Store(r) => r.publish(req).await,

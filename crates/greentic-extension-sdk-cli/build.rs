@@ -18,9 +18,7 @@ fn main() -> anyhow::Result<()> {
 
     let Some(src_dir) = src_dir else {
         if dst_dir.exists() {
-            println!(
-                "cargo:warning=using pre-embedded WIT files at version {version}"
-            );
+            println!("cargo:warning=using pre-embedded WIT files at version {version}");
             return Ok(());
         }
         return Err(anyhow::anyhow!(

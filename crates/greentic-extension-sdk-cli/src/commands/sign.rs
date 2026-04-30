@@ -42,7 +42,8 @@ pub fn run(args: &Args, _home: &Path) -> Result<()> {
         .with_context(|| format!("read {}", args.describe_path.display()))?;
     let mut describe: DescribeJson = serde_json::from_str(&raw).context("parse describe.json")?;
 
-    greentic_extension_sdk_contract::sign_describe(&mut describe, &signing_key).context("sign describe")?;
+    greentic_extension_sdk_contract::sign_describe(&mut describe, &signing_key)
+        .context("sign describe")?;
 
     let out = serde_json::to_string_pretty(&describe)? + "\n";
     std::fs::write(&args.describe_path, out)
