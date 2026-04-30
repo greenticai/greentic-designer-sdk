@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use clap::Args as ClapArgs;
-use greentic_extension_sdk_registry::{ExtensionRegistry, SearchQuery, store::GreenticStoreRegistry};
+use greentic_extension_sdk_registry::{
+    ExtensionRegistry, SearchQuery, store::GreenticStoreRegistry,
+};
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {

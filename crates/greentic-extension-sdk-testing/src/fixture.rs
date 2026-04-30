@@ -102,7 +102,10 @@ impl ExtensionFixtureBuilder {
                 greentic_designer: "*".into(),
                 ext_runtime: "*".into(),
             },
-            capabilities: greentic_extension_sdk_contract::describe::Capabilities { offered, required },
+            capabilities: greentic_extension_sdk_contract::describe::Capabilities {
+                offered,
+                required,
+            },
             runtime: greentic_extension_sdk_contract::describe::Runtime {
                 component: "extension.wasm".into(),
                 memory_limit_mb: 64,

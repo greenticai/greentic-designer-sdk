@@ -207,7 +207,8 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
                     continue;
                 }
             };
-            if let Err(e) = greentic_extension_sdk_contract::schema::validate_describe_json(&value) {
+            if let Err(e) = greentic_extension_sdk_contract::schema::validate_describe_json(&value)
+            {
                 println!("  \u{2717} {}: {e}", describe_path.display());
                 bad += 1;
             } else {
