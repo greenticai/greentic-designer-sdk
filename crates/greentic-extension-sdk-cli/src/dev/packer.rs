@@ -22,7 +22,10 @@ pub struct PackInfo {
 /// Build a `.gtxpack` at `output_pack` from `project_dir` + the already-built
 /// `wasm_path`. The ZIP contains `describe.json`, the wasm renamed to
 /// `extension.wasm` (matches `runtime.component` default), and any optional
-/// asset dirs that exist (`i18n/`, `schemas/`, `prompts/`).
+/// asset dirs that exist (`i18n/`, `schemas/`, `prompts/`, `assets/`).
+/// `assets/` is what `describe.metadata.icon` resolves against once the
+/// extension is unpacked, so omitting it leaves consumers with a 404 on
+/// the icon endpoint.
 ///
 /// For Provider extensions, if `describe.runtime.gtpack` is set (non-null),
 /// the referenced file is read, sha256-verified, and embedded in the archive.
@@ -93,7 +96,7 @@ pub fn build_pack(
         entries.push(PackEntry::file(file_rel.to_string(), bytes));
     }
 
-    for asset_dir in ["i18n", "schemas", "prompts"] {
+    for asset_dir in ["i18n", "schemas", "prompts", "assets"] {
         let src = project_dir.join(asset_dir);
         if !src.is_dir() {
             continue;
@@ -206,6 +209,30 @@ mod tests {
         let zip = zip::ZipArchive::new(file).unwrap();
         let names: Vec<_> = zip.file_names().map(str::to_string).collect();
         assert!(names.iter().any(|n| n == "i18n/en.json"));
+    }
+
+    #[test]
+    fn build_pack_includes_icon_assets_dir() {
+        // describe.metadata.icon resolves to `assets/<file>` after unpack;
+        // the consuming runtime serves it from `<extension-dir>/<icon-rel>`,
+        // so the dir must ship inside the gtxpack zip.
+        let tmp = tempfile::tempdir().unwrap();
+        let wasm = make_project(tmp.path());
+        std::fs::create_dir_all(tmp.path().join("assets")).unwrap();
+        std::fs::write(
+            tmp.path().join("assets/icon.svg"),
+            br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>"#,
+        )
+        .unwrap();
+        let out = tmp.path().join("demo.gtxpack");
+        build_pack(tmp.path(), &wasm, &out).unwrap();
+        let file = File::open(&out).unwrap();
+        let zip = zip::ZipArchive::new(file).unwrap();
+        let names: Vec<_> = zip.file_names().map(str::to_string).collect();
+        assert!(
+            names.iter().any(|n| n == "assets/icon.svg"),
+            "assets/icon.svg missing from gtxpack; entries: {names:?}"
+        );
     }
 
     #[test]
