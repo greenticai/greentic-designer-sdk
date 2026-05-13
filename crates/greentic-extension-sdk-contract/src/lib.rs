@@ -3,6 +3,7 @@
 pub mod capability;
 pub mod compat;
 pub mod component_id;
+pub mod deprecated;
 pub mod describe;
 pub mod error;
 pub mod hex;
@@ -15,6 +16,7 @@ pub mod signature;
 pub use self::capability::{CapabilityId, CapabilityRef, CapabilityVersion};
 pub use self::compat::Compat;
 pub use self::component_id::ComponentId;
+pub use self::deprecated::Deprecated;
 pub use self::describe::{DescribeJson, RuntimeGtpack};
 pub use self::error::ContractError;
 pub use self::kind::ExtensionKind;
