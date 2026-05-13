@@ -11,6 +11,9 @@ pub enum ContractError {
     #[error("component id is malformed: {0}")]
     MalformedComponentId(String),
 
+    #[error("locale is malformed: {0}")]
+    MalformedLocale(String),
+
     #[error("version is not semver: {0}")]
     MalformedVersion(String),
 
