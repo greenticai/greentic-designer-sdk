@@ -198,13 +198,21 @@ pub struct Permissions {
     pub call_extension_kinds: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignatureAlgorithm {
+    #[serde(rename = "ed25519")]
+    Ed25519,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Signature {
-    pub algorithm: String,
+    pub algorithm: SignatureAlgorithm,
     #[serde(rename = "publicKey")]
     pub public_key: String,
     pub value: String,
+    #[serde(rename = "keyId", default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
 }
 
 impl DescribeJson {
