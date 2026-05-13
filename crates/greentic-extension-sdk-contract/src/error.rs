@@ -17,6 +17,9 @@ pub enum ContractError {
     #[error("version is not semver: {0}")]
     MalformedVersion(String),
 
+    #[error("sha256 is malformed: {0}")]
+    MalformedSha256(String),
+
     #[error("signature verification failed: {0}")]
     SignatureInvalid(String),
 
