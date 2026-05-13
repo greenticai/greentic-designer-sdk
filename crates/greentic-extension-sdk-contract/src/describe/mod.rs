@@ -3,7 +3,12 @@ use serde::{Deserialize, Serialize};
 use crate::capability::CapabilityRef;
 use crate::kind::ExtensionKind;
 
+pub mod contributions;
 pub mod provider;
+
+pub use contributions::{
+    Contributions, Knowledge, NodeType, OutputPort, Prompt, Recipe, Schema, Tool,
+};
 pub use provider::RuntimeGtpack;
 
 /// Top-level descriptor for a Greentic extension.
