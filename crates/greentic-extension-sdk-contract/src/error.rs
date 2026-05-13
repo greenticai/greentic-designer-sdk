@@ -8,6 +8,9 @@ pub enum ContractError {
     #[error("capability id is malformed: {0}")]
     MalformedCapabilityId(String),
 
+    #[error("component id is malformed: {0}")]
+    MalformedComponentId(String),
+
     #[error("version is not semver: {0}")]
     MalformedVersion(String),
 

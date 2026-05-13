@@ -1,6 +1,7 @@
 //! Contract types + describe.json schema for Greentic Designer Extensions.
 
 pub mod capability;
+pub mod component_id;
 pub mod describe;
 pub mod error;
 pub mod hex;
@@ -10,6 +11,7 @@ pub mod schema;
 pub mod signature;
 
 pub use self::capability::{CapabilityId, CapabilityRef, CapabilityVersion};
+pub use self::component_id::ComponentId;
 pub use self::describe::{DescribeJson, RuntimeGtpack};
 pub use self::error::ContractError;
 pub use self::kind::ExtensionKind;
