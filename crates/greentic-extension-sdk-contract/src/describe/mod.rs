@@ -11,20 +11,14 @@ pub use contributions::{
     Contributions, Knowledge, NodeType, OutputPort, Prompt, Recipe, Schema, Tool,
 };
 pub use localization_block::Localization;
-pub use provider::RuntimeGtpack;
 
-/// Top-level descriptor for a Greentic extension.
+/// Top-level descriptor for a Greentic extension (v2 shape).
 ///
 /// Invariants enforced at deserialize time:
-/// - `kind == Provider`  ↔  `runtime.gtpack.is_some()` (required)
-/// - `kind == Design` with `runtime.gtpack.is_some()` requires `contributions.nodeTypes`
-///   to be a non-empty array (node-providing design extension)
-/// - `runtime.gtpack.is_some()` is forbidden on all other kinds
+/// - `runtime.components` must have at least one entry
 /// - `execution.is_some()` only when `kind == Bundle`
-///
-/// `execution` is a pass-through `serde_json::Value` at contract level;
-/// each `BundleExtension`'s own reader parses the typed shape
-/// (`{kind: "builtin", builtinId: "..."}` or `{kind: "wasm"}`).
+/// - every `runtime_ref` in `contributions.node_types` and `contributions.tools`
+///   must reference a key that exists in `runtime.components`
 #[derive(Debug, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DescribeJson {
@@ -33,34 +27,40 @@ pub struct DescribeJson {
     #[serde(rename = "apiVersion")]
     pub api_version: String,
     pub kind: ExtensionKind,
+    pub compat: crate::compat::Compat,
     pub metadata: Metadata,
     pub engine: Engine,
     pub capabilities: Capabilities,
     pub runtime: Runtime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<serde_json::Value>,
-    pub contributions: serde_json::Value,
+    pub contributions: contributions::Contributions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub localization: Option<localization_block::Localization>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<Signature>,
 }
 
 /// Private intermediate for deserialization — identical shape to `DescribeJson`.
-/// `TryFrom` validates the kind-specific invariants before constructing the real type.
+/// `TryFrom` validates the invariants before constructing the real type.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DescribeJsonRaw {
-    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$schema", default)]
     schema_ref: Option<String>,
     #[serde(rename = "apiVersion")]
     api_version: String,
     kind: ExtensionKind,
+    compat: crate::compat::Compat,
     metadata: Metadata,
     engine: Engine,
     capabilities: Capabilities,
     runtime: Runtime,
     #[serde(default)]
     execution: Option<serde_json::Value>,
-    contributions: serde_json::Value,
+    contributions: contributions::Contributions,
+    #[serde(default)]
+    localization: Option<localization_block::Localization>,
     #[serde(default)]
     signature: Option<Signature>,
 }
@@ -69,48 +69,52 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
     type Error = String;
 
     fn try_from(raw: DescribeJsonRaw) -> Result<Self, String> {
-        let has_gtpack = raw.runtime.gtpack.is_some();
-        let has_node_types = raw
-            .contributions
-            .get("nodeTypes")
-            .and_then(|v| v.as_array())
-            .is_some_and(|a| !a.is_empty());
-
-        match (raw.kind, has_gtpack) {
-            (ExtensionKind::Provider, false) => {
-                return Err("kind=ProviderExtension requires `runtime.gtpack` to be set".into());
-            }
-            (ExtensionKind::Design, true) if !has_node_types => {
-                return Err(
-                    "DesignExtension with `runtime.gtpack` must contribute `nodeTypes` \
-                     (gtpack is only justified when the extension teaches the runtime new node types)"
-                        .into(),
-                );
-            }
-            (k, true) if k != ExtensionKind::Provider && k != ExtensionKind::Design => {
-                return Err(format!(
-                    "runtime.gtpack is only allowed for ProviderExtension, or for \
-                     DesignExtension that contributes `nodeTypes` (got kind={k:?})"
-                ));
-            }
-            _ => {}
+        if raw.runtime.components.is_empty() {
+            return Err("runtime.components must declare at least one entry".into());
         }
+
         if raw.execution.is_some() && raw.kind != ExtensionKind::Bundle {
             return Err(format!(
                 "`execution` is only allowed when kind=BundleExtension (got kind={:?})",
                 raw.kind
             ));
         }
+
+        let known: std::collections::BTreeSet<&crate::component_id::ComponentId> =
+            raw.runtime.components.keys().collect();
+        for nt in &raw.contributions.node_types {
+            if let Some(rr) = &nt.runtime_ref {
+                if !known.contains(rr) {
+                    return Err(format!(
+                        "node_type {:?} runtime_ref {:?} not in runtime.components",
+                        nt.type_id, rr
+                    ));
+                }
+            }
+        }
+        for tool in &raw.contributions.tools {
+            if let Some(rr) = &tool.runtime_ref {
+                if !known.contains(rr) {
+                    return Err(format!(
+                        "tool {:?} runtime_ref {:?} not in runtime.components",
+                        tool.name, rr
+                    ));
+                }
+            }
+        }
+
         Ok(DescribeJson {
             schema_ref: raw.schema_ref,
             api_version: raw.api_version,
             kind: raw.kind,
+            compat: raw.compat,
             metadata: raw.metadata,
             engine: raw.engine,
             capabilities: raw.capabilities,
             runtime: raw.runtime,
             execution: raw.execution,
             contributions: raw.contributions,
+            localization: raw.localization,
             signature: raw.signature,
         })
     }
@@ -180,14 +184,13 @@ pub struct Capabilities {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Runtime {
-    pub component: String,
     #[serde(rename = "memoryLimitMB", default = "default_memory")]
     pub memory_limit_mb: u32,
     pub permissions: Permissions,
-    /// Provider-only: bundled `.gtpack` artifact metadata.
-    /// Present if and only if `kind == ProviderExtension`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gtpack: Option<RuntimeGtpack>,
+    pub components: std::collections::BTreeMap<
+        crate::component_id::ComponentId,
+        crate::runtime_component::RuntimeComponent,
+    >,
 }
 
 const fn default_memory() -> u32 {

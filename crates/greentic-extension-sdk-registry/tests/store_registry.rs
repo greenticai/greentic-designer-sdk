@@ -30,15 +30,30 @@ async fn store_registry_search_returns_parsed_results() {
 async fn store_registry_fetch_downloads_artifact() {
     let server = MockServer::start().await;
     let describe_json = serde_json::json!({
-        "apiVersion": "greentic.ai/v1",
+        "apiVersion": "greentic.ai/v2",
         "kind": "DesignExtension",
+        "compat": {
+            "min_designer_version": ">=1.0.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "0.5.0"
+        },
         "metadata": {
             "id": "greentic.ac", "name": "AC", "version": "1.6.0",
             "summary": "x", "author": { "name": "G" }, "license": "MIT"
         },
         "engine": { "greenticDesigner": "*", "extRuntime": "*" },
         "capabilities": { "offered": [{"id":"greentic:ac/y","version":"1.0.0"}] },
-        "runtime": { "component": "extension.wasm", "permissions": {} },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
         "contributions": {}
     });
 

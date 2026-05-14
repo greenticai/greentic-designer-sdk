@@ -2,8 +2,9 @@ use std::path::Path;
 use std::process::Command;
 
 use greentic_extension_sdk_contract::{
-    CapabilityId, CapabilityRef, DescribeJson, ExtensionKind,
-    describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime, RuntimeGtpack},
+    Compat, CapabilityId, CapabilityRef, DescribeJson, ExtensionKind, RuntimeComponent,
+    RuntimeGtpack,
+    describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
 };
 use greentic_extension_sdk_registry::hex;
 use sha2::{Digest, Sha256};
@@ -18,6 +19,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(&digest)
 }
 
+fn default_compat() -> Compat {
+    Compat {
+        min_designer_version: ">=1.0.0".parse().unwrap(),
+        min_runner_version: "^0.12.0".parse().unwrap(),
+        contract_version: "0.5.0".parse().unwrap(),
+    }
+}
+
 fn write_design_fixture(extensions_root: &std::path::Path) {
     let design_dir = extensions_root
         .join("design")
@@ -26,8 +35,9 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
 
     let design_describe = DescribeJson {
         schema_ref: None,
-        api_version: "greentic.ai/v1".into(),
+        api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
+        compat: default_compat(),
         metadata: Metadata {
             id: "greentic.design.adaptive-cards".into(),
             name: "Adaptive Cards".into(),
@@ -55,13 +65,27 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
             required: vec![],
         },
         runtime: Runtime {
-            component: "extension.wasm".into(),
             memory_limit_mb: 64,
             permissions: Permissions::default(),
-            gtpack: None,
+            components: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(
+                    "stub".parse().unwrap(),
+                    RuntimeComponent {
+                        oci_ref: Some("oci://ghcr.io/example/stub:latest".into()),
+                        gtpack: None,
+                        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .parse()
+                            .unwrap(),
+                        world: "greentic:component/stub@0.1.0".into(),
+                    },
+                );
+                m
+            },
         },
         execution: None,
-        contributions: serde_json::json!({}),
+        contributions: Contributions::default(),
+        localization: None,
         signature: None,
     };
 
@@ -84,8 +108,9 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
 
     let provider_describe = DescribeJson {
         schema_ref: None,
-        api_version: "greentic.ai/v1".into(),
+        api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Provider,
+        compat: default_compat(),
         metadata: Metadata {
             id: "greentic.provider.telegram".into(),
             name: "Telegram Provider".into(),
@@ -113,18 +138,30 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
             required: vec![],
         },
         runtime: Runtime {
-            component: "wasm/provider.wasm".into(),
             memory_limit_mb: 256,
             permissions: Permissions::default(),
-            gtpack: Some(RuntimeGtpack {
-                file: "runtime/provider.gtpack".into(),
-                sha256,
-                pack_id: "greentic.provider.telegram".into(),
-                component_version: "0.6.0".into(),
-            }),
+            components: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(
+                    "telegram".parse().unwrap(),
+                    RuntimeComponent {
+                        oci_ref: None,
+                        gtpack: Some(RuntimeGtpack {
+                            file: "runtime/provider.gtpack".into(),
+                            sha256: sha256.clone(),
+                            pack_id: "greentic.provider.telegram".into(),
+                            component_version: "0.6.0".into(),
+                        }),
+                        sha256: sha256.parse().unwrap(),
+                        world: "greentic:component/telegram@0.2.0".into(),
+                    },
+                );
+                m
+            },
         },
         execution: None,
-        contributions: serde_json::json!({}),
+        contributions: Contributions::default(),
+        localization: None,
         signature: None,
     };
 
@@ -294,13 +331,15 @@ fn write_provider_fixture_with_capabilities(
         .map(|cap_str| CapabilityRef {
             id: cap_str.parse::<CapabilityId>().unwrap(),
             version: "0.1.0".into(),
+            deprecated: None,
         })
         .collect();
 
     let describe = DescribeJson {
         schema_ref: None,
-        api_version: "greentic.ai/v1".into(),
+        api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Provider,
+        compat: default_compat(),
         metadata: Metadata {
             id: id.into(),
             name: "Telegram Provider".into(),
@@ -328,18 +367,30 @@ fn write_provider_fixture_with_capabilities(
             required: vec![],
         },
         runtime: Runtime {
-            component: "wasm/provider.wasm".into(),
             memory_limit_mb: 256,
             permissions: Permissions::default(),
-            gtpack: Some(RuntimeGtpack {
-                file: "runtime/provider.gtpack".into(),
-                sha256,
-                pack_id: id.into(),
-                component_version: "0.6.0".into(),
-            }),
+            components: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(
+                    "provider".parse().unwrap(),
+                    RuntimeComponent {
+                        oci_ref: None,
+                        gtpack: Some(RuntimeGtpack {
+                            file: "runtime/provider.gtpack".into(),
+                            sha256: sha256.clone(),
+                            pack_id: id.into(),
+                            component_version: "0.6.0".into(),
+                        }),
+                        sha256: sha256.parse().unwrap(),
+                        world: "greentic:component/provider@0.1.0".into(),
+                    },
+                );
+                m
+            },
         },
         execution: None,
-        contributions: serde_json::json!({}),
+        contributions: Contributions::default(),
+        localization: None,
         signature: None,
     };
 

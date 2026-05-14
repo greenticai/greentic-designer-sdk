@@ -33,8 +33,13 @@ fn tampered_payload_fails_verification() {
 
 fn sample_describe_with_sig(sig_value: Option<&str>) -> DescribeJson {
     let json = serde_json::json!({
-        "apiVersion": "greentic.ai/v1",
+        "apiVersion": "greentic.ai/v2",
         "kind": "DesignExtension",
+        "compat": {
+            "min_designer_version": ">=1.0.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "0.5.0"
+        },
         "metadata": {
             "id": "greentic.canonicalize-test",
             "name": "Canonicalize Test",
@@ -45,7 +50,17 @@ fn sample_describe_with_sig(sig_value: Option<&str>) -> DescribeJson {
         },
         "engine": { "greenticDesigner": "*", "extRuntime": "*" },
         "capabilities": { "offered": [], "required": [] },
-        "runtime": { "component": "x.wasm", "memoryLimitMB": 64, "permissions": {} },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
         "contributions": {},
         "signature": sig_value.map(|v| serde_json::json!({
             "algorithm": "ed25519",
@@ -144,8 +159,13 @@ fn verify_describe_rejects_non_ed25519_algorithm() {
     // Since the enum prevents invalid algorithms at deserialization, this test
     // verifies the constraint by attempting to deserialize with an invalid algorithm.
     let json = serde_json::json!({
-        "apiVersion": "greentic.ai/v1",
+        "apiVersion": "greentic.ai/v2",
         "kind": "DesignExtension",
+        "compat": {
+            "min_designer_version": ">=1.0.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "0.5.0"
+        },
         "metadata": {
             "id": "greentic.canonicalize-test",
             "name": "Canonicalize Test",
@@ -156,7 +176,17 @@ fn verify_describe_rejects_non_ed25519_algorithm() {
         },
         "engine": { "greenticDesigner": "*", "extRuntime": "*" },
         "capabilities": { "offered": [], "required": [] },
-        "runtime": { "component": "x.wasm", "memoryLimitMB": 64, "permissions": {} },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
         "contributions": {},
         "signature": {
             "algorithm": "sha256-hmac",

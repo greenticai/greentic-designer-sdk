@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::describe::RuntimeGtpack;
+use crate::describe::provider::RuntimeGtpack;
 use crate::sha256::Sha256;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

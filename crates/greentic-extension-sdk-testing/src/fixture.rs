@@ -80,8 +80,13 @@ impl ExtensionFixtureBuilder {
 
         let describe = DescribeJson {
             schema_ref: None,
-            api_version: "greentic.ai/v1".into(),
+            api_version: "greentic.ai/v2".into(),
             kind: self.kind,
+            compat: greentic_extension_sdk_contract::Compat {
+                min_designer_version: ">=1.0.0".parse().unwrap(),
+                min_runner_version: "^0.12.0".parse().unwrap(),
+                contract_version: "0.5.0".parse().unwrap(),
+            },
             metadata: greentic_extension_sdk_contract::describe::Metadata {
                 id: self.id.clone(),
                 name: self.id.clone(),
@@ -109,13 +114,28 @@ impl ExtensionFixtureBuilder {
                 required,
             },
             runtime: greentic_extension_sdk_contract::describe::Runtime {
-                component: "extension.wasm".into(),
                 memory_limit_mb: 64,
                 permissions: greentic_extension_sdk_contract::describe::Permissions::default(),
-                gtpack: None,
+                components: {
+                    let mut m = std::collections::BTreeMap::new();
+                    m.insert(
+                        "stub".parse::<greentic_extension_sdk_contract::ComponentId>()
+                            .expect("valid component id"),
+                        greentic_extension_sdk_contract::RuntimeComponent {
+                            oci_ref: Some("oci://ghcr.io/example/stub:latest".into()),
+                            gtpack: None,
+                            sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                                .parse()
+                                .expect("valid sha256"),
+                            world: "greentic:component/stub@0.1.0".into(),
+                        },
+                    );
+                    m
+                },
             },
             execution: None,
-            contributions: serde_json::json!({}),
+            contributions: greentic_extension_sdk_contract::describe::Contributions::default(),
+            localization: None,
             signature: None,
         };
         let describe_path = dir.path().join("describe.json");

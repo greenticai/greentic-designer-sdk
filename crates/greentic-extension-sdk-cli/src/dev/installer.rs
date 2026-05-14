@@ -69,11 +69,12 @@ mod tests {
         let opts = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
         let desc = br#"{
-"apiVersion":"greentic.ai/v1","kind":"DesignExtension",
+"apiVersion":"greentic.ai/v2","kind":"DesignExtension",
+"compat":{"min_designer_version":">=1.0.0","min_runner_version":"^0.12.0","contract_version":"0.5.0"},
 "metadata":{"id":"com.example.demo","name":"demo","version":"0.1.0","summary":"x","author":{"name":"a"},"license":"Apache-2.0"},
 "engine":{"greenticDesigner":"^0.1","extRuntime":"^0.1"},
 "capabilities":{"offered":[],"required":[]},
-"runtime":{"component":"extension.wasm","permissions":{"network":[],"secrets":[],"callExtensionKinds":[]}},
+"runtime":{"memoryLimitMB":64,"permissions":{"network":[],"secrets":[],"callExtensionKinds":[]},"components":{"stub":{"oci_ref":"oci://ghcr.io/example/stub:latest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","world":"greentic:component/stub@0.1.0"}}},
 "contributions":{}}"#;
         zip.start_file("describe.json", opts).unwrap();
         zip.write_all(desc).unwrap();

@@ -1,8 +1,8 @@
 //! Integration tests for `gtdx list --status`.
 
 use greentic_extension_sdk_contract::{
-    DescribeJson, ExtensionKind,
-    describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime},
+    Compat, DescribeJson, ExtensionKind, RuntimeComponent,
+    describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
 };
 use tempfile::TempDir;
 
@@ -14,6 +14,14 @@ fn gtdx_bin() -> std::path::PathBuf {
     p
 }
 
+fn default_compat() -> Compat {
+    Compat {
+        min_designer_version: ">=1.0.0".parse().unwrap(),
+        min_runner_version: "^0.12.0".parse().unwrap(),
+        contract_version: "0.5.0".parse().unwrap(),
+    }
+}
+
 fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
     let dir = home
         .join("extensions")
@@ -23,8 +31,9 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
 
     let describe = DescribeJson {
         schema_ref: None,
-        api_version: "greentic.ai/v1".into(),
+        api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
+        compat: default_compat(),
         metadata: Metadata {
             id: id.into(),
             name: id.into(),
@@ -52,13 +61,27 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
             required: vec![],
         },
         runtime: Runtime {
-            component: "extension.wasm".into(),
             memory_limit_mb: 64,
             permissions: Permissions::default(),
-            gtpack: None,
+            components: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(
+                    "stub".parse().unwrap(),
+                    RuntimeComponent {
+                        oci_ref: Some("oci://ghcr.io/example/stub:latest".into()),
+                        gtpack: None,
+                        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .parse()
+                            .unwrap(),
+                        world: "greentic:component/stub@0.1.0".into(),
+                    },
+                );
+                m
+            },
         },
         execution: None,
-        contributions: serde_json::json!({}),
+        contributions: Contributions::default(),
+        localization: None,
         signature: None,
     };
 
