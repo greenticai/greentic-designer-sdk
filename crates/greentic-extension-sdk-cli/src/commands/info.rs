@@ -116,7 +116,7 @@ fn render_info(kind: ExtensionKind, d: &DescribeJson) {
     println!("Name: {}", d.metadata.id);
     println!("Version: {}", d.metadata.version);
     println!("License: {}", d.metadata.license);
-    println!("Summary: {}", d.metadata.summary);
+    println!("Summary: {}", d.metadata.summary.default());
 
     if kind == ExtensionKind::Provider
         && let Some(gtpack) = &d.runtime.gtpack

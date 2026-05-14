@@ -1,6 +1,6 @@
 use chrono::Utc;
 use greentic_extension_sdk_contract::{
-    DescribeJson, ExtensionKind,
+    DescribeJson, ExtensionKind, LocalizedString,
     describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime},
 };
 use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
@@ -15,7 +15,7 @@ fn sample_describe(version: &str) -> DescribeJson {
             id: "com.example.demo".into(),
             name: "demo".into(),
             version: version.into(),
-            summary: "s".into(),
+            summary: LocalizedString::plain("s"),
             description: None,
             author: Author {
                 name: "a".into(),

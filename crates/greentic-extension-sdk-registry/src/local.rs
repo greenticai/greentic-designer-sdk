@@ -173,7 +173,7 @@ impl ExtensionRegistry for LocalFilesystemRegistry {
                         name: d.metadata.id,
                         latest_version: version,
                         kind: d.kind,
-                        summary: d.metadata.summary,
+                        summary: d.metadata.summary.default().to_string(),
                         downloads: 0,
                     });
                 }

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use greentic_extension_sdk_contract::{CapabilityRef, DescribeJson, ExtensionKind};
+use greentic_extension_sdk_contract::{CapabilityRef, DescribeJson, ExtensionKind, LocalizedString};
 use tempfile::TempDir;
 
 pub struct ExtensionFixture {
@@ -84,7 +84,7 @@ impl ExtensionFixtureBuilder {
                 id: self.id.clone(),
                 name: self.id.clone(),
                 version: self.version.clone(),
-                summary: "test".into(),
+                summary: LocalizedString::plain("test"),
                 description: None,
                 author: greentic_extension_sdk_contract::describe::Author {
                     name: "test".into(),

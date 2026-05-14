@@ -4,11 +4,13 @@ use crate::capability::CapabilityRef;
 use crate::kind::ExtensionKind;
 
 pub mod contributions;
+pub mod localization_block;
 pub mod provider;
 
 pub use contributions::{
     Contributions, Knowledge, NodeType, OutputPort, Prompt, Recipe, Schema, Tool,
 };
+pub use localization_block::Localization;
 pub use provider::RuntimeGtpack;
 
 /// Top-level descriptor for a Greentic extension.
@@ -130,9 +132,9 @@ pub struct Metadata {
     pub id: String,
     pub name: String,
     pub version: String,
-    pub summary: String,
+    pub summary: crate::localization::LocalizedString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    pub description: Option<crate::localization::LocalizedString>,
     pub author: Author,
     pub license: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

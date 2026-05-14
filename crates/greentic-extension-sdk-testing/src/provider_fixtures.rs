@@ -6,7 +6,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use greentic_extension_sdk_contract::{
-    DescribeJson, ExtensionKind, RuntimeGtpack,
+    DescribeJson, ExtensionKind, LocalizedString, RuntimeGtpack,
     describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime},
     hex,
 };
@@ -45,7 +45,7 @@ pub fn build_provider_fixture_gtxpack(
             id: id.into(),
             name: id.into(),
             version: version.into(),
-            summary: "fixture".into(),
+            summary: LocalizedString::plain("fixture"),
             description: None,
             author: Author {
                 name: "Fixture".into(),
