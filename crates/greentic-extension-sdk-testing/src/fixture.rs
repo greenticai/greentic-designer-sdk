@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use greentic_extension_sdk_contract::{CapabilityRef, DescribeJson, ExtensionKind, LocalizedString};
+use greentic_extension_sdk_contract::{
+    CapabilityRef, DescribeJson, ExtensionKind, LocalizedString,
+};
 use tempfile::TempDir;
 
 pub struct ExtensionFixture {
@@ -85,7 +87,7 @@ impl ExtensionFixtureBuilder {
             compat: greentic_extension_sdk_contract::Compat {
                 min_designer_version: ">=1.0.0".parse().unwrap(),
                 min_runner_version: "^0.12.0".parse().unwrap(),
-                contract_version: "0.5.0".parse().unwrap(),
+                contract_version: "1.2.0".parse().unwrap(),
             },
             metadata: greentic_extension_sdk_contract::describe::Metadata {
                 id: self.id.clone(),
@@ -119,14 +121,16 @@ impl ExtensionFixtureBuilder {
                 components: {
                     let mut m = std::collections::BTreeMap::new();
                     m.insert(
-                        "stub".parse::<greentic_extension_sdk_contract::ComponentId>()
+                        "stub"
+                            .parse::<greentic_extension_sdk_contract::ComponentId>()
                             .expect("valid component id"),
                         greentic_extension_sdk_contract::RuntimeComponent {
                             oci_ref: Some("oci://ghcr.io/example/stub:latest".into()),
                             gtpack: None,
-                            sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                                .parse()
-                                .expect("valid sha256"),
+                            sha256:
+                                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                                    .parse()
+                                    .expect("valid sha256"),
                             world: "greentic:component/stub@0.1.0".into(),
                         },
                     );

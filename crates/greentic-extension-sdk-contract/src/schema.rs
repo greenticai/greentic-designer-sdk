@@ -30,10 +30,7 @@ static VALIDATOR_V2: LazyLock<Validator> = LazyLock::new(|| {
 /// Dispatches to the v2 schema when `apiVersion == "greentic.ai/v2"`, and
 /// falls back to the v1 schema otherwise (for legacy descriptors).
 pub fn validate_describe_json(value: &serde_json::Value) -> Result<(), ContractError> {
-    let is_v2 = value
-        .get("apiVersion")
-        .and_then(|v| v.as_str())
-        == Some("greentic.ai/v2");
+    let is_v2 = value.get("apiVersion").and_then(|v| v.as_str()) == Some("greentic.ai/v2");
 
     let validator = if is_v2 {
         &*VALIDATOR_V2

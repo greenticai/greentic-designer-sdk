@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use greentic_extension_sdk_contract::{
-    Compat, CapabilityId, CapabilityRef, DescribeJson, ExtensionKind, RuntimeComponent,
+    CapabilityId, CapabilityRef, Compat, DescribeJson, ExtensionKind, RuntimeComponent,
     RuntimeGtpack,
     describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
 };
@@ -23,7 +23,7 @@ fn default_compat() -> Compat {
     Compat {
         min_designer_version: ">=1.0.0".parse().unwrap(),
         min_runner_version: "^0.12.0".parse().unwrap(),
-        contract_version: "0.5.0".parse().unwrap(),
+        contract_version: "1.2.0".parse().unwrap(),
     }
 }
 
@@ -42,7 +42,9 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
             id: "greentic.design.adaptive-cards".into(),
             name: "Adaptive Cards".into(),
             version: "0.1.0".into(),
-            summary: greentic_extension_sdk_contract::LocalizedString::plain("Design extension for adaptive cards"),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain(
+                "Design extension for adaptive cards",
+            ),
             description: None,
             author: Author {
                 name: "Test".into(),
@@ -115,7 +117,9 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
             id: "greentic.provider.telegram".into(),
             name: "Telegram Provider".into(),
             version: "0.2.0".into(),
-            summary: greentic_extension_sdk_contract::LocalizedString::plain("Provider extension for Telegram"),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain(
+                "Provider extension for Telegram",
+            ),
             description: None,
             author: Author {
                 name: "Test".into(),
@@ -344,7 +348,9 @@ fn write_provider_fixture_with_capabilities(
             id: id.into(),
             name: "Telegram Provider".into(),
             version: version.into(),
-            summary: greentic_extension_sdk_contract::LocalizedString::plain("Provider extension for Telegram"),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain(
+                "Provider extension for Telegram",
+            ),
             description: None,
             author: Author {
                 name: "Test".into(),

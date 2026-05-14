@@ -35,7 +35,7 @@ async fn store_registry_fetch_downloads_artifact() {
         "compat": {
             "min_designer_version": ">=1.0.0",
             "min_runner_version": "^0.12.0",
-            "contract_version": "0.5.0"
+            "contract_version": "1.2.0"
         },
         "metadata": {
             "id": "greentic.ac", "name": "AC", "version": "1.6.0",

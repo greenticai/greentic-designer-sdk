@@ -38,7 +38,7 @@ fn sample_describe_with_sig(sig_value: Option<&str>) -> DescribeJson {
         "compat": {
             "min_designer_version": ">=1.0.0",
             "min_runner_version": "^0.12.0",
-            "contract_version": "0.5.0"
+            "contract_version": "1.2.0"
         },
         "metadata": {
             "id": "greentic.canonicalize-test",
@@ -164,7 +164,7 @@ fn verify_describe_rejects_non_ed25519_algorithm() {
         "compat": {
             "min_designer_version": ">=1.0.0",
             "min_runner_version": "^0.12.0",
-            "contract_version": "0.5.0"
+            "contract_version": "1.2.0"
         },
         "metadata": {
             "id": "greentic.canonicalize-test",

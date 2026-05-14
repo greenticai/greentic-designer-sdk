@@ -27,10 +27,9 @@ impl FromStr for ComponentId {
         if s.is_empty() {
             return Err(ContractError::MalformedComponentId(s.into()));
         }
-        if !s
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' || c == '.')
-        {
+        if !s.chars().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' || c == '.'
+        }) {
             return Err(ContractError::MalformedComponentId(s.into()));
         }
         Ok(Self(s.to_owned()))
