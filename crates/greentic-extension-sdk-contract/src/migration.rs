@@ -2,6 +2,10 @@
 //! during build.sh to translate their describe.json forward; gtdx-cli will
 //! call the same helper in `gtdx migrate` (Phase E).
 
+use serde_json::{Map, Value, json};
+
+use crate::error::ContractError;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MigrationReport {
     pub warnings: Vec<String>,
@@ -16,4 +20,155 @@ impl MigrationReport {
     pub fn dropped<S: Into<String>>(&mut self, key: S) {
         self.dropped_keys.push(key.into());
     }
+}
+
+/// Convert a v1 describe.json (`apiVersion: greentic.ai/v1`) into a v2 value
+/// suitable for `serde_json::from_value::<DescribeJson>()`.
+///
+/// Returns the converted value + a non-fatal report. Hard errors return `Err`.
+pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), ContractError> {
+    let mut report = MigrationReport::default();
+    let obj = raw
+        .as_object()
+        .ok_or_else(|| ContractError::SchemaInvalid("describe must be object".into()))?;
+
+    let api = obj.get("apiVersion").and_then(Value::as_str).unwrap_or("");
+    if api != "greentic.ai/v1" {
+        return Err(ContractError::UnsupportedApiVersion(api.into()));
+    }
+
+    let mut out = Map::new();
+    out.insert("apiVersion".into(), Value::String("greentic.ai/v2".into()));
+    out.insert(
+        "$schema".into(),
+        Value::String("https://store.greentic.ai/schemas/describe-v2.json".into()),
+    );
+
+    for key in ["kind", "metadata", "engine", "capabilities"] {
+        if let Some(v) = obj.get(key).cloned() {
+            out.insert(key.into(), v);
+        }
+    }
+
+    out.insert(
+        "compat".into(),
+        json!({
+            "min_designer_version": ">=1.2.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "0.5.0"
+        }),
+    );
+
+    let (runtime_val, contributions_val) = migrate_runtime_and_contributions(obj, &mut report);
+    out.insert("runtime".into(), runtime_val);
+
+    if let Some(execution) = contributions_val.get("__execution__").cloned() {
+        out.insert("execution".into(), execution);
+    }
+    let contributions_clean = {
+        let mut m = contributions_val.as_object().cloned().unwrap_or_default();
+        m.remove("__execution__");
+        Value::Object(m)
+    };
+    out.insert("contributions".into(), contributions_clean);
+
+    if let Some(sig) = obj.get("signature").cloned() {
+        out.insert("signature".into(), sig);
+    }
+
+    Ok((Value::Object(out), report))
+}
+
+/// Build the v2 `runtime` object and accumulate `contributions`. Returns them
+/// both; the caller strips the internal `__execution__` sentinel from the
+/// contributions map if present.
+fn migrate_runtime_and_contributions(
+    obj: &Map<String, Value>,
+    report: &mut MigrationReport,
+) -> (Value, Value) {
+    let runtime_val = migrate_runtime(obj, report);
+    let contributions_val = migrate_contributions(obj, report);
+    (runtime_val, contributions_val)
+}
+
+fn migrate_runtime(obj: &Map<String, Value>, report: &mut MigrationReport) -> Value {
+    let mut runtime_out = Map::new();
+    if let Some(rt) = obj.get("runtime").and_then(Value::as_object) {
+        for key in ["memoryLimitMB", "permissions"] {
+            if let Some(v) = rt.get(key).cloned() {
+                runtime_out.insert(key.into(), v);
+            }
+        }
+        let entry = build_component_entry(rt, report);
+        let mut components = Map::new();
+        components.insert("main".into(), entry);
+        runtime_out.insert("components".into(), Value::Object(components));
+    }
+    Value::Object(runtime_out)
+}
+
+fn build_component_entry(rt: &Map<String, Value>, report: &mut MigrationReport) -> Value {
+    let mut entry = Map::new();
+    if let Some(gtpack) = rt.get("gtpack").cloned() {
+        let sha = gtpack
+            .get("sha256")
+            .and_then(Value::as_str)
+            .unwrap_or(&"0".repeat(64))
+            .to_string();
+        entry.insert("gtpack".into(), gtpack);
+        entry.insert("sha256".into(), Value::String(sha));
+        entry.insert("world".into(), Value::String("main".into()));
+    } else {
+        // No gtpack in v1 — emit a placeholder oci_ref so RuntimeComponent
+        // deserialises (it requires at least one of oci_ref or gtpack).
+        entry.insert("oci_ref".into(), Value::String("placeholder://zero".into()));
+        entry.insert("sha256".into(), Value::String("0".repeat(64)));
+        entry.insert("world".into(), Value::String("main".into()));
+        report.warn(
+            "runtime.components[\"main\"] populated with zero sha256 \
+             and placeholder oci_ref; please hand-edit before publishing",
+        );
+    }
+    Value::Object(entry)
+}
+
+fn migrate_contributions(obj: &Map<String, Value>, report: &mut MigrationReport) -> Value {
+    let empty = Value::Object(Map::new());
+    let contributions_in = obj.get("contributions").unwrap_or(&empty);
+    let mut out = Map::new();
+
+    if let Some(arr) = contributions_in.get("nodeTypes").and_then(Value::as_array) {
+        // LocalizedString handles plain strings transparently; pass through as-is.
+        out.insert("nodeTypes".into(), Value::Array(arr.clone()));
+    }
+    for key in ["tools", "recipes"] {
+        if let Some(v) = contributions_in.get(key).cloned() {
+            out.insert(key.into(), v);
+        }
+    }
+    // knowledge / prompts / schemas: v1 allows plain path strings; v2 requires {path}.
+    for key in ["knowledge", "prompts", "schemas"] {
+        if let Some(arr) = contributions_in.get(key).and_then(Value::as_array) {
+            let wrapped = arr
+                .iter()
+                .map(|v| {
+                    if v.is_string() {
+                        json!({ "path": v })
+                    } else {
+                        v.clone()
+                    }
+                })
+                .collect();
+            out.insert(key.into(), Value::Array(wrapped));
+        }
+    }
+
+    // targets is a DeployExtension-only concept dropped in v2.
+    if let Some(targets) = contributions_in.get("targets").cloned() {
+        report.dropped("targets");
+        // Stash the execution block under a sentinel key; the caller hoists it.
+        out.insert("__execution__".into(), json!({ "legacy_targets": targets }));
+    }
+
+    Value::Object(out)
 }

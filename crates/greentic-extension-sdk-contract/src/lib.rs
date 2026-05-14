@@ -25,6 +25,7 @@ pub use self::describe::{DescribeJson, Signature, SignatureAlgorithm};
 pub use self::error::ContractError;
 pub use self::kind::ExtensionKind;
 pub use self::localization::{Locale, LocalizedString};
+pub use self::migration::{MigrationReport, migrate_v0_4_x_value};
 pub use self::pack_writer::{PackEntry, PackWriterError, build_gtxpack, sha256_hex};
 pub use self::runtime_component::RuntimeComponent;
 pub use self::sha256::Sha256;
