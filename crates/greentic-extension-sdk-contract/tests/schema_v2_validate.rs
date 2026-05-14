@@ -7,7 +7,7 @@ const VALID: &str = r#"{
   "compat": {
     "min_designer_version": ">=1.2.0",
     "min_runner_version": "^0.12.0",
-    "contract_version": "0.5.0"
+    "contract_version": "1.2.0"
   },
   "metadata": {
     "id": "greentic.x",

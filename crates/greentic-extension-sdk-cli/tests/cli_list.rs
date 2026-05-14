@@ -18,7 +18,7 @@ fn default_compat() -> Compat {
     Compat {
         min_designer_version: ">=1.0.0".parse().unwrap(),
         min_runner_version: "^0.12.0".parse().unwrap(),
-        contract_version: "0.5.0".parse().unwrap(),
+        contract_version: "1.2.0".parse().unwrap(),
     }
 }
 
@@ -38,7 +38,9 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
             id: id.into(),
             name: id.into(),
             version: version.into(),
-            summary: greentic_extension_sdk_contract::LocalizedString::plain(format!("Test fixture for {id}")),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain(format!(
+                "Test fixture for {id}"
+            )),
             description: None,
             author: Author {
                 name: "Test".into(),

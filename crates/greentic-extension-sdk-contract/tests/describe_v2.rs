@@ -7,7 +7,7 @@ const AC_V2: &str = r##"{
   "compat": {
     "min_designer_version": ">=1.2.0",
     "min_runner_version": "^0.12.0",
-    "contract_version": "0.5.0"
+    "contract_version": "1.2.0"
   },
   "metadata": {
     "id": "greentic.adaptive-cards",
@@ -65,7 +65,7 @@ fn ac_v2_parses() {
     let d: DescribeJson = serde_json::from_str(AC_V2).unwrap();
     assert_eq!(d.kind, ExtensionKind::Design);
     assert_eq!(d.metadata.id, "greentic.adaptive-cards");
-    assert_eq!(d.compat.contract_version.to_string(), "0.5.0");
+    assert_eq!(d.compat.contract_version.to_string(), "1.2.0");
     assert_eq!(d.runtime.components.len(), 1);
     let cid = ComponentId::from_str("adaptive-card").unwrap();
     let comp = d.runtime.components.get(&cid).unwrap();
@@ -87,7 +87,7 @@ fn missing_components_rejected() {
 #[test]
 fn missing_compat_rejected() {
     let bad = AC_V2.replace(
-        "\"compat\": {\n    \"min_designer_version\": \">=1.2.0\",\n    \"min_runner_version\": \"^0.12.0\",\n    \"contract_version\": \"0.5.0\"\n  },\n  ",
+        "\"compat\": {\n    \"min_designer_version\": \">=1.2.0\",\n    \"min_runner_version\": \"^0.12.0\",\n    \"contract_version\": \"1.2.0\"\n  },\n  ",
         "",
     );
     let r: Result<DescribeJson, _> = serde_json::from_str(&bad);
@@ -110,5 +110,8 @@ fn unknown_runtime_ref_in_node_type_rejected() {
         "\"runtime_ref\": \"does-not-exist\"\n      }\n    ],\n    \"tools\"",
     );
     let r: Result<DescribeJson, _> = serde_json::from_str(&bad);
-    assert!(r.is_err(), "runtime_ref must reference a key in runtime.components");
+    assert!(
+        r.is_err(),
+        "runtime_ref must reference a key in runtime.components"
+    );
 }

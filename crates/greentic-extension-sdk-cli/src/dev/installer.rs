@@ -70,7 +70,7 @@ mod tests {
             .compression_method(zip::CompressionMethod::Deflated);
         let desc = br#"{
 "apiVersion":"greentic.ai/v2","kind":"DesignExtension",
-"compat":{"min_designer_version":">=1.0.0","min_runner_version":"^0.12.0","contract_version":"0.5.0"},
+"compat":{"min_designer_version":">=1.0.0","min_runner_version":"^0.12.0","contract_version":"1.2.0"},
 "metadata":{"id":"com.example.demo","name":"demo","version":"0.1.0","summary":"x","author":{"name":"a"},"license":"Apache-2.0"},
 "engine":{"greenticDesigner":"^0.1","extRuntime":"^0.1"},
 "capabilities":{"offered":[],"required":[]},

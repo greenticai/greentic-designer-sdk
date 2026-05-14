@@ -59,7 +59,7 @@ pub fn build_provider_fixture_gtxpack(
         compat: Compat {
             min_designer_version: ">=1.0.0".parse().unwrap(),
             min_runner_version: "^0.12.0".parse().unwrap(),
-            contract_version: "0.5.0".parse().unwrap(),
+            contract_version: "1.2.0".parse().unwrap(),
         },
         metadata: Metadata {
             id: id.into(),

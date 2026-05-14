@@ -55,7 +55,7 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
         json!({
             "min_designer_version": ">=1.2.0",
             "min_runner_version": "^0.12.0",
-            "contract_version": "0.5.0"
+            "contract_version": "1.2.0"
         }),
     );
 

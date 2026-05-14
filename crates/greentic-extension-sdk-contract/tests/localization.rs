@@ -6,7 +6,10 @@ use std::str::FromStr;
 fn locale_parses_bcp47_basic() {
     assert_eq!(Locale::from_str("en").unwrap().as_str(), "en");
     assert_eq!(Locale::from_str("en-US").unwrap().as_str(), "en-US");
-    assert_eq!(Locale::from_str("zh-Hant-TW").unwrap().as_str(), "zh-Hant-TW");
+    assert_eq!(
+        Locale::from_str("zh-Hant-TW").unwrap().as_str(),
+        "zh-Hant-TW"
+    );
 }
 
 #[test]
@@ -51,8 +54,5 @@ fn localized_string_object_roundtrips() {
     let s = serde_json::to_string(&ls).unwrap();
     let back: LocalizedString = serde_json::from_str(&s).unwrap();
     assert_eq!(back.default(), "Hello");
-    assert_eq!(
-        back.lookup(&Locale::from_str("id").unwrap()),
-        Some("Halo")
-    );
+    assert_eq!(back.lookup(&Locale::from_str("id").unwrap()), Some("Halo"));
 }
