@@ -3,7 +3,11 @@ use greentic_extension_sdk_contract::{
     DescribeJson, artifact_sha256, canonical_signing_payload, sign_describe, sign_ed25519,
     verify_describe, verify_ed25519,
 };
-use rand::rngs::OsRng;
+
+fn random_signing_key() -> SigningKey {
+    let seed: [u8; 32] = rand::random();
+    SigningKey::from_bytes(&seed)
+}
 
 #[test]
 fn sha256_is_deterministic() {
@@ -13,7 +17,7 @@ fn sha256_is_deterministic() {
 
 #[test]
 fn round_trip_sign_verify() {
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let pk = sk.verifying_key();
     let pk_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pk.to_bytes());
     let payload = b"arbitrary payload";
@@ -23,7 +27,7 @@ fn round_trip_sign_verify() {
 
 #[test]
 fn tampered_payload_fails_verification() {
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let pk = sk.verifying_key();
     let pk_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pk.to_bytes());
     let sig = sign_ed25519(&sk, b"original");
@@ -80,7 +84,7 @@ fn canonical_payload_is_deterministic_across_serde_round_trip() {
 
 #[test]
 fn sign_describe_populates_signature_field() {
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let mut d = sample_describe_with_sig(None);
     assert!(d.signature.is_none());
     sign_describe(&mut d, &sk).expect("sign");
@@ -95,7 +99,7 @@ fn sign_describe_strips_preexisting_signature_before_signing() {
     // If caller passes a describe that already has a stale signature,
     // sign_describe should canonicalize as-if signature was None so the
     // new sig is not computed over a signed payload.
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let mut d_preexisting = sample_describe_with_sig(Some("STALE"));
     let mut d_fresh = sample_describe_with_sig(None);
     sign_describe(&mut d_preexisting, &sk).expect("sign");
@@ -109,7 +113,7 @@ fn sign_describe_strips_preexisting_signature_before_signing() {
 
 #[test]
 fn sign_describe_then_verify_describe_roundtrip() {
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let mut d = sample_describe_with_sig(None);
     sign_describe(&mut d, &sk).expect("sign");
     verify_describe(&d).expect("verify");
@@ -128,7 +132,7 @@ fn verify_describe_missing_signature_fails() {
 
 #[test]
 fn verify_describe_rejects_tampered_metadata() {
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let mut d = sample_describe_with_sig(None);
     sign_describe(&mut d, &sk).expect("sign");
     d.metadata.version = "99.99.99".into();
@@ -141,7 +145,7 @@ fn verify_describe_rejects_tampered_metadata() {
 
 #[test]
 fn verify_describe_rejects_non_ed25519_algorithm() {
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let mut d = sample_describe_with_sig(None);
     sign_describe(&mut d, &sk).expect("sign");
     d.signature.as_mut().unwrap().algorithm = "sha256-hmac".into();
@@ -153,7 +157,7 @@ fn verify_describe_rejects_non_ed25519_algorithm() {
 fn verify_describe_survives_serde_round_trip() {
     // Field-order-independence test: sign, re-serialize through serde_json,
     // re-parse, verify still passes. Proves JCS canonicalization is stable.
-    let sk = SigningKey::generate(&mut OsRng);
+    let sk = random_signing_key();
     let mut d1 = sample_describe_with_sig(None);
     sign_describe(&mut d1, &sk).expect("sign");
     let json = serde_json::to_string(&d1).unwrap();

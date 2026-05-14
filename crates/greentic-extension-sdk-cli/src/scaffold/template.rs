@@ -6,6 +6,8 @@ use include_dir::{Dir, include_dir};
 
 static TEMPLATES_COMMON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/common");
 static TEMPLATES_DESIGN: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/design");
+static TEMPLATES_DESIGN_ARTIFACT_PRODUCER: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/templates/design-artifact-producer");
 static TEMPLATES_BUNDLE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/bundle");
 static TEMPLATES_DEPLOY: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/deploy");
 static TEMPLATES_PROVIDER: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/provider");
@@ -57,6 +59,7 @@ pub fn load_templates_common() -> Vec<TemplateEntry> {
 pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
     match kind {
         "design" => collect(&TEMPLATES_DESIGN),
+        "design-artifact-producer" => collect(&TEMPLATES_DESIGN_ARTIFACT_PRODUCER),
         "bundle" => collect(&TEMPLATES_BUNDLE),
         "deploy" => collect(&TEMPLATES_DEPLOY),
         "provider" => collect(&TEMPLATES_PROVIDER),
@@ -191,5 +194,15 @@ mod tests {
         assert!(entries.iter().any(|e| e.dst_rel == "Cargo.toml"));
         assert!(entries.iter().any(|e| e.dst_rel == "describe.json"));
         assert!(entries.iter().any(|e| e.dst_rel == "src/lib.rs"));
+    }
+
+    #[test]
+    fn load_kind_design_artifact_producer_returns_example_output() {
+        let entries = load_templates_kind("design-artifact-producer");
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.dst_rel == "examples/artifact-output.json")
+        );
     }
 }

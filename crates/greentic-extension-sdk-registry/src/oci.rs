@@ -134,7 +134,7 @@ impl ExtensionRegistry for OciRegistry {
             name: describe.metadata.id.clone(),
             version: describe.metadata.version.clone(),
             describe,
-            bytes,
+            bytes: bytes.to_vec(),
             signature: None,
         })
     }
@@ -160,7 +160,7 @@ impl ExtensionRegistry for OciRegistry {
         // Minimal JSON config — OCI manifests require a config blob, but for
         // non-runnable artifacts the spec lets us use an empty object.
         let config = Config {
-            data: b"{}".to_vec(),
+            data: b"{}".to_vec().into(),
             media_type: GTXPACK_CONFIG_MEDIA_TYPE.to_string(),
             annotations: None,
         };

@@ -14,7 +14,7 @@ chrono = { workspace = true }
 ciborium = { workspace = true }
 dialoguer = { workspace = true }
 fs2 = { workspace = true }
-greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "0.4" }
+greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "0.4.6" }
 oci-client = { workspace = true }
 reqwest = { workspace = true }
 semver = { workspace = true }
@@ -29,7 +29,7 @@ tracing = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
-greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "0.4" }
+greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "0.4.6" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 wiremock = "0.6"
 

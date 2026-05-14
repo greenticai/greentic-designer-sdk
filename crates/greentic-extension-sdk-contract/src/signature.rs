@@ -10,7 +10,13 @@ use crate::error::ContractError;
 pub fn artifact_sha256(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(64);
+    for b in digest {
+        use std::fmt::Write as _;
+        write!(&mut out, "{b:02x}").expect("write to String");
+    }
+    out
 }
 
 #[must_use]
