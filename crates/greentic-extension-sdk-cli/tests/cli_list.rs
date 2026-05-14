@@ -29,7 +29,7 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
             id: id.into(),
             name: id.into(),
             version: version.into(),
-            summary: format!("Test fixture for {id}"),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain(format!("Test fixture for {id}")),
             description: None,
             author: Author {
                 name: "Test".into(),

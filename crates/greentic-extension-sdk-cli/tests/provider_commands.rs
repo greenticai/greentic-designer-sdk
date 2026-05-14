@@ -32,7 +32,7 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
             id: "greentic.design.adaptive-cards".into(),
             name: "Adaptive Cards".into(),
             version: "0.1.0".into(),
-            summary: "Design extension for adaptive cards".into(),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain("Design extension for adaptive cards"),
             description: None,
             author: Author {
                 name: "Test".into(),
@@ -90,7 +90,7 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
             id: "greentic.provider.telegram".into(),
             name: "Telegram Provider".into(),
             version: "0.2.0".into(),
-            summary: "Provider extension for Telegram".into(),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain("Provider extension for Telegram"),
             description: None,
             author: Author {
                 name: "Test".into(),
@@ -305,7 +305,7 @@ fn write_provider_fixture_with_capabilities(
             id: id.into(),
             name: "Telegram Provider".into(),
             version: version.into(),
-            summary: "Provider extension for Telegram".into(),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain("Provider extension for Telegram"),
             description: None,
             author: Author {
                 name: "Test".into(),

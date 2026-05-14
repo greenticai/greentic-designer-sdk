@@ -122,7 +122,7 @@ mod tests {
                 id: "com.example.demo".into(),
                 name: "demo".into(),
                 version: "0.1.0".into(),
-                summary: "s".into(),
+                summary: greentic_extension_sdk_contract::LocalizedString::plain("s"),
                 description: None,
                 author: Author {
                     name: "a".into(),
