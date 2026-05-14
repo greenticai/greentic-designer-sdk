@@ -56,9 +56,12 @@ impl fmt::Display for CapabilityId {
 pub type CapabilityVersion = semver::Version;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilityRef {
     pub id: CapabilityId,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<crate::deprecated::Deprecated>,
 }
 
 impl CapabilityRef {

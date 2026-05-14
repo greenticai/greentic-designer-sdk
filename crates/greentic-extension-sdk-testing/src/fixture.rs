@@ -65,6 +65,7 @@ impl ExtensionFixtureBuilder {
             .map(|(id, v)| CapabilityRef {
                 id: id.parse().expect("valid cap id"),
                 version: v,
+                deprecated: None,
             })
             .collect();
         let required: Vec<CapabilityRef> = self
@@ -73,6 +74,7 @@ impl ExtensionFixtureBuilder {
             .map(|(id, v)| CapabilityRef {
                 id: id.parse().expect("valid cap id"),
                 version: v,
+                deprecated: None,
             })
             .collect();
 
