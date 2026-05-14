@@ -116,10 +116,14 @@ fn render_info(kind: ExtensionKind, d: &DescribeJson) {
     println!("Name: {}", d.metadata.id);
     println!("Version: {}", d.metadata.version);
     println!("License: {}", d.metadata.license);
-    println!("Summary: {}", d.metadata.summary);
+    println!("Summary: {}", d.metadata.summary.default());
 
     if kind == ExtensionKind::Provider
-        && let Some(gtpack) = &d.runtime.gtpack
+        && let Some(gtpack) = d
+            .runtime
+            .components
+            .values()
+            .find_map(|c| c.gtpack.as_ref())
     {
         println!("Runtime pack: {}", gtpack.pack_id);
         println!("Component version: {}", gtpack.component_version);

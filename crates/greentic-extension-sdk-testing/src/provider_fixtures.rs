@@ -6,8 +6,8 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use greentic_extension_sdk_contract::{
-    DescribeJson, ExtensionKind, RuntimeGtpack,
-    describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime},
+    Compat, DescribeJson, ExtensionKind, LocalizedString, RuntimeGtpack,
+    describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
     hex,
 };
 use sha2::{Digest, Sha256};
@@ -37,15 +37,35 @@ pub fn build_provider_fixture_gtxpack(
     let mut zip = zip::ZipWriter::new(file);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
+    let gtpack = RuntimeGtpack {
+        file: "runtime/provider.gtpack".into(),
+        sha256: sha256.into(),
+        pack_id: id.into(),
+        component_version: "0.6.0".into(),
+    };
+    let component = greentic_extension_sdk_contract::RuntimeComponent {
+        oci_ref: None,
+        gtpack: Some(gtpack),
+        sha256: sha256.parse().expect("valid sha256 fixture"),
+        world: "greentic:component/stub@0.1.0".into(),
+    };
+    let mut components = std::collections::BTreeMap::new();
+    components.insert("stub".parse().expect("valid component id"), component);
+
     let describe = DescribeJson {
         schema_ref: None,
-        api_version: "greentic.ai/v1".into(),
+        api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Provider,
+        compat: Compat {
+            min_designer_version: ">=1.0.0".parse().unwrap(),
+            min_runner_version: "^0.12.0".parse().unwrap(),
+            contract_version: "1.2.0".parse().unwrap(),
+        },
         metadata: Metadata {
             id: id.into(),
             name: id.into(),
             version: version.into(),
-            summary: "fixture".into(),
+            summary: LocalizedString::plain("fixture"),
             description: None,
             author: Author {
                 name: "Fixture".into(),
@@ -68,18 +88,13 @@ pub fn build_provider_fixture_gtxpack(
             required: vec![],
         },
         runtime: Runtime {
-            component: "wasm/stub.wasm".into(),
             memory_limit_mb: 64,
             permissions: Permissions::default(),
-            gtpack: Some(RuntimeGtpack {
-                file: "runtime/provider.gtpack".into(),
-                sha256: sha256.into(),
-                pack_id: id.into(),
-                component_version: "0.6.0".into(),
-            }),
+            components,
         },
         execution: None,
-        contributions: serde_json::json!({}),
+        contributions: Contributions::default(),
+        localization: None,
         signature: None,
     };
 

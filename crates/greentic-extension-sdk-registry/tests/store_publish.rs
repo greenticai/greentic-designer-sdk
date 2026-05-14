@@ -1,13 +1,21 @@
 use chrono::Utc;
 use greentic_extension_sdk_contract::{
-    DescribeJson, ExtensionKind,
-    describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime},
+    Compat, DescribeJson, ExtensionKind, LocalizedString,
+    describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
 };
 use greentic_extension_sdk_registry::publish::PublishRequest;
 use greentic_extension_sdk_registry::registry::ExtensionRegistry;
 use greentic_extension_sdk_registry::store::GreenticStoreRegistry;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn default_compat() -> Compat {
+    Compat {
+        min_designer_version: ">=1.0.0".parse().unwrap(),
+        min_runner_version: "^0.12.0".parse().unwrap(),
+        contract_version: "1.2.0".parse().unwrap(),
+    }
+}
 
 fn sample_req() -> PublishRequest {
     PublishRequest {
@@ -19,13 +27,14 @@ fn sample_req() -> PublishRequest {
         artifact_sha256: "abc".into(),
         describe: DescribeJson {
             schema_ref: None,
-            api_version: "greentic.ai/v1".into(),
+            api_version: "greentic.ai/v2".into(),
             kind: ExtensionKind::Design,
+            compat: default_compat(),
             metadata: Metadata {
                 id: "com.example.demo".into(),
                 name: "demo".into(),
                 version: "0.1.0".into(),
-                summary: "s".into(),
+                summary: LocalizedString::plain("s"),
                 description: None,
                 author: Author {
                     name: "a".into(),
@@ -48,13 +57,13 @@ fn sample_req() -> PublishRequest {
                 required: vec![],
             },
             runtime: Runtime {
-                component: "extension.wasm".into(),
                 memory_limit_mb: 64,
                 permissions: Permissions::default(),
-                gtpack: None,
+                components: std::collections::BTreeMap::new(),
             },
             execution: None,
-            contributions: serde_json::json!({}),
+            contributions: Contributions::default(),
+            localization: None,
             signature: None,
         },
         signature: None,

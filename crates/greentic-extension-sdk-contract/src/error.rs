@@ -8,8 +8,17 @@ pub enum ContractError {
     #[error("capability id is malformed: {0}")]
     MalformedCapabilityId(String),
 
+    #[error("component id is malformed: {0}")]
+    MalformedComponentId(String),
+
+    #[error("locale is malformed: {0}")]
+    MalformedLocale(String),
+
     #[error("version is not semver: {0}")]
     MalformedVersion(String),
+
+    #[error("sha256 is malformed: {0}")]
+    MalformedSha256(String),
 
     #[error("signature verification failed: {0}")]
     SignatureInvalid(String),

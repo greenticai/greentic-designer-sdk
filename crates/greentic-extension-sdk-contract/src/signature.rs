@@ -71,9 +71,10 @@ pub fn sign_describe(
     let pubkey_b64 = B64.encode(signing_key.verifying_key().to_bytes());
     let sig_b64 = B64.encode(sig.to_bytes());
     describe.signature = Some(crate::describe::Signature {
-        algorithm: "ed25519".into(),
+        algorithm: crate::describe::SignatureAlgorithm::Ed25519,
         public_key: pubkey_b64,
         value: sig_b64,
+        key_id: None,
     });
     Ok(())
 }
@@ -87,11 +88,10 @@ pub fn verify_describe(describe: &DescribeJson) -> Result<(), ContractError> {
         .signature
         .as_ref()
         .ok_or_else(|| ContractError::SignatureInvalid("missing signature field".into()))?;
-    if sig.algorithm != "ed25519" {
-        return Err(ContractError::SignatureInvalid(format!(
-            "unsupported algorithm: {}",
-            sig.algorithm
-        )));
+    if !matches!(sig.algorithm, crate::describe::SignatureAlgorithm::Ed25519) {
+        return Err(ContractError::SignatureInvalid(
+            "unsupported algorithm".into(),
+        ));
     }
     let payload = canonical_signing_payload(describe)?;
     verify_ed25519(&sig.public_key, &sig.value, &payload)

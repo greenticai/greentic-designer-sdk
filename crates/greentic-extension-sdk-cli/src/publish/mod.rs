@@ -321,7 +321,11 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
             .as_ref()
             .ok_or_else(|| PublishError::Other(anyhow::anyhow!("signing produced no signature")))?;
         Some(SignatureBlob {
-            algorithm: sig.algorithm.clone(),
+            algorithm: match sig.algorithm {
+                greentic_extension_sdk_contract::SignatureAlgorithm::Ed25519 => {
+                    "ed25519".to_string()
+                }
+            },
             public_key: sig.public_key.clone(),
             value: sig.value.clone(),
             key_id,

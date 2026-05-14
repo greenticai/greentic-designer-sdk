@@ -116,13 +116,18 @@ mod tests {
     fn sample_describe() -> DescribeJson {
         DescribeJson {
             schema_ref: None,
-            api_version: "greentic.ai/v1".into(),
+            api_version: "greentic.ai/v2".into(),
             kind: ExtensionKind::Design,
+            compat: greentic_extension_sdk_contract::Compat {
+                min_designer_version: ">=1.0.0".parse().unwrap(),
+                min_runner_version: "^0.12.0".parse().unwrap(),
+                contract_version: "1.2.0".parse().unwrap(),
+            },
             metadata: Metadata {
                 id: "com.example.demo".into(),
                 name: "demo".into(),
                 version: "0.1.0".into(),
-                summary: "s".into(),
+                summary: greentic_extension_sdk_contract::LocalizedString::plain("s"),
                 description: None,
                 author: Author {
                     name: "a".into(),
@@ -145,13 +150,13 @@ mod tests {
                 required: vec![],
             },
             runtime: Runtime {
-                component: "extension.wasm".into(),
                 memory_limit_mb: 64,
                 permissions: Permissions::default(),
-                gtpack: None,
+                components: std::collections::BTreeMap::new(),
             },
             execution: None,
-            contributions: serde_json::json!({}),
+            contributions: greentic_extension_sdk_contract::describe::Contributions::default(),
+            localization: None,
             signature: None,
         }
     }

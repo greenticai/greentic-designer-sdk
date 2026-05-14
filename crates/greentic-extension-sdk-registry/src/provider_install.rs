@@ -47,12 +47,18 @@ pub(crate) fn post_install_provider(
     storage_root: &Path,
     force: bool,
 ) -> Result<(), RegistryError> {
-    // Step 1: gtpack field must be present.
-    let gtpack = describe.runtime.gtpack.as_ref().ok_or_else(|| {
-        RegistryError::ProviderInstall(
-            "provider extension missing runtime.gtpack (invariant violation)".into(),
-        )
-    })?;
+    // Step 1: at least one component must carry a gtpack distribution channel.
+    let gtpack = describe
+        .runtime
+        .components
+        .values()
+        .find_map(|c| c.gtpack.as_ref())
+        .ok_or_else(|| {
+            RegistryError::ProviderInstall(
+                "provider extension has no component with runtime.gtpack (invariant violation)"
+                    .into(),
+            )
+        })?;
 
     // Step 2: Read staged bytes and verify sha256.
     let staged_path = staging.join(&gtpack.file);
