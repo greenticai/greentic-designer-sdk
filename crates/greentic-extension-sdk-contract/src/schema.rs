@@ -18,7 +18,7 @@ static SCHEMA: LazyLock<Validator> = LazyLock::new(|| {
 pub fn validate_describe_json(value: &serde_json::Value) -> Result<(), ContractError> {
     let errors: Vec<String> = SCHEMA
         .iter_errors(value)
-        .map(|e| format!("{}: {}", e.instance_path, e))
+        .map(|e| format!("{}: {}", e.instance_path(), e))
         .collect();
     if errors.is_empty() {
         Ok(())

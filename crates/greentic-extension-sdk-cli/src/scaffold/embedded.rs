@@ -34,12 +34,12 @@ pub fn wit_files() -> Vec<WitFile> {
 /// Returns the subset of WIT files needed to scaffold an extension of the given kind.
 /// Always includes `extension-base.wit` and `extension-host.wit`.
 ///
-/// `wasm-component` reuses the `design` WIT files: the scaffolded world imports
-/// `greentic:extension-design/tools@0.1.0`, so `cargo component build` needs the
-/// same package set as a `design` extension.
+/// `wasm-component` and `design-artifact-producer` reuse the `design` WIT files:
+/// the scaffolded world imports `greentic:extension-design/tools@0.1.0`, so
+/// `cargo component build` needs the same package set as a `design` extension.
 pub fn files_for_kind(kind: &str) -> Vec<WitFile> {
     let kind_file = match kind {
-        "wasm-component" => "extension-design.wit".to_string(),
+        "wasm-component" | "design-artifact-producer" => "extension-design.wit".to_string(),
         other => format!("extension-{other}.wit"),
     };
     wit_files()

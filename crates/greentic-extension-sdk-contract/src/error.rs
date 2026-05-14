@@ -20,6 +20,9 @@ pub enum ContractError {
     #[error("canonicalization failed: {0}")]
     Canonicalize(String),
 
+    #[error("generated artifact is invalid: {0}")]
+    GeneratedArtifactInvalid(String),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 

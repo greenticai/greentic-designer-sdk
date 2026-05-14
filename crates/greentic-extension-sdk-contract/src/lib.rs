@@ -1,5 +1,6 @@
 //! Contract types + describe.json schema for Greentic Designer Extensions.
 
+pub mod artifact;
 pub mod capability;
 pub mod describe;
 pub mod error;
@@ -9,6 +10,10 @@ pub mod pack_writer;
 pub mod schema;
 pub mod signature;
 
+pub use self::artifact::{
+    ArtifactDiagnostic, ArtifactKind, ArtifactToolOutput, GeneratedArtifact,
+    validate_artifact_tool_output, validate_generated_artifact,
+};
 pub use self::capability::{CapabilityId, CapabilityRef, CapabilityVersion};
 pub use self::describe::{DescribeJson, RuntimeGtpack};
 pub use self::error::ContractError;

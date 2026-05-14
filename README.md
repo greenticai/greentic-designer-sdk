@@ -16,6 +16,8 @@ A workspace containing the public-facing tooling and types for building Greentic
 
 The runtime engine that *executes* WASM extensions is part of the commercial Greentic Designer platform and is not included here. This SDK gives developers everything they need to author, validate, sign, and publish extensions; execution happens on the Greentic platform.
 
+Design extension tools can return generated design-time artifacts through the existing `tools.invoke-tool` JSON result. See [Generated Artifacts](./docs/generated-artifacts.md) for the generic output contract.
+
 ## Quick start
 
 ### Install the CLI
