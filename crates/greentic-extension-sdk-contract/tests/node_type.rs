@@ -1,4 +1,5 @@
 use greentic_extension_sdk_contract::ComponentId;
+use greentic_extension_sdk_contract::Locale;
 use greentic_extension_sdk_contract::describe::{NodeType, OutputPort};
 use std::str::FromStr;
 
@@ -55,7 +56,6 @@ fn parses_node_type_with_localized_label() {
         "output_ports": []
     });
     let nt: NodeType = serde_json::from_value(v).unwrap();
-    use greentic_extension_sdk_contract::Locale;
     let id = Locale::from_str("id").unwrap();
     assert_eq!(nt.label.lookup(&id), Some("Kartu Adaptif"));
 }

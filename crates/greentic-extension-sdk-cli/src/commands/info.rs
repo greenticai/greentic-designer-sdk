@@ -118,11 +118,15 @@ fn render_info(kind: ExtensionKind, d: &DescribeJson) {
     println!("License: {}", d.metadata.license);
     println!("Summary: {}", d.metadata.summary.default());
 
-    if kind == ExtensionKind::Provider {
-        if let Some(gtpack) = d.runtime.components.values().find_map(|c| c.gtpack.as_ref()) {
-            println!("Runtime pack: {}", gtpack.pack_id);
-            println!("Component version: {}", gtpack.component_version);
-        }
+    if kind == ExtensionKind::Provider
+        && let Some(gtpack) = d
+            .runtime
+            .components
+            .values()
+            .find_map(|c| c.gtpack.as_ref())
+    {
+        println!("Runtime pack: {}", gtpack.pack_id);
+        println!("Component version: {}", gtpack.component_version);
     }
 
     if !d.capabilities.offered.is_empty() {

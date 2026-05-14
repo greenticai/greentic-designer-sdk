@@ -83,23 +83,23 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
         let known: std::collections::BTreeSet<&crate::component_id::ComponentId> =
             raw.runtime.components.keys().collect();
         for nt in &raw.contributions.node_types {
-            if let Some(rr) = &nt.runtime_ref {
-                if !known.contains(rr) {
-                    return Err(format!(
-                        "node_type {:?} runtime_ref {:?} not in runtime.components",
-                        nt.type_id, rr
-                    ));
-                }
+            if let Some(rr) = &nt.runtime_ref
+                && !known.contains(rr)
+            {
+                return Err(format!(
+                    "node_type {:?} runtime_ref {:?} not in runtime.components",
+                    nt.type_id, rr
+                ));
             }
         }
         for tool in &raw.contributions.tools {
-            if let Some(rr) = &tool.runtime_ref {
-                if !known.contains(rr) {
-                    return Err(format!(
-                        "tool {:?} runtime_ref {:?} not in runtime.components",
-                        tool.name, rr
-                    ));
-                }
+            if let Some(rr) = &tool.runtime_ref
+                && !known.contains(rr)
+            {
+                return Err(format!(
+                    "tool {:?} runtime_ref {:?} not in runtime.components",
+                    tool.name, rr
+                ));
             }
         }
 
