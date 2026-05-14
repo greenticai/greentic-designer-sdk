@@ -49,7 +49,34 @@
       "description": "BundleExtension dispatch config (builtin vs wasm). Ignored for other kinds."
     },
     "contributions": {
-      "type": "object"
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodeTypes": {
+          "type": "array",
+          "items": {}
+        },
+        "tools": {
+          "type": "array",
+          "items": {}
+        },
+        "recipes": {
+          "type": "array",
+          "items": {}
+        },
+        "knowledge": {
+          "type": "array",
+          "items": {}
+        },
+        "prompts": {
+          "type": "array",
+          "items": {}
+        },
+        "schemas": {
+          "type": "array",
+          "items": {}
+        }
+      }
     },
     "localization": {
       "type": "object"
