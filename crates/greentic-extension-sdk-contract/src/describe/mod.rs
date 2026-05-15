@@ -212,4 +212,10 @@ impl DescribeJson {
     pub fn identity_key(&self) -> String {
         format!("{}@{}", self.metadata.id, self.metadata.version)
     }
+
+    pub fn typed_contributions(
+        &self,
+    ) -> Result<crate::contributions::Contributions, crate::ContractError> {
+        crate::contributions::validate_contributions(&self.contributions)
+    }
 }

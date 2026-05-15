@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "global": {
+    "line_coverage_min": 60.0
+  },
+  "defaults": {
+    "per_file_line_coverage_min": 60.0
+  },
+  "exclusions": {
+    "files": [
+      "crates/greentic-extension-sdk-cli/build.rs",
+      "crates/greentic-extension-sdk-cli/src/main.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/dev.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/disable.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/doctor.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/enable.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/info.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/install.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/keygen.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/list.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/login.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/mod.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/new.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/publish.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/registries.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/search.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/sign.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/uninstall.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/validate.rs",
+      "crates/greentic-extension-sdk-cli/src/commands/verify.rs",
+      "crates/greentic-extension-sdk-cli/src/dev/mod.rs",
+      "crates/greentic-extension-sdk-cli/src/publish/mod.rs",
+      "crates/greentic-extension-sdk-cli/embedded-wit/**",
+      "crates/greentic-extension-sdk-cli/templates/**",
+      "crates/greentic-extension-sdk-registry/src/oci.rs",
+      "crates/greentic-extension-sdk-registry/src/prompt.rs"
+    ]
+  },
+  "per_file": {
+    "crates/greentic-extension-sdk-contract/src/artifact.rs": {
+      "line_coverage_min": 80.0
+    },
+    "crates/greentic-extension-sdk-contract/src/contributions/node_type.rs": {
+      "line_coverage_min": 80.0
+    },
+    "crates/greentic-extension-sdk-contract/src/describe/mod.rs": {
+      "line_coverage_min": 75.0
+    },
+    "crates/greentic-extension-sdk-cli/src/dev/packer.rs": {
+      "line_coverage_min": 80.0
+    },
+    "crates/greentic-extension-sdk-cli/src/publish/validator.rs": {
+      "line_coverage_min": 80.0
+    },
+    "crates/greentic-extension-sdk-registry/src/lifecycle.rs": {
+      "line_coverage_min": 80.0
+    },
+    "crates/greentic-extension-sdk-registry/src/provider_install.rs": {
+      "line_coverage_min": 80.0
+    },
+    "crates/greentic-extension-sdk-state/src/atomic.rs": {
+      "line_coverage_min": 80.0
+    }
+  }
+}

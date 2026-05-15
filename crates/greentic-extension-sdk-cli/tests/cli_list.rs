@@ -14,6 +14,13 @@ fn gtdx_bin() -> std::path::PathBuf {
     p
 }
 
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
+}
+
 fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
     let dir = home
         .join("extensions")
@@ -75,7 +82,7 @@ fn list_status_shows_disabled_extensions() {
     write_design_fixture(tmp.path(), "test.qux", "0.1.0");
 
     // Disable it first.
-    let s = std::process::Command::new(gtdx_bin())
+    let s = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -86,7 +93,7 @@ fn list_status_shows_disabled_extensions() {
         .unwrap();
     assert!(s.success());
 
-    let output = std::process::Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args(["--home", tmp.path().to_str().unwrap(), "list", "--status"])
         .output()
         .unwrap();
@@ -105,7 +112,7 @@ fn list_without_status_does_not_show_column() {
     let tmp = TempDir::new().unwrap();
     write_design_fixture(tmp.path(), "test.qux", "0.1.0");
 
-    let output = std::process::Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args(["--home", tmp.path().to_str().unwrap(), "list"])
         .output()
         .unwrap();

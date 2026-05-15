@@ -18,6 +18,8 @@ The runtime engine that *executes* WASM extensions is part of the commercial Gre
 
 Design extension tools can return generated design-time artifacts through the existing `tools.invoke-tool` JSON result. See [Generated Artifacts](./docs/generated-artifacts.md) for the generic output contract.
 
+Design extensions can also contribute Designer node type metadata through `contributions.nodeTypes`. See [Designer Node Types](./docs/node-types.md) for the generic node type contract and validation helpers.
+
 ## Quick start
 
 ### Install the CLI

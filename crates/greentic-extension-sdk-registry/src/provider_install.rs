@@ -168,3 +168,72 @@ fn read_pack_id_from_gtpack(path: &Path) -> Result<String, RegistryError> {
         .map_err(|e| RegistryError::ProviderInstall(format!("cbor decode: {e}")))?;
     Ok(head.pack_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    fn write_gtpack(path: &Path, pack_id: Option<&str>) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        if let Some(pack_id) = pack_id {
+            let manifest = serde_json::json!({ "pack_id": pack_id });
+            let mut bytes = Vec::new();
+            ciborium::into_writer(&manifest, &mut bytes).unwrap();
+            zip.start_file("manifest.cbor", options).unwrap();
+            zip.write_all(&bytes).unwrap();
+        } else {
+            zip.start_file("readme.txt", options).unwrap();
+            zip.write_all(b"missing manifest").unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn hex_decode_rejects_odd_length_and_non_hex() {
+        assert_eq!(hex_decode("0a"), Some(vec![10]));
+        assert!(hex_decode("abc").is_none());
+        assert!(hex_decode("zz").is_none());
+    }
+
+    #[test]
+    fn remove_empty_ancestors_stops_at_non_empty_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let nested = root.join("a/b/c");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join("a/keep.txt"), "keep").unwrap();
+        let removed = nested.join("pack.gtpack");
+        std::fs::write(&removed, "pack").unwrap();
+        std::fs::remove_file(&removed).unwrap();
+
+        remove_empty_ancestors(&removed, root);
+
+        assert!(!nested.exists());
+        assert!(root.join("a").exists());
+    }
+
+    #[test]
+    fn read_pack_id_from_gtpack_reads_manifest_cbor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pack = tmp.path().join("pack.gtpack");
+        write_gtpack(&pack, Some("greentic.provider.test"));
+
+        assert_eq!(
+            read_pack_id_from_gtpack(&pack).unwrap(),
+            "greentic.provider.test"
+        );
+    }
+
+    #[test]
+    fn read_pack_id_from_gtpack_reports_missing_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pack = tmp.path().join("missing.gtpack");
+        write_gtpack(&pack, None);
+
+        let err = read_pack_id_from_gtpack(&pack).unwrap_err();
+        assert!(err.to_string().contains("manifest.cbor"));
+    }
+}

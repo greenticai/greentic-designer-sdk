@@ -10,12 +10,19 @@ fn gtdx_bin() -> std::path::PathBuf {
     p
 }
 
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
+}
+
 #[test]
 fn disable_sets_state_false() {
     let tmp = TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join("extensions/design/test.bar-0.1.0")).unwrap();
 
-    let status = std::process::Command::new(gtdx_bin())
+    let status = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -59,7 +66,7 @@ fn disable_warns_when_dependent_extension_present() {
     )
     .unwrap();
 
-    let output = std::process::Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
