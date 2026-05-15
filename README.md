@@ -71,7 +71,7 @@ Versions are pinned at `0.4.0`. The `gtdx` binary embeds a copy under `crates/gr
 bash ci/local_check.sh
 ```
 
-Runs `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo build --release`, plus `cargo publish --dry-run` on leaf crates.
+Runs `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test`, `cargo build --release`, plus `cargo publish --dry-run` on leaf crates.
 
 ## Toolchain
 
