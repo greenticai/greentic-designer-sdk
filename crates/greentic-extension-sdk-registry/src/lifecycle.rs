@@ -32,83 +32,6 @@ impl Default for InstallOptions {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::registry::ExtensionRegistry;
-    use crate::types::{ExtensionArtifact, ExtensionMetadata, ExtensionSummary, SearchQuery};
-    use greentic_extension_sdk_contract::ExtensionKind;
-
-    struct EmptyRegistry;
-
-    #[async_trait::async_trait]
-    impl ExtensionRegistry for EmptyRegistry {
-        fn name(&self) -> &str {
-            "empty"
-        }
-
-        async fn search(
-            &self,
-            _query: SearchQuery,
-        ) -> Result<Vec<ExtensionSummary>, RegistryError> {
-            Ok(Vec::new())
-        }
-
-        async fn metadata(
-            &self,
-            _name: &str,
-            _version: &str,
-        ) -> Result<ExtensionMetadata, RegistryError> {
-            Err(RegistryError::NotFound {
-                name: "metadata".into(),
-                version: "0.0.0".into(),
-            })
-        }
-
-        async fn fetch(
-            &self,
-            _name: &str,
-            _version: &str,
-        ) -> Result<ExtensionArtifact, RegistryError> {
-            Err(RegistryError::NotFound {
-                name: "artifact".into(),
-                version: "0.0.0".into(),
-            })
-        }
-
-        async fn list_versions(&self, _name: &str) -> Result<Vec<String>, RegistryError> {
-            Ok(Vec::new())
-        }
-    }
-
-    #[test]
-    fn install_options_default_is_normal_without_force() {
-        let opts = InstallOptions::default();
-        assert_eq!(opts.trust_policy, TrustPolicy::Normal);
-        assert!(!opts.accept_permissions);
-        assert!(!opts.force);
-    }
-
-    #[test]
-    fn uninstall_delegates_to_storage_remove() {
-        let tmp = tempfile::tempdir().unwrap();
-        let storage = Storage::new(tmp.path());
-        let (staging, final_dir) = storage
-            .begin_install(ExtensionKind::Design, "greentic.test", "0.1.0")
-            .unwrap();
-        std::fs::write(staging.join("describe.json"), "{}").unwrap();
-        storage.commit_install(&staging, &final_dir).unwrap();
-
-        let registry = EmptyRegistry;
-        let installer = Installer::new(storage, &registry);
-        installer
-            .uninstall(ExtensionKind::Design, "greentic.test", "0.1.0")
-            .unwrap();
-
-        assert!(!final_dir.exists());
-    }
-}
-
 pub struct Installer<'a, R: ExtensionRegistry + ?Sized> {
     storage: Storage,
     registry: &'a R,
@@ -226,5 +149,82 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         version: &str,
     ) -> Result<(), RegistryError> {
         self.storage.remove_extension(kind, name, version)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::ExtensionRegistry;
+    use crate::types::{ExtensionArtifact, ExtensionMetadata, ExtensionSummary, SearchQuery};
+    use greentic_extension_sdk_contract::ExtensionKind;
+
+    struct EmptyRegistry;
+
+    #[async_trait::async_trait]
+    impl ExtensionRegistry for EmptyRegistry {
+        fn name(&self) -> &'static str {
+            "empty"
+        }
+
+        async fn search(
+            &self,
+            _query: SearchQuery,
+        ) -> Result<Vec<ExtensionSummary>, RegistryError> {
+            Ok(Vec::new())
+        }
+
+        async fn metadata(
+            &self,
+            _name: &str,
+            _version: &str,
+        ) -> Result<ExtensionMetadata, RegistryError> {
+            Err(RegistryError::NotFound {
+                name: "metadata".into(),
+                version: "0.0.0".into(),
+            })
+        }
+
+        async fn fetch(
+            &self,
+            _name: &str,
+            _version: &str,
+        ) -> Result<ExtensionArtifact, RegistryError> {
+            Err(RegistryError::NotFound {
+                name: "artifact".into(),
+                version: "0.0.0".into(),
+            })
+        }
+
+        async fn list_versions(&self, _name: &str) -> Result<Vec<String>, RegistryError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn install_options_default_is_normal_without_force() {
+        let opts = InstallOptions::default();
+        assert_eq!(opts.trust_policy, TrustPolicy::Normal);
+        assert!(!opts.accept_permissions);
+        assert!(!opts.force);
+    }
+
+    #[test]
+    fn uninstall_delegates_to_storage_remove() {
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Storage::new(tmp.path());
+        let (staging, final_dir) = storage
+            .begin_install(ExtensionKind::Design, "greentic.test", "0.1.0")
+            .unwrap();
+        std::fs::write(staging.join("describe.json"), "{}").unwrap();
+        storage.commit_install(&staging, &final_dir).unwrap();
+
+        let registry = EmptyRegistry;
+        let installer = Installer::new(storage, &registry);
+        installer
+            .uninstall(ExtensionKind::Design, "greentic.test", "0.1.0")
+            .unwrap();
+
+        assert!(!final_dir.exists());
     }
 }
