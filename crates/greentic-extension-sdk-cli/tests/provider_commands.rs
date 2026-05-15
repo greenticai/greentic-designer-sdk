@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::process::Command;
 
 use greentic_extension_sdk_contract::{
     CapabilityId, CapabilityRef, DescribeJson, ExtensionKind,
@@ -11,6 +10,13 @@ use tempfile::TempDir;
 
 fn gtdx_bin() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_gtdx"))
+}
+
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -148,7 +154,7 @@ fn gtdx_list_filters_by_kind_provider() {
     let tmp = TempDir::new().unwrap();
     setup_fixture_extensions(tmp.path());
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -187,7 +193,7 @@ fn gtdx_list_filters_by_kind_design() {
     let tmp = TempDir::new().unwrap();
     setup_fixture_extensions(tmp.path());
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -226,7 +232,7 @@ fn gtdx_list_shows_all_kinds_by_default() {
     let tmp = TempDir::new().unwrap();
     setup_fixture_extensions(tmp.path());
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args(["--home", tmp.path().to_str().unwrap(), "list"])
         .output()
         .unwrap();
@@ -255,7 +261,7 @@ fn gtdx_list_handles_missing_kind_dir() {
     std::fs::create_dir_all(tmp.path().join("extensions")).unwrap();
 
     // Don't create any provider dir
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -371,7 +377,7 @@ fn gtdx_install_provider_from_gtxpack_places_files() {
         &sha,
     );
 
-    let output = std::process::Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             home.to_str().unwrap(),
@@ -428,7 +434,7 @@ fn gtdx_info_displays_provider_channels() {
         &["greentic:messaging/send@0.1.0"],
     );
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             home.to_str().unwrap(),

@@ -8,6 +8,13 @@ fn gtdx_bin() -> std::path::PathBuf {
     p
 }
 
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
+}
+
 fn run(cmd: &mut Command) -> (bool, String, String) {
     let out = cmd.output().expect("spawn gtdx");
     (
@@ -21,7 +28,7 @@ fn run(cmd: &mut Command) -> (bool, String, String) {
 fn scaffolds_design_extension_and_lock_file_matches_bytes() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("demo");
-    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+    let (ok, stdout, stderr) = run(gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -72,7 +79,7 @@ fn scaffolds_design_extension_and_lock_file_matches_bytes() {
 fn scaffolds_bundle_extension_with_correct_wit_deps() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("b");
-    let (ok, _o, e) = run(Command::new(gtdx_bin())
+    let (ok, _o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("b")
         .arg("--kind")
@@ -99,7 +106,7 @@ fn scaffolds_bundle_extension_with_correct_wit_deps() {
 fn scaffolds_deploy_extension_with_correct_wit_deps() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("d");
-    let (ok, _o, e) = run(Command::new(gtdx_bin())
+    let (ok, _o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("d")
         .arg("--kind")
@@ -126,7 +133,7 @@ fn scaffolds_deploy_extension_with_correct_wit_deps() {
 fn scaffolds_provider_extension_with_correct_wit_deps() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("p");
-    let (ok, _o, e) = run(Command::new(gtdx_bin())
+    let (ok, _o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("p")
         .arg("--kind")
@@ -169,7 +176,7 @@ fn target_dir_conflict_without_force_fails() {
     std::fs::create_dir_all(&proj).unwrap();
     std::fs::write(proj.join("something"), "x").unwrap();
 
-    let (ok, _o, e) = run(Command::new(gtdx_bin())
+    let (ok, _o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -194,7 +201,7 @@ fn target_dir_conflict_with_force_succeeds() {
     std::fs::create_dir_all(&proj).unwrap();
     std::fs::write(proj.join("something"), "x").unwrap();
 
-    let (ok, _o, e) = run(Command::new(gtdx_bin())
+    let (ok, _o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -221,7 +228,7 @@ fn generated_project_passes_cargo_check() {
     }
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("demo");
-    let (ok, _o, e) = run(Command::new(gtdx_bin())
+    let (ok, _o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -259,10 +266,11 @@ fn scaffolded_describe_json_validates_against_schema() {
         ("bundle", "bundle-demo"),
         ("deploy", "deploy-demo"),
         ("provider", "provider-demo"),
+        ("wasm-component", "wasm-component-demo"),
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join(scaffold_name);
-        let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+        let (ok, stdout, stderr) = run(gtdx_cmd()
             .arg("new")
             .arg(scaffold_name)
             .arg("--kind")
@@ -295,7 +303,7 @@ fn scaffolded_describe_json_validates_against_schema() {
 fn scaffolds_design_artifact_producer_fixture() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("artifact-demo");
-    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+    let (ok, stdout, stderr) = run(gtdx_cmd()
         .arg("new")
         .arg("artifact-demo")
         .arg("--kind")
@@ -367,7 +375,7 @@ fn scaffolds_design_artifact_producer_fixture() {
 fn new_wasm_component_accepts_node_type_id_and_label() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("greentic.test-tool");
-    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+    let (ok, stdout, stderr) = run(gtdx_cmd()
         .arg("new")
         .arg("greentic.test-tool")
         .arg("--kind")
@@ -388,7 +396,7 @@ fn new_wasm_component_accepts_node_type_id_and_label() {
 fn new_wasm_component_produces_expected_tree() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("greentic.snap-test");
-    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+    let (ok, stdout, stderr) = run(gtdx_cmd()
         .arg("new")
         .arg("greentic.snap-test")
         .arg("--kind")
@@ -463,6 +471,78 @@ fn new_wasm_component_produces_expected_tree() {
     );
 }
 
+#[test]
+fn new_wasm_component_validates_and_doctor_reports_node_types() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("greentic.node-provider");
+    let (ok, stdout, stderr) = run(gtdx_cmd()
+        .arg("new")
+        .arg("greentic.node-provider")
+        .arg("--kind")
+        .arg("wasm-component")
+        .arg("--node-type-id")
+        .arg("node-provider")
+        .arg("--label")
+        .arg("Node Provider")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new failed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+
+    let (ok, validate_stdout, validate_stderr) = run(gtdx_cmd().arg("validate").arg(&proj));
+    assert!(
+        ok,
+        "gtdx validate failed\nstdout:\n{validate_stdout}\nstderr:\n{validate_stderr}"
+    );
+    assert!(validate_stdout.contains("nodeTypes: 1 valid"));
+
+    let (ok, doctor_stdout, doctor_stderr) = run(gtdx_cmd().arg("doctor").arg(&proj));
+    assert!(
+        ok,
+        "gtdx doctor failed\nstdout:\n{doctor_stdout}\nstderr:\n{doctor_stderr}"
+    );
+    assert!(doctor_stdout.contains("Node types:"));
+    assert!(doctor_stdout.contains("count: 1"));
+    assert!(doctor_stdout.contains("valid: true"));
+}
+
+#[test]
+fn doctor_rejects_invalid_node_types() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("greentic.invalid-node-provider");
+    let (ok, stdout, stderr) = run(gtdx_cmd()
+        .arg("new")
+        .arg("greentic.invalid-node-provider")
+        .arg("--kind")
+        .arg("wasm-component")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new failed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+
+    let describe_path = proj.join("describe.json");
+    let bytes = std::fs::read(&describe_path).unwrap();
+    let mut describe: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    describe["contributions"]["nodeTypes"][0]["config_schema"] = serde_json::json!("{");
+    std::fs::write(
+        &describe_path,
+        serde_json::to_vec_pretty(&describe).unwrap(),
+    )
+    .unwrap();
+
+    let (ok, doctor_stdout, doctor_stderr) = run(gtdx_cmd().arg("doctor").arg(&proj));
+    assert!(
+        !ok,
+        "gtdx doctor should fail\nstdout:\n{doctor_stdout}\nstderr:\n{doctor_stderr}"
+    );
+    assert!(
+        doctor_stderr.contains("node type contribution") || doctor_stderr.contains("config_schema"),
+        "stderr should explain invalid node type, got: {doctor_stderr}"
+    );
+}
+
 /// Smoke test: scaffold a wasm-component extension and confirm the generated
 /// extension crate compiles to `wasm32-wasip2`. Gated with `#[ignore]` because
 /// it needs the `wasm32-wasip2` rustup target and network access for cargo
@@ -473,7 +553,7 @@ fn new_wasm_component_produces_expected_tree() {
 fn new_wasm_component_compiles_to_wasi_p2() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("greentic.compile-test");
-    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+    let (ok, stdout, stderr) = run(gtdx_cmd()
         .arg("new")
         .arg("greentic.compile-test")
         .arg("--kind")

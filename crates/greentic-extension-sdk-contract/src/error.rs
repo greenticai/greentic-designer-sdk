@@ -23,6 +23,9 @@ pub enum ContractError {
     #[error("generated artifact is invalid: {0}")]
     GeneratedArtifactInvalid(String),
 
+    #[error("node type contribution is invalid: {0}")]
+    NodeTypeInvalid(String),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 

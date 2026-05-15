@@ -15,6 +15,13 @@ fn gtdx_bin() -> PathBuf {
     p
 }
 
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
+}
+
 fn gate() -> bool {
     std::env::var("GTDX_RUN_BUILD").ok().as_deref() == Some("1")
 }
@@ -39,7 +46,7 @@ fn dev_once_no_install_packs_design_extension() {
     let home = tmp.path().join("home");
 
     // 1) scaffold
-    let (ok, o, e) = run(Command::new(gtdx_bin())
+    let (ok, o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -51,7 +58,7 @@ fn dev_once_no_install_packs_design_extension() {
     assert!(ok, "gtdx new failed: {o}\n{e}");
 
     // 2) run dev --once --no-install
-    let (ok, o, e) = run(Command::new(gtdx_bin())
+    let (ok, o, e) = run(gtdx_cmd()
         .env("GREENTIC_HOME", &home)
         .arg("dev")
         .arg("--once")
@@ -81,7 +88,7 @@ fn dev_once_json_format_emits_valid_jsonl() {
     let home = tmp.path().join("home");
 
     assert!(
-        Command::new(gtdx_bin())
+        gtdx_cmd()
             .arg("new")
             .arg("demo")
             .arg("--dir")
@@ -95,7 +102,7 @@ fn dev_once_json_format_emits_valid_jsonl() {
             .success()
     );
 
-    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+    let (ok, stdout, stderr) = run(gtdx_cmd()
         .env("GREENTIC_HOME", &home)
         .arg("dev")
         .arg("--once")

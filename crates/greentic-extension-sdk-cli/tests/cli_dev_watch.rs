@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 fn gtdx_bin() -> PathBuf {
@@ -16,6 +16,13 @@ fn gtdx_bin() -> PathBuf {
     p.pop();
     p.push("target/debug/gtdx");
     p
+}
+
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
 }
 
 fn gate() -> bool {
@@ -33,7 +40,7 @@ fn dev_watch_rebuilds_and_reinstalls_on_source_edit() {
     let home = tmp.path().join("home");
 
     // scaffold
-    let status = Command::new(gtdx_bin())
+    let status = gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -47,7 +54,7 @@ fn dev_watch_rebuilds_and_reinstalls_on_source_edit() {
     assert!(status.success());
 
     // spawn dev --watch
-    let mut child = Command::new(gtdx_bin())
+    let mut child = gtdx_cmd()
         .env("GREENTIC_HOME", &home)
         .arg("dev")
         .arg("--watch")
@@ -103,7 +110,7 @@ fn dev_watch_survives_build_failure() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("demo");
     let home = tmp.path().join("home");
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -118,7 +125,7 @@ fn dev_watch_survives_build_failure() {
     // Introduce a syntax error BEFORE starting dev
     std::fs::write(proj.join("src/lib.rs"), "not rust").unwrap();
 
-    let mut child = Command::new(gtdx_bin())
+    let mut child = gtdx_cmd()
         .env("GREENTIC_HOME", &home)
         .arg("dev")
         .arg("--watch")

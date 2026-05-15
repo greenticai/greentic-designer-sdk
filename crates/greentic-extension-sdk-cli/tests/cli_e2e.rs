@@ -1,11 +1,16 @@
-use std::process::Command;
-
 use greentic_extension_sdk_contract::ExtensionKind;
 use greentic_extension_sdk_testing::{ExtensionFixtureBuilder, pack_directory};
 use tempfile::TempDir;
 
 fn gtdx_bin() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_gtdx"))
+}
+
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
 }
 
 #[test]
@@ -16,7 +21,7 @@ fn validate_command_accepts_valid_extension() {
         .build()
         .unwrap();
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .arg("validate")
         .arg(fixture.root())
         .output()
@@ -44,7 +49,7 @@ fn install_from_local_pack_copies_into_home() {
     let pack = pack_dir.join("greentic.cli-install-0.1.0.gtxpack");
     pack_directory(fixture.root(), &pack).unwrap();
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .arg("--home")
         .arg(&home)
         .arg("install")
@@ -83,7 +88,7 @@ fn list_shows_installed_extensions() {
     )
     .unwrap();
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .arg("--home")
         .arg(&home)
         .arg("list")
@@ -100,7 +105,7 @@ fn doctor_exits_zero_on_empty_home() {
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .arg("--home")
         .arg(&home)
         .arg("doctor")
@@ -119,7 +124,7 @@ fn registries_list_shows_default_only() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path().join("home");
 
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .arg("--home")
         .arg(&home)
         .arg("registries")

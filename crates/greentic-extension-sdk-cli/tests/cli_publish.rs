@@ -12,6 +12,13 @@ fn gtdx_bin() -> PathBuf {
     p
 }
 
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
+}
+
 fn gate() -> bool {
     std::env::var("GTDX_RUN_BUILD").ok().as_deref() == Some("1")
 }
@@ -36,7 +43,7 @@ fn publish_writes_hierarchical_layout_and_receipt() {
     let home = tmp.path().join("home");
 
     // scaffold
-    let (ok, o, e) = run(Command::new(gtdx_bin())
+    let (ok, o, e) = run(gtdx_cmd()
         .arg("new")
         .arg("demo")
         .arg("--dir")
@@ -48,7 +55,7 @@ fn publish_writes_hierarchical_layout_and_receipt() {
     assert!(ok, "gtdx new failed: {o}\n{e}");
 
     // publish
-    let (ok, o, e) = run(Command::new(gtdx_bin())
+    let (ok, o, e) = run(gtdx_cmd()
         .env("GREENTIC_HOME", &home)
         .arg("publish")
         .arg("--manifest")
@@ -80,7 +87,7 @@ fn publish_is_deterministic_sha_across_runs() {
     let home2 = tmp.path().join("home2");
 
     assert!(
-        run(Command::new(gtdx_bin())
+        run(gtdx_cmd()
             .arg("new")
             .arg("demo")
             .arg("--dir")
@@ -94,7 +101,7 @@ fn publish_is_deterministic_sha_across_runs() {
 
     let sha_of = |home: &PathBuf| {
         assert!(
-            run(Command::new(gtdx_bin())
+            run(gtdx_cmd()
                 .env("GREENTIC_HOME", home)
                 .arg("publish")
                 .arg("--manifest")
@@ -127,7 +134,7 @@ fn publish_conflicts_without_force() {
     let proj = tmp.path().join("demo");
     let home = tmp.path().join("home");
     assert!(
-        run(Command::new(gtdx_bin())
+        run(gtdx_cmd()
             .arg("new")
             .arg("demo")
             .arg("--dir")
@@ -139,14 +146,14 @@ fn publish_conflicts_without_force() {
         .0
     );
     assert!(
-        run(Command::new(gtdx_bin())
+        run(gtdx_cmd()
             .env("GREENTIC_HOME", &home)
             .arg("publish")
             .arg("--manifest")
             .arg(proj.join("Cargo.toml")))
         .0
     );
-    let (ok, _o, e) = run(Command::new(gtdx_bin())
+    let (ok, _o, e) = run(gtdx_cmd()
         .env("GREENTIC_HOME", &home)
         .arg("publish")
         .arg("--manifest")
@@ -169,7 +176,7 @@ fn publish_to_local_then_install_round_trip() {
     let home = tmp.path().join("home");
 
     assert!(
-        run(Command::new(gtdx_bin())
+        run(gtdx_cmd()
             .arg("new")
             .arg("demo")
             .arg("--dir")
@@ -181,7 +188,7 @@ fn publish_to_local_then_install_round_trip() {
         .0
     );
     assert!(
-        run(Command::new(gtdx_bin())
+        run(gtdx_cmd()
             .env("GREENTIC_HOME", &home)
             .arg("publish")
             .arg("--manifest")
@@ -199,7 +206,7 @@ fn publish_to_local_then_install_round_trip() {
 
     // Install from the pack path into a SECOND home — proves round-trip.
     let home2 = tmp.path().join("home2");
-    let (ok, o, e) = run(Command::new(gtdx_bin())
+    let (ok, o, e) = run(gtdx_cmd()
         .env("GREENTIC_HOME", &home2)
         .arg("install")
         .arg(pack_path.to_string_lossy().to_string())

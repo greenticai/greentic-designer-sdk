@@ -1,0 +1,10 @@
+{
+  "nodeTypes": [
+    {
+      "type_id": "example.bad-config",
+      "label": "Bad config",
+      "category": "tools",
+      "config_schema": "{\"type\":1}"
+    }
+  ]
+}

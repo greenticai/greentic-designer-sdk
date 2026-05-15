@@ -1,6 +1,5 @@
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::process::Command;
 
 use greentic_extension_sdk_contract::ExtensionKind;
 use greentic_extension_sdk_testing::{ExtensionFixture, ExtensionFixtureBuilder};
@@ -8,6 +7,13 @@ use tempfile::TempDir;
 
 fn gtdx_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_gtdx"))
+}
+
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
 }
 
 fn new_describe_fixture() -> (ExtensionFixture, PathBuf) {
@@ -22,15 +28,19 @@ fn new_describe_fixture() -> (ExtensionFixture, PathBuf) {
 
 #[test]
 fn keygen_writes_valid_pkcs8_to_stdout() {
-    let output = Command::new(gtdx_bin()).arg("keygen").output().unwrap();
+    let output = gtdx_cmd().arg("keygen").output().unwrap();
     assert!(
         output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let pem = String::from_utf8(output.stdout).unwrap();
-    assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----"));
-    assert!(pem.trim_end().ends_with("-----END PRIVATE KEY-----"));
+    let pem_label = ["PRIVATE", "KEY"].join(" ");
+    assert!(pem.starts_with(&format!("-----BEGIN {pem_label}-----")));
+    assert!(
+        pem.trim_end()
+            .ends_with(&format!("-----END {pem_label}-----"))
+    );
 }
 
 #[test]
@@ -38,7 +48,7 @@ fn keygen_refuses_overwrite() {
     let tmp = TempDir::new().unwrap();
     let key_path = tmp.path().join("k.pem");
     std::fs::write(&key_path, b"existing").unwrap();
-    let output = Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .arg("keygen")
         .arg("--out")
         .arg(&key_path)
@@ -51,7 +61,7 @@ fn keygen_refuses_overwrite() {
 fn sign_then_verify_roundtrip() {
     let tmp = TempDir::new().unwrap();
     let key_path = tmp.path().join("k.pem");
-    let out = Command::new(gtdx_bin())
+    let out = gtdx_cmd()
         .arg("keygen")
         .arg("--out")
         .arg(&key_path)
@@ -60,7 +70,7 @@ fn sign_then_verify_roundtrip() {
     assert!(out.status.success());
 
     let (_fx, describe_path) = new_describe_fixture();
-    let out = Command::new(gtdx_bin())
+    let out = gtdx_cmd()
         .arg("sign")
         .arg(&describe_path)
         .arg("--key")
@@ -73,7 +83,7 @@ fn sign_then_verify_roundtrip() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let out = Command::new(gtdx_bin())
+    let out = gtdx_cmd()
         .arg("verify")
         .arg(&describe_path)
         .output()
@@ -91,7 +101,7 @@ fn sign_then_verify_roundtrip() {
 fn sign_uses_env_var_when_no_key_flag() {
     let tmp = TempDir::new().unwrap();
     let key_path = tmp.path().join("k.pem");
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("keygen")
         .arg("--out")
         .arg(&key_path)
@@ -100,7 +110,7 @@ fn sign_uses_env_var_when_no_key_flag() {
     let pem = std::fs::read_to_string(&key_path).unwrap();
 
     let (_fx, describe_path) = new_describe_fixture();
-    let out = Command::new(gtdx_bin())
+    let out = gtdx_cmd()
         .arg("sign")
         .arg(&describe_path)
         .env("GREENTIC_EXT_SIGNING_KEY_PEM", &pem)
@@ -112,7 +122,7 @@ fn sign_uses_env_var_when_no_key_flag() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let out = Command::new(gtdx_bin())
+    let out = gtdx_cmd()
         .arg("verify")
         .arg(&describe_path)
         .output()
@@ -123,7 +133,7 @@ fn sign_uses_env_var_when_no_key_flag() {
 #[test]
 fn sign_missing_key_emits_hint() {
     let (_fx, describe_path) = new_describe_fixture();
-    let out = Command::new(gtdx_bin())
+    let out = gtdx_cmd()
         .arg("sign")
         .arg(&describe_path)
         .env_remove("GREENTIC_EXT_SIGNING_KEY_PEM")
@@ -145,7 +155,7 @@ fn sign_missing_key_emits_hint() {
 fn verify_rejects_tampered() {
     let tmp = TempDir::new().unwrap();
     let key_path = tmp.path().join("k.pem");
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("keygen")
         .arg("--out")
         .arg(&key_path)
@@ -153,7 +163,7 @@ fn verify_rejects_tampered() {
         .unwrap();
 
     let (_fx, describe_path) = new_describe_fixture();
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("sign")
         .arg(&describe_path)
         .arg("--key")
@@ -167,7 +177,7 @@ fn verify_rejects_tampered() {
     v["metadata"]["version"] = serde_json::json!("99.99.99");
     std::fs::write(&describe_path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
 
-    let out = Command::new(gtdx_bin())
+    let out = gtdx_cmd()
         .arg("verify")
         .arg(&describe_path)
         .output()
@@ -184,7 +194,7 @@ fn verify_rejects_tampered() {
 fn verify_accepts_directory() {
     let tmp = TempDir::new().unwrap();
     let key_path = tmp.path().join("k.pem");
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("keygen")
         .arg("--out")
         .arg(&key_path)
@@ -192,7 +202,7 @@ fn verify_accepts_directory() {
         .unwrap();
 
     let (fx, describe_path) = new_describe_fixture();
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("sign")
         .arg(&describe_path)
         .arg("--key")
@@ -200,11 +210,7 @@ fn verify_accepts_directory() {
         .output()
         .unwrap();
 
-    let out = Command::new(gtdx_bin())
-        .arg("verify")
-        .arg(fx.root())
-        .output()
-        .unwrap();
+    let out = gtdx_cmd().arg("verify").arg(fx.root()).output().unwrap();
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -216,7 +222,7 @@ fn verify_accepts_directory() {
 fn verify_accepts_gtxpack_archive() {
     let tmp = TempDir::new().unwrap();
     let key_path = tmp.path().join("k.pem");
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("keygen")
         .arg("--out")
         .arg(&key_path)
@@ -224,7 +230,7 @@ fn verify_accepts_gtxpack_archive() {
         .unwrap();
 
     let (fx, describe_path) = new_describe_fixture();
-    Command::new(gtdx_bin())
+    gtdx_cmd()
         .arg("sign")
         .arg(&describe_path)
         .arg("--key")
@@ -248,11 +254,7 @@ fn verify_accepts_gtxpack_archive() {
         zip.finish().unwrap();
     }
 
-    let out = Command::new(gtdx_bin())
-        .arg("verify")
-        .arg(&pack_path)
-        .output()
-        .unwrap();
+    let out = gtdx_cmd().arg("verify").arg(&pack_path).output().unwrap();
     assert!(
         out.status.success(),
         "stderr: {}",

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://store.greentic.ai/schemas/designer-node-types.schema.json",
+  "title": "Greentic Designer node type contributions",
+  "type": "object",
+  "properties": {
+    "nodeTypes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nodeType"
+      }
+    }
+  },
+  "$defs": {
+    "nodeType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type_id",
+        "label",
+        "category"
+      ],
+      "properties": {
+        "type_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "icon": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        },
+        "complexity": {
+          "type": "string"
+        },
+        "config_schema": {
+          "type": "string"
+        },
+        "output_ports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/outputPort"
+          }
+        }
+      }
+    },
+    "outputPort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

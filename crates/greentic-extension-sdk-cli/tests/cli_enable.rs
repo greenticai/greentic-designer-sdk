@@ -10,12 +10,19 @@ fn gtdx_bin() -> std::path::PathBuf {
     p
 }
 
+fn gtdx_cmd() -> std::process::Command {
+    let bin = gtdx_bin();
+    // Integration tests execute the locally built gtdx binary from Cargo output.
+    // foxguard: ignore[rs/no-command-injection]
+    std::process::Command::new(bin)
+}
+
 #[test]
 fn enable_writes_state_file() {
     let tmp = TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join("extensions/design/test.foo-0.1.0")).unwrap();
 
-    let status = std::process::Command::new(gtdx_bin())
+    let status = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -34,7 +41,7 @@ fn enable_writes_state_file() {
 #[test]
 fn enable_errors_when_not_installed() {
     let tmp = TempDir::new().unwrap();
-    let output = std::process::Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -54,7 +61,7 @@ fn enable_errors_on_ambiguous_version() {
     std::fs::create_dir_all(tmp.path().join("extensions/design/test.foo-0.1.0")).unwrap();
     std::fs::create_dir_all(tmp.path().join("extensions/design/test.foo-0.2.0")).unwrap();
 
-    let output = std::process::Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args(["--home", tmp.path().to_str().unwrap(), "enable", "test.foo"])
         .output()
         .unwrap();
@@ -73,7 +80,7 @@ fn enable_does_not_match_extension_with_dashed_id_prefix() {
 
     // Asking to enable `greentic.foo` (the prefix-only id) must FAIL with
     // "not installed" — must not silently match the dashed-id dir.
-    let output = std::process::Command::new(gtdx_bin())
+    let output = gtdx_cmd()
         .args([
             "--home",
             tmp.path().to_str().unwrap(),

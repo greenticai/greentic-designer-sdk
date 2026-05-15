@@ -2,6 +2,7 @@
 
 pub mod artifact;
 pub mod capability;
+pub mod contributions;
 pub mod describe;
 pub mod error;
 pub mod hex;
@@ -15,6 +16,10 @@ pub use self::artifact::{
     validate_artifact_tool_output, validate_generated_artifact,
 };
 pub use self::capability::{CapabilityId, CapabilityRef, CapabilityVersion};
+pub use self::contributions::{
+    Contributions, DesignerNodeType, NodeOutputPort, validate_contributions,
+    validate_contributions_schema, validate_node_type,
+};
 pub use self::describe::{DescribeJson, RuntimeGtpack};
 pub use self::error::ContractError;
 pub use self::kind::ExtensionKind;
