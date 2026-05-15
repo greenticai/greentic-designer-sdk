@@ -57,7 +57,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ExtensionRegistry for FakeRegistry {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "fake"
         }
 
