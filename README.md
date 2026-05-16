@@ -59,7 +59,7 @@ The canonical WebAssembly Component Model interface specifications for all exten
 - `extension-deploy.wit` — `DeployExtension` world (deployment)
 - `extension-provider.wit` — `ProviderExtension` world
 
-Versions are pinned at `0.4.0`. The `gtdx` binary embeds a copy under `crates/greentic-extension-sdk-cli/embedded-wit/` for offline scaffolding.
+The WIT package versions are declared as `@0.1.0` in each `wit/*.wit` file (this is the contract surface scaffolded extensions import against — see `CONTRACT_VERSION` in `crates/greentic-extension-sdk-cli/src/scaffold/embedded.rs`). The crate / workspace ships at the version declared in the root `Cargo.toml`. The `gtdx` binary embeds a copy of the current WIT package set under `crates/greentic-extension-sdk-cli/embedded-wit/$CARGO_PKG_VERSION/` (auto-populated from `wit/` by `build.rs`) so scaffolding works offline without network access to crates.io.
 
 ## Local development
 
