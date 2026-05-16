@@ -3,6 +3,8 @@
 //! Builders for synthetic extensions and gtxpack ZIP helpers used across
 //! the runtime and CLI test suites.
 
+#![forbid(unsafe_code)]
+
 mod fixture;
 mod gtxpack;
 mod provider_fixtures;

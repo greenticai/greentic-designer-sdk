@@ -1,5 +1,7 @@
 //! Registry client + install lifecycle for Greentic Designer Extensions.
 
+#![forbid(unsafe_code)]
+
 pub mod config;
 pub mod credentials;
 pub mod error;
