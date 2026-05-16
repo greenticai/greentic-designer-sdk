@@ -1,5 +1,7 @@
 //! Contract types + describe.json schema for Greentic Designer Extensions.
 
+#![forbid(unsafe_code)]
+
 pub mod capability;
 pub mod compat;
 pub mod component_id;
