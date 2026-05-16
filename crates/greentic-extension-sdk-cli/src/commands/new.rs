@@ -189,7 +189,7 @@ fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<usize> {
     }
     let lock = ContractLock {
         contract_version: CONTRACT_VERSION.to_string(),
-        generated_by: format!("gtdx {CONTRACT_VERSION}"),
+        generated_by: format!("gtdx {}", env!("CARGO_PKG_VERSION")),
         generated_at: now_iso8601(),
         files: lock_files,
     };
