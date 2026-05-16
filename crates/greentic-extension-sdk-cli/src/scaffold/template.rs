@@ -192,4 +192,43 @@ mod tests {
         assert!(entries.iter().any(|e| e.dst_rel == "describe.json"));
         assert!(entries.iter().any(|e| e.dst_rel == "src/lib.rs"));
     }
+
+    /// Audit P1 (E.3.a): every kind must scaffold a rust-toolchain.toml
+    /// pinned to the same workspace toolchain. Without this the user's
+    /// `cargo build` picks up whatever's in their PATH and silently
+    /// produces wasm with the wrong feature set.
+    #[test]
+    fn every_kind_template_ships_rust_toolchain_pinned_to_1_95_0() {
+        for kind in ["design", "bundle", "deploy", "provider", "wasm-component"] {
+            let entries = load_templates_kind(kind);
+            let toolchain = entries
+                .iter()
+                .find(|e| e.dst_rel == "rust-toolchain.toml")
+                .unwrap_or_else(|| panic!("kind {kind} missing rust-toolchain.toml template"));
+            let content = std::str::from_utf8(toolchain.src_bytes).expect("utf8");
+            assert!(
+                content.contains("channel = \"1.95.0\""),
+                "kind {kind} toolchain template does not pin 1.95.0:\n{content}",
+            );
+        }
+    }
+
+    /// Audit P1 (E.3.b): all four "real" extension kinds must scaffold
+    /// `wit-bindgen-rt = "0.41"` (the current pinned version). 0.35 emits
+    /// older intrinsics that newer cargo-component rejects.
+    #[test]
+    fn every_kind_template_ships_wit_bindgen_rt_0_41() {
+        for kind in ["design", "bundle", "deploy", "provider"] {
+            let entries = load_templates_kind(kind);
+            let cargo_toml = entries
+                .iter()
+                .find(|e| e.dst_rel == "Cargo.toml")
+                .unwrap_or_else(|| panic!("kind {kind} missing Cargo.toml template"));
+            let content = std::str::from_utf8(cargo_toml.src_bytes).expect("utf8");
+            assert!(
+                content.contains("wit-bindgen-rt = { version = \"0.41\""),
+                "kind {kind} Cargo.toml does not pin wit-bindgen-rt 0.41:\n{content}",
+            );
+        }
+    }
 }
