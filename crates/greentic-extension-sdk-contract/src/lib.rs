@@ -33,7 +33,9 @@ pub use self::manifest::{
     build_manifest, verify_archive_against_manifest,
 };
 pub use self::migration::{MigrationReport, migrate_v0_4_x_value};
-pub use self::pack_writer::{PackEntry, PackWriterError, build_gtxpack, sha256_hex};
+pub use self::pack_writer::{
+    PackEntry, PackWriterError, build_gtxpack, build_gtxpack_with_manifest, sha256_hex,
+};
 pub use self::runtime_component::RuntimeComponent;
 pub use self::sha256::Sha256;
 pub use self::signature::{
