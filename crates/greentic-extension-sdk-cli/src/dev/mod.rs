@@ -3,6 +3,7 @@
 pub mod builder;
 pub mod event;
 pub mod installer;
+pub mod mount;
 pub mod packer;
 pub mod state;
 pub mod watcher;

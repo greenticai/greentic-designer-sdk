@@ -53,6 +53,13 @@ pub struct Args {
     #[arg(long, default_value = "./Cargo.toml")]
     pub manifest: PathBuf,
 
+    /// Mount mode: build + pack + install the extension at `<path>` once,
+    /// exactly the way `gtdx install` would. Conflicts with `--watch` and
+    /// `--once`. Intended for dev-loop "drop a built extension into a fresh
+    /// runtime" iterations without the file watcher.
+    #[arg(long, conflicts_with_all = ["watch", "once"])]
+    pub mount: Option<PathBuf>,
+
     /// Force a full rebuild by running `cargo clean -p <crate>` first
     // Reserved: consumed in future tracks.
     #[allow(dead_code)]
@@ -69,6 +76,9 @@ fn default_debounce_ms() -> u64 {
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
+    if let Some(mount_dir) = &args.mount {
+        return crate::dev::mount::run_mount(mount_dir, home, args.release).await;
+    }
     let project_dir = project_dir_from_manifest(&args.manifest)?;
     let profile = if args.release {
         Profile::Release
