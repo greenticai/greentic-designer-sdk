@@ -7,6 +7,7 @@
 
 mod fixture;
 mod gtxpack;
+pub mod mock_host;
 mod provider_fixtures;
 
 pub use self::fixture::{ExtensionFixture, ExtensionFixtureBuilder};
