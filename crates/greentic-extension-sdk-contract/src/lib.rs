@@ -11,6 +11,7 @@ pub mod error;
 pub mod hex;
 pub mod kind;
 pub mod localization;
+pub mod manifest;
 pub mod migration;
 pub mod pack_writer;
 pub mod runtime_component;
@@ -27,6 +28,10 @@ pub use self::describe::{DescribeJson, Signature, SignatureAlgorithm};
 pub use self::error::ContractError;
 pub use self::kind::ExtensionKind;
 pub use self::localization::{Locale, LocalizedString};
+pub use self::manifest::{
+    MANIFEST_ENTRY_NAME, MANIFEST_SCHEMA_V1, Manifest, ManifestEntry, ManifestError,
+    build_manifest, verify_archive_against_manifest,
+};
 pub use self::migration::{MigrationReport, migrate_v0_4_x_value};
 pub use self::pack_writer::{PackEntry, PackWriterError, build_gtxpack, sha256_hex};
 pub use self::runtime_component::RuntimeComponent;
