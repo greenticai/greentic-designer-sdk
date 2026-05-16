@@ -56,6 +56,8 @@ enum Command {
     Sign(commands::sign::Args),
     /// Verify an extension's signature (file, directory, or .gtxpack)
     Verify(commands::verify::Args),
+    /// Lint a describe.json for cross-field invariants beyond JSON Schema
+    Lint(commands::lint::Args),
     /// Print version
     Version,
 }
@@ -88,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Disable(args) => commands::disable::run(&args, &home),
         Command::Sign(args) => commands::sign::run(&args, &home),
         Command::Verify(args) => commands::verify::run(&args, &home),
+        Command::Lint(args) => commands::lint::run(&args, &home),
         Command::Version => {
             println!("gtdx {}", env!("CARGO_PKG_VERSION"));
             Ok(())

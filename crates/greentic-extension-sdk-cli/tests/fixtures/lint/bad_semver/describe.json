@@ -1,0 +1,36 @@
+{
+  "$schema": "https://store.greentic.ai/schemas/describe-v2.json",
+  "apiVersion": "greentic.ai/v2",
+  "kind": "DesignExtension",
+  "compat": {
+    "min_designer_version": ">=1.2.0",
+    "min_runner_version": "^0.12.0",
+    "contract_version": "1.2.0"
+  },
+  "metadata": {
+    "id": "com.example.badsemver",
+    "name": "badsemver",
+    "version": "not-a-version",
+    "summary": "Bad semver fixture.",
+    "author": { "name": "Test" },
+    "license": "MIT"
+  },
+  "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
+  "capabilities": { "offered": [], "required": [] },
+  "runtime": {
+    "components": {
+      "badsemver": {
+        "gtpack": {
+          "file": "extension.wasm",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pack_id": "com.example.badsemver",
+          "component_version": "0.1.0"
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "world": "greentic:badsemver/extension@1.0.0"
+      }
+    },
+    "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+  },
+  "contributions": {}
+}

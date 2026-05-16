@@ -5,6 +5,7 @@ pub mod enable;
 pub mod info;
 pub mod install;
 pub mod keygen;
+pub mod lint;
 pub mod list;
 pub mod login;
 pub mod new;
