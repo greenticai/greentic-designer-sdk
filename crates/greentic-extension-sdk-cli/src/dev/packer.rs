@@ -3,7 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use greentic_extension_sdk_contract::pack_writer::{PackEntry, build_gtxpack, sha256_hex};
+use greentic_extension_sdk_contract::pack_writer::{
+    PackEntry, build_gtxpack_with_manifest, sha256_hex,
+};
 use walkdir::WalkDir;
 
 /// Summary of a packed `.gtxpack`.
@@ -121,7 +123,12 @@ pub fn build_pack(
     if let Some(parent) = output_pack.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let zip_bytes = build_gtxpack(entries).map_err(|e| anyhow::anyhow!("build_gtxpack: {e}"))?;
+    // Use the manifest-aware packer (D.4.2/D.4.3) so the produced .gtxpack
+    // carries a `manifest.json` listing every entry's sha256. Runtime
+    // verification (verify_archive_against_manifest) detects post-publish
+    // tampering of any file, not just describe.json.
+    let zip_bytes = build_gtxpack_with_manifest(entries)
+        .map_err(|e| anyhow::anyhow!("build_gtxpack_with_manifest: {e}"))?;
     std::fs::write(output_pack, &zip_bytes)?;
 
     let size = u64::try_from(zip_bytes.len()).unwrap_or(u64::MAX);
@@ -410,10 +417,17 @@ mod tests {
             .map(|i| zip.by_index(i).unwrap().name().to_string())
             .collect();
 
-        // Only describe.json + extension.wasm, no runtime/ entry.
-        assert_eq!(names.len(), 2, "expected exactly 2 entries; got: {names:?}");
+        // describe.json + extension.wasm + manifest.json (D.4.2: every
+        // pack now carries a whole-archive integrity manifest); no
+        // runtime/ entry.
+        assert_eq!(
+            names.len(),
+            3,
+            "expected describe + wasm + manifest; got: {names:?}"
+        );
         assert!(names.iter().any(|n| n == "describe.json"));
         assert!(names.iter().any(|n| n == "extension.wasm"));
+        assert!(names.iter().any(|n| n == "manifest.json"));
     }
 
     #[test]
@@ -432,7 +446,8 @@ mod tests {
         let out = tmp.path().join("out.gtxpack");
         let info = build_pack(tmp.path(), &wasm, &out).unwrap();
 
-        // Must succeed with exactly 2 entries (describe + wasm).
+        // describe + wasm + manifest.json (D.4.2: every pack now carries a
+        // whole-archive integrity manifest).
         let file = File::open(&out).unwrap();
         let mut zip = zip::ZipArchive::new(file).unwrap();
         let names: Vec<_> = (0..zip.len())
@@ -440,8 +455,8 @@ mod tests {
             .collect();
         assert_eq!(
             names.len(),
-            2,
-            "null gtpack should produce 2 entries; got: {names:?}"
+            3,
+            "null gtpack should produce describe + wasm + manifest; got: {names:?}"
         );
         let _ = info;
     }
