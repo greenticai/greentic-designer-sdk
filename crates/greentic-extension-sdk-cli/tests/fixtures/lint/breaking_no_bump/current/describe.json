@@ -1,0 +1,40 @@
+{
+  "$schema": "https://store.greentic.ai/schemas/describe-v2.json",
+  "apiVersion": "greentic.ai/v2",
+  "kind": "DesignExtension",
+  "compat": {
+    "min_designer_version": ">=1.2.0",
+    "min_runner_version": "^0.12.0",
+    "contract_version": "1.2.0"
+  },
+  "metadata": {
+    "id": "com.example.breaks",
+    "name": "breaks",
+    "version": "0.1.0",
+    "summary": "Current dir: removed tool_b but kept version 0.1.0.",
+    "author": { "name": "Test" },
+    "license": "MIT"
+  },
+  "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
+  "capabilities": { "offered": [], "required": [] },
+  "runtime": {
+    "components": {
+      "breaks": {
+        "gtpack": {
+          "file": "extension.wasm",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pack_id": "com.example.breaks",
+          "component_version": "0.1.0"
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "world": "greentic:breaks/extension@1.0.0"
+      }
+    },
+    "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+  },
+  "contributions": {
+    "tools": [
+      { "id": "tool_a", "name": "tool_a", "runtime_ref": "breaks" }
+    ]
+  }
+}
