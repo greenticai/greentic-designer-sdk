@@ -21,16 +21,82 @@ pub struct PackInfo {
     pub ext_kind: String,
 }
 
+/// Walk `describe.runtime.components.<key>.gtpack` and append every referenced
+/// file (other than `extension.wasm` and the output pack itself) to `entries`,
+/// sha256-verifying each. Returns silently if the components map is absent or
+/// empty (Design/Bundle/Deploy extensions with self-contained wasm).
+fn collect_runtime_component_files(
+    describe: &serde_json::Value,
+    project_dir: &Path,
+    output_pack: &Path,
+    entries: &mut Vec<PackEntry>,
+) -> anyhow::Result<()> {
+    let output_pack_name = output_pack
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let Some(components) = describe["runtime"]
+        .get("components")
+        .and_then(|v| v.as_object())
+    else {
+        return Ok(());
+    };
+    let mut seen_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (comp_key, comp) in components {
+        let Some(gtpack) = comp.get("gtpack").filter(|v| !v.is_null()) else {
+            continue;
+        };
+        let file_rel = gtpack["file"].as_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "describe.runtime.components.{comp_key}.gtpack.file missing or not a string"
+            )
+        })?;
+        if file_rel == "extension.wasm" || file_rel == output_pack_name {
+            continue;
+        }
+        if !seen_files.insert(file_rel.to_string()) {
+            continue;
+        }
+        let expected_sha = gtpack["sha256"].as_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "describe.runtime.components.{comp_key}.gtpack.sha256 missing or not a string"
+            )
+        })?;
+        let abs = project_dir.join(file_rel);
+        if !abs.exists() {
+            anyhow::bail!(
+                "describe.runtime.components.{comp_key}.gtpack.file = {file_rel:?} but file not found at {}.\n\
+                 Multi-component extensions must stage their runtime .gtpack into the project before publish.\n\
+                 For pilot/dev, ship a placeholder file at the declared path with sha256 matching describe.json.",
+                abs.display()
+            );
+        }
+        let bytes = std::fs::read(&abs)
+            .map_err(|e| anyhow::anyhow!("read runtime gtpack at {}: {e}", abs.display()))?;
+        let actual_sha = sha256_hex(&bytes);
+        if actual_sha != expected_sha {
+            anyhow::bail!(
+                "describe.runtime.components.{comp_key}.gtpack.sha256 mismatch for {file_rel}:\n\
+                 declared: {expected_sha}\n\
+                 actual:   {actual_sha}\n\
+                 Either rebuild the runtime + update describe.json, or update describe.json to match the staged file."
+            );
+        }
+        entries.push(PackEntry::file(file_rel.to_string(), bytes));
+    }
+    Ok(())
+}
+
 /// Build a `.gtxpack` at `output_pack` from `project_dir` + the already-built
 /// `wasm_path`. The ZIP contains `describe.json`, the wasm renamed to
-/// `extension.wasm` (matches `runtime.component` default), and any optional
-/// asset dirs that exist (`i18n/`, `schemas/`, `prompts/`, `assets/`).
-/// `assets/` is what `describe.metadata.icon` resolves against once the
-/// extension is unpacked, so omitting it leaves consumers with a 404 on
-/// the icon endpoint.
+/// `extension.wasm`, and any optional asset dirs that exist (`i18n/`,
+/// `schemas/`, `prompts/`, `assets/`). `assets/` is what `describe.metadata.icon`
+/// resolves against once the extension is unpacked.
 ///
-/// For Provider extensions, if `describe.runtime.gtpack` is set (non-null),
-/// the referenced file is read, sha256-verified, and embedded in the archive.
+/// For multi-component extensions (v2 schema), each entry in
+/// `describe.runtime.components.<key>.gtpack` whose `file` is not
+/// `extension.wasm` is read, sha256-verified, and embedded in the archive at
+/// the declared project-relative path (e.g. `runtime/provider.gtpack`).
 pub fn build_pack(
     project_dir: &Path,
     wasm_path: &Path,
@@ -59,44 +125,7 @@ pub fn build_pack(
         PackEntry::file("extension.wasm", std::fs::read(wasm_path)?),
     ];
 
-    // Provider extensions embed a runtime .gtpack alongside the metadata WASM.
-    // describe.runtime.gtpack is required when kind=ProviderExtension (enforced
-    // at deserialize time) and points at a project-relative file path with a
-    // declared sha256 that the install path verifies.
-    //
-    // Value::get returns Some(Value::Null) for present-but-null fields, so
-    // the .filter(|v| !v.is_null()) correctly skips Design/Bundle/Deploy
-    // extensions that have no gtpack field or have it explicitly set to null.
-    if let Some(gtpack) = describe["runtime"].get("gtpack").filter(|v| !v.is_null()) {
-        let file_rel = gtpack["file"].as_str().ok_or_else(|| {
-            anyhow::anyhow!("describe.runtime.gtpack.file missing or not a string")
-        })?;
-        let expected_sha = gtpack["sha256"].as_str().ok_or_else(|| {
-            anyhow::anyhow!("describe.runtime.gtpack.sha256 missing or not a string")
-        })?;
-        let abs = project_dir.join(file_rel);
-        if !abs.exists() {
-            anyhow::bail!(
-                "describe.runtime.gtpack.file = {:?} but file not found at {}.\n\
-                 Provider extensions must stage their runtime .gtpack into the project before publish.\n\
-                 For pilot/dev, ship a placeholder file at the declared path with sha256 matching describe.json.",
-                file_rel,
-                abs.display()
-            );
-        }
-        let bytes = std::fs::read(&abs)
-            .map_err(|e| anyhow::anyhow!("read runtime gtpack at {}: {e}", abs.display()))?;
-        let actual_sha = sha256_hex(&bytes);
-        if actual_sha != expected_sha {
-            anyhow::bail!(
-                "describe.runtime.gtpack.sha256 mismatch for {file_rel}:\n\
-                 declared: {expected_sha}\n\
-                 actual:   {actual_sha}\n\
-                 Either rebuild the runtime + update describe.json, or update describe.json to match the staged file."
-            );
-        }
-        entries.push(PackEntry::file(file_rel.to_string(), bytes));
-    }
+    collect_runtime_component_files(&describe, project_dir, output_pack, &mut entries)?;
 
     for asset_dir in ["i18n", "schemas", "prompts", "assets"] {
         let src = project_dir.join(asset_dir);
@@ -157,12 +186,12 @@ mod tests {
 
     fn make_project(root: &Path) -> PathBuf {
         let desc = br#"{
-  "apiVersion": "greentic.ai/v1",
+  "apiVersion": "greentic.ai/v2",
   "kind": "DesignExtension",
   "metadata": {"id": "com.example.demo", "name": "demo", "version": "0.1.0", "summary": "x", "author": {"name": "a"}, "license": "Apache-2.0"},
   "engine": {"greenticDesigner": "^0.1.0", "extRuntime": "^0.1.0"},
   "capabilities": {"offered": [], "required": []},
-  "runtime": {"component": "extension.wasm", "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}},
+  "runtime": {"components": {}, "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}},
   "contributions": {}
 }"#;
         std::fs::write(root.join("describe.json"), desc).unwrap();
@@ -255,10 +284,16 @@ mod tests {
 
     // ── Provider extension tests ─────────────────────────────────────────────
 
-    /// Write a minimal provider describe.json with the given runtime.gtpack value.
+    /// Write a minimal provider describe.json with a single `provider` component
+    /// whose `gtpack` block uses `gtpack_field` (or `null` to test the absent case).
     fn write_provider_describe(root: &Path, gtpack_field: &serde_json::Value) {
+        let component = if gtpack_field.is_null() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ "gtpack": gtpack_field })
+        };
         let desc = serde_json::json!({
-            "apiVersion": "greentic.ai/v1",
+            "apiVersion": "greentic.ai/v2",
             "kind": "ProviderExtension",
             "metadata": {
                 "id": "com.example.provider",
@@ -271,8 +306,7 @@ mod tests {
             "engine": {"greenticDesigner": "^0.1.0", "extRuntime": "^0.1.0"},
             "capabilities": {"offered": [], "required": []},
             "runtime": {
-                "component": "extension.wasm",
-                "gtpack": gtpack_field,
+                "components": { "provider": component },
                 "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}
             },
             "contributions": {}
@@ -431,9 +465,9 @@ mod tests {
     }
 
     #[test]
-    fn provider_pack_handles_null_gtpack_field() {
-        // describe.json with runtime.gtpack: null explicitly — should behave
-        // like absent field (no extra entry, no error).
+    fn provider_pack_handles_absent_gtpack_field() {
+        // Component without a gtpack key — should behave like the design case
+        // (no extra entry, no error).
         let tmp = tempfile::tempdir().unwrap();
 
         write_provider_describe(tmp.path(), &serde_json::Value::Null);
@@ -456,7 +490,7 @@ mod tests {
         assert_eq!(
             names.len(),
             3,
-            "null gtpack should produce describe + wasm + manifest; got: {names:?}"
+            "absent gtpack should produce describe + wasm + manifest; got: {names:?}"
         );
         let _ = info;
     }
