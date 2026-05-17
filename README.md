@@ -1,6 +1,6 @@
 # greentic-designer-sdk
 
-Public SDK for authoring [Greentic Designer](https://greentic.ai) extensions — Bundle, Design, Deploy, and Provider extension kinds.
+Public SDK for authoring [Greentic Designer](https://greentic.ai) extensions — Bundle, Design, Deploy, Provider, WASM-component, and LLM extension kinds.
 
 ## What this is
 
@@ -32,12 +32,36 @@ This installs the `gtdx` binary.
 ### Scaffold and build an extension
 
 ```bash
-gtdx new my-bundle-ext --kind bundle
-cd my-bundle-ext
+gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm
+cd my-ext
 gtdx dev --once
 ```
 
-This rebuilds, packs, and produces `dist/<name>-<version>.gtxpack`.
+This rebuilds, packs, and produces `dist/<name>-<version>.gtxpack`. The
+pack includes a `manifest.json` integrity ledger (sha256 of every entry)
+since 1.2.0-research; runtime install verifies it.
+
+### Lint before publish
+
+```bash
+gtdx lint --dir .
+```
+
+Catches cross-field invariants the JSON Schema can't (dangling
+`runtime_ref`, capability self-cycles, invalid semver, breaking changes
+without a version bump). Each rule has a stable code; see
+`crates/greentic-extension-sdk-cli/src/commands/lint.rs` for the
+catalogue.
+
+### Quick dev-loop install
+
+```bash
+gtdx dev --mount ./path/to/built/ext
+```
+
+One-shot strict-parity install — build + pack + install the same way
+production install would, but for an already-built source dir (no
+watcher loop).
 
 ### Sign and publish
 
@@ -47,6 +71,17 @@ gtdx sign --key my-key.pem ./
 gtdx login                       # auth to Greentic Store
 gtdx publish ./
 ```
+
+## Audit + roadmap
+
+The May 2026 extensions audit completion summary, design rationale, and
+PR map for every shipped phase live under
+[`docs/superpowers/`](./docs/superpowers/):
+
+- [`specs/2026-05-13-extensions-1.0-cleanup.md`](./docs/superpowers/specs/2026-05-13-extensions-1.0-cleanup.md) — umbrella spec + full PR map
+- [`plans/2026-05-13-contract-0.5.0-bump.md`](./docs/superpowers/plans/2026-05-13-contract-0.5.0-bump.md) — Phase A (contract → v2 + migration)
+- [`plans/2026-05-13-security-hardening.md`](./docs/superpowers/plans/2026-05-13-security-hardening.md) — Phase D (D.5 trust root blocked on org decision)
+- [`plans/2026-05-13-dx-cleanup.md`](./docs/superpowers/plans/2026-05-13-dx-cleanup.md) — Phase E (DX cleanup, all shipped)
 
 ## WIT specification
 
