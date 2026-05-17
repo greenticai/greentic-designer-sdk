@@ -1,7 +1,12 @@
 {
-  "$schema": "https://store.greentic.ai/schemas/describe-v1.json",
-  "apiVersion": "greentic.ai/v1",
+  "$schema": "https://store.greentic.ai/schemas/describe-v2.json",
+  "apiVersion": "greentic.ai/v2",
   "kind": "DesignExtension",
+  "compat": {
+    "min_designer_version": ">={{sdk_version}}",
+    "min_runner_version": "^{{sdk_version}}",
+    "contract_version": "{{sdk_version}}"
+  },
   "metadata": {
     "id": "{{id}}",
     "name": "{{name}}",
@@ -13,12 +18,31 @@
     "license": "{{license}}"
   },
   "engine": {
-    "greenticDesigner": "^{{contract_version}}",
-    "extRuntime": "^{{contract_version}}"
+    "greenticDesigner": ">={{sdk_version}}",
+    "extRuntime": "^{{sdk_version}}"
   },
   "capabilities": {
     "offered": [],
     "required": []
+  },
+  "runtime": {
+    "components": {
+      "{{runtime_ref_key}}": {
+        "gtpack": {
+          "file": "extension.wasm",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pack_id": "{{id}}",
+          "component_version": "{{version}}"
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "world": "{{id_wit}}/extension@1.0.0"
+      }
+    },
+    "permissions": {
+      "network": [],
+      "secrets": [],
+      "callExtensionKinds": []
+    }
   },
   "contributions": {
     "nodeTypes": [
@@ -33,22 +57,9 @@
         "output_ports": [
           { "name": "success", "label": "Success" },
           { "name": "error", "label": "Error" }
-        ]
+        ],
+        "runtime_ref": "{{runtime_ref_key}}"
       }
     ]
-  },
-  "runtime": {
-    "component": "extension.wasm",
-    "gtpack": {
-      "file": "runtime/REPLACE_ME.gtpack",
-      "sha256": "REPLACE_AT_BUILD",
-      "pack_id": "{{id}}",
-      "component_version": "0.1.0"
-    },
-    "permissions": {
-      "network": [],
-      "secrets": [],
-      "callExtensionKinds": []
-    }
   }
 }

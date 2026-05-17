@@ -153,6 +153,18 @@ fn build_context(args: &Args, id: &str, author: &str) -> Context {
     ctx.set("author", author);
     ctx.set("license", &args.license);
     ctx.set("contract_version", CONTRACT_VERSION);
+    // `sdk_version` is the gtdx CLI / SDK crate version (the toolchain that
+    // generated this scaffold). v2 describe.json templates use it for
+    // `engine.*` + `compat.*` so scaffolds pin to the same SDK line that
+    // produced them, independent of the WIT contract `CONTRACT_VERSION`
+    // (which tracks the wit-package @version, evolves slower).
+    ctx.set("sdk_version", env!("CARGO_PKG_VERSION"));
+    // `runtime_ref_key` is the key used in v2 `runtime.components` map and
+    // in every `nodeTypes[].runtime_ref` / `tools[].runtime_ref`. Default
+    // is the last dotted segment of the extension id (matches the
+    // dw-canvas + dw-composers convention we shipped in #7 / #21).
+    let runtime_ref_key = id.split('.').next_back().unwrap_or(id).to_string();
+    ctx.set("runtime_ref_key", &runtime_ref_key);
     ctx
 }
 
