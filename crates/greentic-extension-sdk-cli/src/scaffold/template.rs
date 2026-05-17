@@ -241,6 +241,47 @@ mod tests {
         }
     }
 
+    /// Every kind's `describe.json` template must emit v2 shape — after
+    /// the v1->v2 ecosystem migration (PR-series ending in greentic-biz/
+    /// greentic-designer-extensions#58), scaffolded extensions that still
+    /// emit `apiVersion: greentic.ai/v1` won't round-trip through the
+    /// 1.2.x runtime without manual editing. This guard catches any
+    /// future template that regresses to v1 shape.
+    #[test]
+    fn every_kind_describe_template_is_v2() {
+        for kind in [
+            "design",
+            "bundle",
+            "deploy",
+            "provider",
+            "wasm-component",
+            "llm",
+        ] {
+            let entries = load_templates_kind(kind);
+            let describe = entries
+                .iter()
+                .find(|e| e.dst_rel == "describe.json")
+                .unwrap_or_else(|| panic!("kind {kind} missing describe.json template"));
+            let content = std::str::from_utf8(describe.src_bytes).expect("utf8");
+            assert!(
+                content.contains("\"apiVersion\": \"greentic.ai/v2\""),
+                "kind {kind} describe.json template not v2:\n{content}",
+            );
+            assert!(
+                content.contains("\"compat\":"),
+                "kind {kind} describe.json missing `compat` block:\n{content}",
+            );
+            assert!(
+                content.contains("\"components\":"),
+                "kind {kind} describe.json missing `runtime.components` map:\n{content}",
+            );
+            assert!(
+                !content.contains("\"component\": \"extension.wasm\""),
+                "kind {kind} describe.json still has v1 singular `runtime.component`:\n{content}",
+            );
+        }
+    }
+
     /// E.4.b: the `llm` template tree resolves through `load_templates_kind`
     /// and ships the canonical 5-file design-extension skeleton.
     #[test]

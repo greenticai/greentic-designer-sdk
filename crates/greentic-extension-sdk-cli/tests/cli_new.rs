@@ -158,8 +158,12 @@ fn scaffolds_provider_extension_with_correct_wit_deps() {
 
     let describe = std::fs::read_to_string(proj.join("describe.json")).unwrap();
     assert!(describe.contains("\"kind\": \"ProviderExtension\""));
+    // v2 templates declare a `runtime.components` map whose entries each
+    // carry a `gtpack` block. The legacy `REPLACE_WITH_YOUR.gtpack`
+    // sentinel from the v1 template is gone — the file is now
+    // `extension.wasm` directly, matching what the packer writes.
     assert!(describe.contains("\"gtpack\""));
-    assert!(describe.contains("REPLACE_WITH_YOUR.gtpack"));
+    assert!(describe.contains("\"file\": \"extension.wasm\""));
 }
 
 #[test]
@@ -242,10 +246,13 @@ fn generated_project_passes_cargo_check() {
 
 #[test]
 fn scaffolded_describe_json_validates_against_schema() {
+    // Validate scaffolded describes against the v2 schema — the templates
+    // emit v2 shape after the v1->v2 ecosystem migration (see
+    // greentic-biz/greentic-designer-extensions#58 + sibling PRs).
     let schema_path = {
         let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         p.pop();
-        p.push("greentic-extension-sdk-contract/schemas/describe-v1.json");
+        p.push("greentic-extension-sdk-contract/schemas/describe-v2.json");
         p
     };
     let schema_bytes = std::fs::read(&schema_path)
