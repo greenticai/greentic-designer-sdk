@@ -11,6 +11,7 @@ static TEMPLATES_DEPLOY: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/d
 static TEMPLATES_PROVIDER: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/provider");
 static TEMPLATES_WASM_COMPONENT: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/templates/wasm-component");
+static TEMPLATES_LLM: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/llm");
 
 #[derive(Debug, Clone)]
 pub struct TemplateEntry {
@@ -61,6 +62,7 @@ pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
         "deploy" => collect(&TEMPLATES_DEPLOY),
         "provider" => collect(&TEMPLATES_PROVIDER),
         "wasm-component" => collect(&TEMPLATES_WASM_COMPONENT),
+        "llm" => collect(&TEMPLATES_LLM),
         _ => Vec::new(),
     }
 }
@@ -199,7 +201,14 @@ mod tests {
     /// produces wasm with the wrong feature set.
     #[test]
     fn every_kind_template_ships_rust_toolchain_pinned_to_1_95_0() {
-        for kind in ["design", "bundle", "deploy", "provider", "wasm-component"] {
+        for kind in [
+            "design",
+            "bundle",
+            "deploy",
+            "provider",
+            "wasm-component",
+            "llm",
+        ] {
             let entries = load_templates_kind(kind);
             let toolchain = entries
                 .iter()
@@ -218,7 +227,7 @@ mod tests {
     /// older intrinsics that newer cargo-component rejects.
     #[test]
     fn every_kind_template_ships_wit_bindgen_rt_0_41() {
-        for kind in ["design", "bundle", "deploy", "provider"] {
+        for kind in ["design", "bundle", "deploy", "provider", "llm"] {
             let entries = load_templates_kind(kind);
             let cargo_toml = entries
                 .iter()
@@ -230,5 +239,33 @@ mod tests {
                 "kind {kind} Cargo.toml does not pin wit-bindgen-rt 0.41:\n{content}",
             );
         }
+    }
+
+    /// E.4.b: the `llm` template tree resolves through `load_templates_kind`
+    /// and ships the canonical 5-file design-extension skeleton.
+    #[test]
+    fn load_kind_llm_returns_full_template_set() {
+        let entries = load_templates_kind("llm");
+        let names: Vec<&str> = entries.iter().map(|e| e.dst_rel.as_str()).collect();
+        assert!(
+            names.contains(&"Cargo.toml"),
+            "missing Cargo.toml: {names:?}"
+        );
+        assert!(
+            names.contains(&"describe.json"),
+            "missing describe.json: {names:?}"
+        );
+        assert!(
+            names.contains(&"src/lib.rs"),
+            "missing src/lib.rs: {names:?}"
+        );
+        assert!(
+            names.contains(&"wit/world.wit"),
+            "missing wit/world.wit: {names:?}"
+        );
+        assert!(
+            names.contains(&"rust-toolchain.toml"),
+            "missing rust-toolchain.toml: {names:?}"
+        );
     }
 }

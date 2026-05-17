@@ -39,7 +39,7 @@ pub fn wit_files() -> Vec<WitFile> {
 /// same package set as a `design` extension.
 pub fn files_for_kind(kind: &str) -> Vec<WitFile> {
     let kind_file = match kind {
-        "wasm-component" => "extension-design.wit".to_string(),
+        "wasm-component" | "llm" => "extension-design.wit".to_string(),
         other => format!("extension-{other}.wit"),
     };
     wit_files()
@@ -105,6 +105,21 @@ mod tests {
         assert!(!names.contains(&"extension-design.wit"));
         assert!(!names.contains(&"extension-bundle.wit"));
         assert!(!names.contains(&"extension-deploy.wit"));
+    }
+
+    /// E.4.b: `llm` is a design-extension subtype — its WIT set must mirror
+    /// `design` (no separate `extension-llm.wit`), so `cargo component build`
+    /// can resolve the scaffolded world.
+    #[test]
+    fn files_for_kind_llm_uses_design_wit() {
+        let files = files_for_kind("llm");
+        let names: Vec<_> = files.iter().map(|f| f.name).collect();
+        assert!(names.contains(&"extension-base.wit"));
+        assert!(names.contains(&"extension-host.wit"));
+        assert!(names.contains(&"extension-design.wit"));
+        assert!(!names.contains(&"extension-bundle.wit"));
+        assert!(!names.contains(&"extension-deploy.wit"));
+        assert!(!names.contains(&"extension-provider.wit"));
     }
 
     #[test]
