@@ -20,14 +20,51 @@ The runtime engine that *executes* WASM extensions is part of the commercial Gre
 
 ### Install the CLI
 
+Prebuilt binaries are published to GitHub Releases for every tagged
+version (Linux / macOS / Windows, x86_64 + aarch64). Pick whichever
+matches your setup:
+
+**Recommended — `cargo binstall` (no compile, fetches the release binary):**
+
 ```bash
-cargo install greentic-extension-sdk-cli
-# or, when binary release pipeline is up:
-# cargo binstall gtdx
-# or download from GitHub Releases
+cargo binstall greentic-extension-sdk-cli \
+  --version 1.2.2-research \
+  --git https://github.com/greenticai/greentic-designer-sdk
 ```
 
-This installs the `gtdx` binary.
+`--git` is required because this crate is not published to crates.io —
+binstall reads the `[package.metadata.binstall]` section directly from
+the repo at the requested tag. Drop the `--version` flag once a stable
+release is cut.
+
+**Build from source (slowest, needs the full toolchain):**
+
+```bash
+cargo install --git https://github.com/greenticai/greentic-designer-sdk \
+  --tag v1.2.2-research \
+  greentic-extension-sdk-cli
+```
+
+**Manual download:**
+
+```bash
+# macOS Apple Silicon example — swap target for your platform
+curl -L -o gtdx.tgz \
+  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.2-research/gtdx-v1.2.2-research-aarch64-apple-darwin.tgz
+tar -xzf gtdx.tgz
+chmod +x gtdx && mv gtdx ~/.cargo/bin/
+```
+
+Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
+`aarch64-pc-windows-msvc`, `x86_64-pc-windows-msvc` (Windows uses
+`.zip` instead of `.tgz`).
+
+Verify the install:
+
+```bash
+gtdx --version
+```
 
 ### Scaffold and build an extension
 
