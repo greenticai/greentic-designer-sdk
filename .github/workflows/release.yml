@@ -16,6 +16,11 @@ concurrency:
 jobs:
   release-binaries:
     name: Build gtdx binaries (6 platforms)
+    # Skip pre-release / channel tags (v*-dev, v*-research). These come from
+    # auto-tag-channel.yml on develop/research pushes and are not meant to
+    # trigger a crates.io publish — Cargo.toml at the workspace stays on the
+    # stable base version. Stable v<X.Y.Z> tags still fire.
+    if: github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-')
     uses: greenticai/.github/.github/workflows/release-binaries.yml@main
     with:
       package: greentic-extension-sdk-cli
@@ -26,6 +31,7 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     needs: [release-binaries]
+    if: github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-')
     permissions:
       contents: read
     uses: greenticai/.github/.github/workflows/crates-publish.yml@main
