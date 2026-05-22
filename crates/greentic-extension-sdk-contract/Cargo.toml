@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
+cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
 tempfile = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }

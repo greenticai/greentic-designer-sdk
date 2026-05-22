@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Auto-installed by cargo-husky on first `cargo test`.
+# Runs the cheap fast checks before each commit so the developer never pushes
+# unformatted code or trivial clippy warnings.
+
+set -euo pipefail
+
+echo "[husky pre-commit] cargo fmt --all -- --check"
+cargo fmt --all -- --check
+
+echo "[husky pre-commit] cargo clippy --workspace --all-targets --locked -- -D warnings"
+cargo clippy --workspace --all-targets --locked -- -D warnings
+
+echo "[husky pre-commit] OK"
