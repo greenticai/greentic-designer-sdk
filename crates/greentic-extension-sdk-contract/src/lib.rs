@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod agentic_worker;
 pub mod capability;
 pub mod compat;
 pub mod component_id;
@@ -19,6 +20,9 @@ pub mod schema;
 pub mod sha256;
 pub mod signature;
 
+pub use self::agentic_worker::{
+    AgenticWorkerMetadata, Cost, SideEffects, ToolCapability, UsageExample,
+};
 pub use self::capability::{CapabilityId, CapabilityRef, CapabilityVersion};
 pub use self::compat::Compat;
 pub use self::component_id::ComponentId;
