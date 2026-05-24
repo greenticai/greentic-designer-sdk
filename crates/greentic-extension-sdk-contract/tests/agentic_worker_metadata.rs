@@ -107,3 +107,37 @@ fn tool_capability_serde_round_trip() {
     let back: Vec<ToolCapability> = serde_json::from_str(&json).unwrap();
     assert_eq!(back, caps);
 }
+
+#[test]
+fn encode_decode_round_trip() {
+    let meta = AgenticWorkerMetadata {
+        usage_hint: Some("hi".into()),
+        ..Default::default()
+    };
+    let blob = meta.encode().unwrap();
+    let back = AgenticWorkerMetadata::decode(&blob).unwrap();
+    assert_eq!(back, meta);
+}
+
+#[test]
+fn conservative_defaults_only_fill_missing() {
+    let meta = AgenticWorkerMetadata {
+        side_effects: Some(SideEffects::None),
+        cost: Some(Cost::Low),
+        confirmation_required: Some(false),
+        ..Default::default()
+    };
+    let filled = meta.clone().with_conservative_defaults();
+    assert_eq!(filled, meta, "no defaults should overwrite explicit values");
+}
+
+#[test]
+fn conservative_defaults_fill_when_all_missing() {
+    let filled = AgenticWorkerMetadata::default().with_conservative_defaults();
+    assert_eq!(filled.side_effects, Some(SideEffects::External));
+    assert_eq!(filled.confirmation_required, Some(true));
+    assert_eq!(filled.cost, Some(Cost::Medium));
+    // usage_hint + examples remain None — no safe default.
+    assert!(filled.usage_hint.is_none());
+    assert!(filled.examples.is_none());
+}
