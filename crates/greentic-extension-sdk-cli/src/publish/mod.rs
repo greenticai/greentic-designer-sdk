@@ -357,13 +357,16 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
 
     let receipt = backend.publish(req).await.map_err(map_registry_err)?;
 
-    // 8. Also copy into local ./dist/ with the canonical name.
-    let final_dist = cfg.dist_dir.join(format!(
-        "{}-{}.gtxpack",
-        describe.metadata.name, describe.metadata.version
-    ));
-    std::fs::create_dir_all(&cfg.dist_dir).map_err(io_err)?;
-    std::fs::write(&final_dist, &pack_bytes).map_err(io_err)?;
+    // 8. Also copy into local ./dist/ with the canonical name, and drop the
+    //    transient staging pack so it doesn't linger.
+    let final_dist = write_canonical_dist(
+        &staging_pack,
+        &cfg.dist_dir,
+        &describe.metadata.name,
+        &describe.metadata.version,
+        &pack_bytes,
+    )
+    .map_err(io_err)?;
 
     let receipt_json = PublishReceiptJson {
         artifact: final_dist
@@ -465,8 +468,37 @@ fn backend_registry_label(backend: &Backend) -> String {
     }
 }
 
+/// True when `key_id` is a single safe path component (no separators, no `..`,
+/// non-empty) so it cannot escape `<home>/keys/` when joined.
+fn is_safe_key_id(key_id: &str) -> bool {
+    !key_id.is_empty()
+        && !key_id.contains('/')
+        && !key_id.contains('\\')
+        && key_id != ".."
+        && key_id != "."
+}
+
+/// Write the published bytes to `<dist_dir>/<name>-<version>.gtxpack` and remove
+/// the transient `staging` pack so it doesn't linger in `./dist` after publish.
+fn write_canonical_dist(
+    staging: &Path,
+    dist_dir: &Path,
+    name: &str,
+    version: &str,
+    bytes: &[u8],
+) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dist_dir)?;
+    let final_dist = dist_dir.join(format!("{name}-{version}.gtxpack"));
+    std::fs::write(&final_dist, bytes)?;
+    let _ = std::fs::remove_file(staging);
+    Ok(final_dist)
+}
+
 fn load_signing_key(home: &Path, key_id: &str) -> anyhow::Result<ed25519_dalek::SigningKey> {
     use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    if !is_safe_key_id(key_id) {
+        anyhow::bail!("invalid --key-id {key_id:?}: must not contain path separators or '..'");
+    }
     let key_path = home.join("keys").join(format!("{key_id}.key"));
     let bytes = std::fs::read_to_string(&key_path)
         .map_err(|e| anyhow::anyhow!("read {}: {e}", key_path.display()))?;
@@ -478,4 +510,40 @@ fn load_signing_key(home: &Path, key_id: &str) -> anyhow::Result<ed25519_dalek::
         .try_into()
         .map_err(|_| anyhow::anyhow!("{key_id}.key must be 32 bytes base64"))?;
     Ok(ed25519_dalek::SigningKey::from_bytes(&arr))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_signing_key_rejects_path_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        for bad in ["../../etc/passwd", "..", "a/b", "a\\b", ""] {
+            let err = load_signing_key(tmp.path(), bad).unwrap_err();
+            assert!(
+                err.to_string().contains("key-id"),
+                "key_id {bad:?} should be rejected as unsafe, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn write_canonical_dist_removes_staging() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path().join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        let staging = dist.join("publish-staging.gtxpack");
+        std::fs::write(&staging, b"pack-bytes").unwrap();
+
+        let final_dist =
+            write_canonical_dist(&staging, &dist, "demo", "0.1.0", b"pack-bytes").unwrap();
+
+        assert!(final_dist.exists());
+        assert_eq!(final_dist.file_name().unwrap(), "demo-0.1.0.gtxpack");
+        assert!(
+            !staging.exists(),
+            "staging pack must not linger in ./dist after publish"
+        );
+    }
 }
