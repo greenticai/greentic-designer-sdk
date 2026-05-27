@@ -127,6 +127,10 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         let name = entry.name().to_string();
+        // describe.json is excluded from the manifest ledger on purpose: it
+        // carries its own JCS publisher signature and binds the manifest via
+        // describe.manifestSha256, so listing it here would be circular
+        // (the signed describe references a manifest that references describe).
         if name == MANIFEST_ENTRY_NAME || name == DESCRIBE_ENTRY_NAME || entry.is_dir() {
             continue;
         }
@@ -294,6 +298,50 @@ mod tests {
         assert!(
             matches!(err, ManifestError::MissingEntry { .. }),
             "got {err:?}"
+        );
+    }
+
+    /// Regression guard: `verify_archive_against_manifest` must tolerate any
+    /// modification to describe.json without failing. describe.json integrity
+    /// is protected by its own JCS publisher signature — re-including it in
+    /// the manifest ledger would create a circular dependency (signed describe
+    /// references a manifest that references describe). This test locks in
+    /// that exclusion: if a future refactor accidentally re-adds describe.json
+    /// to the manifest, the second zip (with different describe bytes) will
+    /// produce a sha256 mismatch and the assertion will catch it.
+    #[test]
+    fn verify_tolerates_modified_describe_json() {
+        let wasm_bytes: &[u8] = b"\0asm\x01\x00\x00\x00";
+        let describe_v1: &[u8] = b"{\"version\":1,\"id\":\"my-ext\"}";
+        let describe_v2: &[u8] = b"{\"version\":2,\"id\":\"my-ext\",\"extra\":true}";
+
+        // Build manifest from entries that should be covered (wasm only —
+        // describe.json and manifest.json are excluded by build_manifest).
+        let manifest = build_manifest(vec![("extension.wasm", wasm_bytes)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+
+        // Zip A: describe.json has v1 bytes.
+        let zip_a = build_zip(&[
+            ("describe.json", describe_v1),
+            ("extension.wasm", wasm_bytes),
+            ("manifest.json", manifest_json.as_slice()),
+        ]);
+
+        // Zip B: describe.json has v2 bytes (everything else identical).
+        let zip_b = build_zip(&[
+            ("describe.json", describe_v2),
+            ("extension.wasm", wasm_bytes),
+            ("manifest.json", manifest_json.as_slice()),
+        ]);
+
+        assert!(
+            verify_archive_against_manifest(&zip_a).is_ok(),
+            "zip_a (describe v1) should pass manifest verification"
+        );
+        assert!(
+            verify_archive_against_manifest(&zip_b).is_ok(),
+            "zip_b (describe v2) should pass manifest verification — \
+             describe.json bytes must not affect the manifest ledger"
         );
     }
 }
