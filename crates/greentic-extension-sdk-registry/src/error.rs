@@ -8,6 +8,14 @@ pub enum RegistryError {
     #[error("signature verification failed: {0}")]
     SignatureInvalid(String),
 
+    #[error(
+        "artifact sha256 mismatch: registry advertised {expected}, downloaded bytes hash to {computed}"
+    )]
+    ArtifactHashMismatch { expected: String, computed: String },
+
+    #[error("install of {name}@{version} declined: requested permissions were not granted")]
+    PermissionDenied { name: String, version: String },
+
     #[error("auth required for {0}")]
     AuthRequired(String),
 

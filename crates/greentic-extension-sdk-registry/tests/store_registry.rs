@@ -57,11 +57,13 @@ async fn store_registry_fetch_downloads_artifact() {
         "contributions": {}
     });
 
+    let artifact_bytes = b"fake-gtxpack-bytes".to_vec();
+    let artifact_sha = greentic_extension_sdk_contract::artifact_sha256(&artifact_bytes);
     Mock::given(method("GET"))
         .and(path("/api/v1/extensions/greentic.ac/1.6.0"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "describe": describe_json,
-            "artifactSha256": "deadbeef",
+            "artifactSha256": artifact_sha,
             "publishedAt": "2026-04-17T00:00:00Z",
             "yanked": false
         })))
@@ -70,14 +72,71 @@ async fn store_registry_fetch_downloads_artifact() {
 
     Mock::given(method("GET"))
         .and(path("/api/v1/extensions/greentic.ac/1.6.0/artifact"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"fake-gtxpack-bytes".to_vec()))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(artifact_bytes.clone()))
         .mount(&server)
         .await;
 
     let reg = GreenticStoreRegistry::new("default", server.uri(), None);
     let art = reg.fetch("greentic.ac", "1.6.0").await.unwrap();
     assert_eq!(art.name, "greentic.ac");
-    assert_eq!(art.bytes, b"fake-gtxpack-bytes");
+    assert_eq!(art.bytes, artifact_bytes);
+}
+
+#[tokio::test]
+async fn store_registry_fetch_rejects_artifact_sha_mismatch() {
+    let server = MockServer::start().await;
+    let describe_json = serde_json::json!({
+        "apiVersion": "greentic.ai/v2",
+        "kind": "DesignExtension",
+        "compat": {
+            "min_designer_version": ">=1.0.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "1.2.0"
+        },
+        "metadata": {
+            "id": "greentic.ac", "name": "AC", "version": "1.6.0",
+            "summary": "x", "author": { "name": "G" }, "license": "MIT"
+        },
+        "engine": { "greenticDesigner": "*", "extRuntime": "*" },
+        "capabilities": { "offered": [{"id":"greentic:ac/y","version":"1.0.0"}] },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
+        "contributions": {}
+    });
+
+    // Registry advertises the sha256 of one payload but serves a different body.
+    let advertised = greentic_extension_sdk_contract::artifact_sha256(b"the-real-bytes");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/extensions/greentic.ac/1.6.0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "describe": describe_json,
+            "artifactSha256": advertised,
+            "publishedAt": "2026-04-17T00:00:00Z",
+            "yanked": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/extensions/greentic.ac/1.6.0/artifact"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"tampered-bytes".to_vec()))
+        .mount(&server)
+        .await;
+
+    let reg = GreenticStoreRegistry::new("default", server.uri(), None);
+    let err = reg.fetch("greentic.ac", "1.6.0").await.unwrap_err();
+    assert!(
+        err.to_string().contains("sha256"),
+        "expected a sha256 mismatch error, got: {err}"
+    );
 }
 
 #[tokio::test]

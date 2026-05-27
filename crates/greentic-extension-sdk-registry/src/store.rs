@@ -175,6 +175,19 @@ impl ExtensionRegistry for GreenticStoreRegistry {
             .bytes()
             .await?
             .to_vec();
+
+        // Verify the downloaded bytes against the digest the registry advertised
+        // in its metadata. This catches truncation, corruption, and an artifact
+        // swapped on the (separate) artifact endpoint. It does NOT establish
+        // publisher trust — that is the trust-root work tracked under D.5.
+        let computed = greentic_extension_sdk_contract::artifact_sha256(&bytes);
+        if computed != metadata.artifact_sha256 {
+            return Err(RegistryError::ArtifactHashMismatch {
+                expected: metadata.artifact_sha256,
+                computed,
+            });
+        }
+
         Ok(ExtensionArtifact {
             name: metadata.name,
             version: metadata.version,

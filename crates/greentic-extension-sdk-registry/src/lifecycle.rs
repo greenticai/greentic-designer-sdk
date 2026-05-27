@@ -53,11 +53,38 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         self.install_artifact(&artifact, opts)
     }
 
+    /// Install an already-fetched artifact, prompting for permission consent
+    /// via the interactive prompt. See [`Self::install_artifact_with_confirm`]
+    /// for the testable, injectable variant.
     pub fn install_artifact(
         &self,
         artifact: &ExtensionArtifact,
         opts: InstallOptions,
     ) -> Result<(), RegistryError> {
+        self.install_artifact_with_confirm(artifact, opts, crate::prompt::confirm_install)
+    }
+
+    /// Install an already-fetched artifact, deciding permission consent via the
+    /// supplied `confirm` callback (`(&describe, accept_permissions) -> bool`).
+    /// The consent gate runs *before* anything is written to disk: if `confirm`
+    /// returns `false`, no files are extracted and [`RegistryError::PermissionDenied`]
+    /// is returned. Tests inject a stub here to avoid the interactive prompt.
+    pub fn install_artifact_with_confirm<F>(
+        &self,
+        artifact: &ExtensionArtifact,
+        opts: InstallOptions,
+        confirm: F,
+    ) -> Result<(), RegistryError>
+    where
+        F: FnOnce(&greentic_extension_sdk_contract::DescribeJson, bool) -> bool,
+    {
+        if !confirm(&artifact.describe, opts.accept_permissions) {
+            return Err(RegistryError::PermissionDenied {
+                name: artifact.name.clone(),
+                version: artifact.version.clone(),
+            });
+        }
+
         let kind = artifact.describe.kind;
         let (staging, final_dir) =
             self.storage
