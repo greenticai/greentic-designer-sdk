@@ -38,3 +38,23 @@ fn roundtrips() {
     let back: Sha256 = serde_json::from_str(&s).unwrap();
     assert_eq!(back, h);
 }
+
+#[test]
+fn from_str_rejects_multibyte_without_panicking() {
+    // 62 ascii + one 2-byte char = 64 bytes, 63 chars. Must error, not panic.
+    let s = format!("{}{}", "a".repeat(62), "é");
+    assert_eq!(s.len(), 64, "test string must be exactly 64 bytes");
+    let parsed: Result<greentic_extension_sdk_contract::Sha256, _> = s.parse();
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn from_str_rejects_midchar_boundary_without_panicking() {
+    // 61 ascii + one 3-byte char (中) = 64 bytes, 62 chars.
+    // The slice s[60..62] splits inside the 3-byte char → char-boundary panic
+    // in the old str-slice implementation. Must return an error, never panic.
+    let s = format!("{}{}", "a".repeat(61), "中");
+    assert_eq!(s.len(), 64, "test string must be exactly 64 bytes");
+    let parsed: Result<greentic_extension_sdk_contract::Sha256, _> = s.parse();
+    assert!(parsed.is_err());
+}

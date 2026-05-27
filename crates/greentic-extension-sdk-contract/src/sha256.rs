@@ -24,12 +24,7 @@ impl Sha256 {
 
     #[must_use]
     pub fn as_hex(&self) -> String {
-        let mut s = String::with_capacity(64);
-        for b in self.0 {
-            use std::fmt::Write;
-            let _ = write!(s, "{b:02x}");
-        }
-        s
+        crate::hex::encode(&self.0)
     }
 }
 
@@ -37,27 +32,30 @@ impl FromStr for Sha256 {
     type Err = ContractError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() != 64 {
+        let raw = s.as_bytes();
+        if raw.len() != 64 {
             return Err(ContractError::MalformedSha256(format!(
                 "expected 64 hex chars, got {}",
-                s.len()
+                raw.len()
             )));
         }
         let mut bytes = [0u8; 32];
         for i in 0..32 {
-            let pair = &s[i * 2..i * 2 + 2];
-            let valid = pair
-                .chars()
-                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
-            if !valid {
-                return Err(ContractError::MalformedSha256(format!(
-                    "non-lowercase-hex char in {pair:?}"
-                )));
-            }
-            bytes[i] = u8::from_str_radix(pair, 16)
-                .map_err(|e| ContractError::MalformedSha256(e.to_string()))?;
+            let hi = hex_val(raw[i * 2])?;
+            let lo = hex_val(raw[i * 2 + 1])?;
+            bytes[i] = (hi << 4) | lo;
         }
         Ok(Self(bytes))
+    }
+}
+
+fn hex_val(b: u8) -> Result<u8, ContractError> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        other => Err(ContractError::MalformedSha256(format!(
+            "non-lowercase-hex byte {other:#x}"
+        ))),
     }
 }
 
