@@ -62,6 +62,21 @@ fn collect_runtime_component_files(
                 "describe.runtime.components.{comp_key}.gtpack.sha256 missing or not a string"
             )
         })?;
+        // `file_rel` comes from describe.json (author-controlled). Reject
+        // absolute paths and any `..` component so a crafted describe cannot
+        // make build_pack read a file outside the project dir (e.g. /etc/passwd)
+        // and embed it in the published pack.
+        let candidate = Path::new(file_rel);
+        if candidate.is_absolute()
+            || candidate
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            anyhow::bail!(
+                "describe.runtime.components.{comp_key}.gtpack.file = {file_rel:?} must be a \
+                 project-relative path with no `..` or absolute components"
+            );
+        }
         let abs = project_dir.join(file_rel);
         if !abs.exists() {
             anyhow::bail!(
@@ -231,6 +246,75 @@ mod tests {
         let a = build_pack(tmp.path(), &wasm, &out1).unwrap();
         let b = build_pack(tmp.path(), &wasm, &out2).unwrap();
         assert_eq!(a.sha256, b.sha256);
+    }
+
+    fn describe_with_gtpack_file(file: &str) -> serde_json::Value {
+        serde_json::json!({
+            "runtime": { "components": {
+                "comp": { "gtpack": {
+                    "file": file,
+                    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+                }}
+            }}
+        })
+    }
+
+    #[test]
+    fn collect_runtime_files_rejects_parent_dir_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let describe = describe_with_gtpack_file("../escape.gtpack");
+        let mut entries = Vec::new();
+        let err = collect_runtime_component_files(
+            &describe,
+            tmp.path(),
+            &tmp.path().join("out.gtxpack"),
+            &mut entries,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("project-relative"),
+            "expected a path-traversal rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn collect_runtime_files_rejects_absolute_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let describe = describe_with_gtpack_file("/etc/passwd");
+        let mut entries = Vec::new();
+        let err = collect_runtime_component_files(
+            &describe,
+            tmp.path(),
+            &tmp.path().join("out.gtxpack"),
+            &mut entries,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("project-relative"),
+            "expected a path-traversal rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn collect_runtime_files_accepts_legit_relative_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bytes = b"runtime-pack-bytes";
+        std::fs::create_dir_all(tmp.path().join("runtime")).unwrap();
+        std::fs::write(tmp.path().join("runtime/p.gtpack"), bytes).unwrap();
+        let describe = serde_json::json!({
+            "runtime": { "components": {
+                "comp": { "gtpack": { "file": "runtime/p.gtpack", "sha256": sha256_hex(bytes) }}
+            }}
+        });
+        let mut entries = Vec::new();
+        collect_runtime_component_files(
+            &describe,
+            tmp.path(),
+            &tmp.path().join("out.gtxpack"),
+            &mut entries,
+        )
+        .unwrap();
+        assert_eq!(entries.len(), 1);
     }
 
     #[test]
