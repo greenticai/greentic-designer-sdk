@@ -16,9 +16,8 @@ pub fn run(args: &EnableArgs, home: &Path) -> Result<()> {
 
     verify_installed(home, &id, &version)?;
 
-    let mut state = ExtensionState::load(home).context("loading state")?;
-    state.set_enabled(&id, &version, true);
-    state.save_atomic(home).context("saving state")?;
+    ExtensionState::update(home, |state| state.set_enabled(&id, &version, true))
+        .context("updating state")?;
 
     tracing::info!(ext_id = %id, version = %version, action = "enable", "extension state changed");
     println!("Enabled: {id}@{version} (designer will reload)");

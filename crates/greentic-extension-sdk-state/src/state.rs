@@ -33,8 +33,12 @@ impl ExtensionState {
     /// Load state from `<home>/extensions-state.json`. Missing file returns
     /// the default (everything enabled). Parse errors propagate.
     pub fn load(home: &Path) -> Result<Self, crate::StateError> {
-        let path = state_path(home);
-        match std::fs::read_to_string(&path) {
+        Self::read_from(&state_path(home))
+    }
+
+    /// Read and parse the state file at `path`. Missing file → default.
+    fn read_from(path: &Path) -> Result<Self, crate::StateError> {
+        match std::fs::read_to_string(path) {
             Ok(content) => Ok(serde_json::from_str(&content)?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e.into()),
@@ -64,6 +68,25 @@ impl ExtensionState {
         let path = state_path(home);
         let content = serde_json::to_vec_pretty(self)?;
         crate::atomic::write_atomic(&path, &content)
+    }
+
+    /// Load, apply `mutate`, and persist — all while holding the write lock.
+    ///
+    /// This is the safe way to flip an enable/disable flag: a plain
+    /// `load(); set_enabled(); save_atomic()` from two processes can interleave
+    /// so the second writer clobbers the first's change (lost update). Holding
+    /// the lock across the whole read-modify-write cycle serializes them.
+    pub fn update<F>(home: &Path, mutate: F) -> Result<(), crate::StateError>
+    where
+        F: FnOnce(&mut Self),
+    {
+        let path = state_path(home);
+        crate::atomic::with_lock(&path, || {
+            let mut state = Self::read_from(&path)?;
+            mutate(&mut state);
+            let content = serde_json::to_vec_pretty(&state)?;
+            crate::atomic::write_file_atomic(&path, &content)
+        })
     }
 }
 
