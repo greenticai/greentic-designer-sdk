@@ -29,6 +29,15 @@ pub enum ContractError {
     #[error("canonicalization failed: {0}")]
     Canonicalize(String),
 
+    /// Publisher certificate failed to parse or verify against the root.
+    #[error("publisher cert invalid: {0}")]
+    CertInvalid(String),
+
+    /// The trust root is not available (e.g. production root key not yet
+    /// provisioned — org-blocked).
+    #[error("trust root unavailable: {0}")]
+    TrustRootUnavailable(String),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 

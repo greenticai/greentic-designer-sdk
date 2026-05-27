@@ -1,5 +1,5 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 
 use crate::describe::DescribeJson;
@@ -42,7 +42,7 @@ pub fn verify_ed25519(
     let key = VerifyingKey::from_bytes(&public_key_array)
         .map_err(|e| ContractError::SignatureInvalid(format!("pubkey parse: {e}")))?;
     let signature = Signature::from_bytes(&sig_array);
-    key.verify(payload, &signature)
+    key.verify_strict(payload, &signature)
         .map_err(|e| ContractError::SignatureInvalid(format!("verify: {e}")))
 }
 

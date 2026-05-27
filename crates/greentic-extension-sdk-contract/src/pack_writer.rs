@@ -129,12 +129,7 @@ pub fn build_gtxpack_with_manifest(entries: Vec<PackEntry>) -> Result<Vec<u8>, P
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(64);
-    for b in digest {
-        use std::fmt::Write as _;
-        write!(&mut out, "{b:02x}").expect("write to String");
-    }
-    out
+    crate::hex::encode(&digest)
 }
 
 #[derive(Debug, thiserror::Error)]
