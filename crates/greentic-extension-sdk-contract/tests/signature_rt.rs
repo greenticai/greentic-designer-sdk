@@ -222,3 +222,21 @@ fn bind_then_verify_manifest_binding() {
     let tampered = serde_jcs::to_vec(&build_manifest(vec![("evil.wasm", &b"x"[..])])).unwrap();
     assert!(verify_manifest_binding(&describe, &tampered).is_err());
 }
+
+#[test]
+fn verify_manifest_binding_errors_when_unbound() {
+    // A describe that has never had bind_manifest called (manifest_sha256 is None)
+    // must return Err — not panic or silently pass.
+    let describe = sample_describe_with_sig(None);
+    assert!(describe.manifest_sha256.is_none());
+    let manifest_bytes = b"any bytes";
+    let err = verify_manifest_binding(&describe, manifest_bytes)
+        .expect_err("should fail when manifest_sha256 is absent");
+    assert!(
+        matches!(
+            err,
+            greentic_extension_sdk_contract::ContractError::SignatureInvalid(_)
+        ),
+        "expected SignatureInvalid, got: {err}"
+    );
+}

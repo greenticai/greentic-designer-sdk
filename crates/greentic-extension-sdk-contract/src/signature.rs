@@ -97,14 +97,22 @@ pub fn verify_describe(describe: &DescribeJson) -> Result<(), ContractError> {
     verify_ed25519(&sig.public_key, &sig.value, &payload)
 }
 
-/// Compute `sha256(manifest_bytes)` and store it on the describe so the
-/// describe signature transitively covers the whole-archive manifest.
-/// Call BEFORE `sign_describe`.
+/// Compute `sha256(manifest_bytes)` and store it in `describe.manifest_sha256`
+/// so the describe signature transitively covers the whole-archive manifest.
+///
+/// # Ordering requirement
+/// MUST be called **before** [`sign_describe`]. `sign_describe` canonicalizes
+/// `manifest_sha256` into the JCS signing payload; calling `bind_manifest` after
+/// signing leaves the field out of the signed payload and the manifest is NOT
+/// covered by the signature (an insecure artifact).
 pub fn bind_manifest(describe: &mut DescribeJson, manifest_bytes: &[u8]) {
     describe.manifest_sha256 = Some(artifact_sha256(manifest_bytes));
 }
 
 /// Verify the describe's `manifest_sha256` matches the supplied manifest bytes.
+///
+/// This checks the manifest binding only; verify the describe signature
+/// separately (see the `verify_describe`* functions).
 ///
 /// # Errors
 /// `SignatureInvalid` if the field is absent or does not match.
@@ -119,7 +127,7 @@ pub fn verify_manifest_binding(
     let actual = artifact_sha256(manifest_bytes);
     if expected != actual {
         return Err(ContractError::SignatureInvalid(format!(
-            "manifestSha256 mismatch: describe={expected}, computed={actual}"
+            "manifestSha256 mismatch: stored={expected}, computed={actual}"
         )));
     }
     Ok(())
