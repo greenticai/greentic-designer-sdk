@@ -65,8 +65,8 @@ pub enum ManifestError {
     UnsupportedSchema(String),
     #[error("entry '{path}' declared size {size} exceeds cap {cap}")]
     EntryTooLarge { path: String, size: u64, cap: u64 },
-    #[error("archive uncompressed size exceeds cap {cap}")]
-    ArchiveTooLarge { cap: u64 },
+    #[error("archive uncompressed size {total} exceeds cap {cap}")]
+    ArchiveTooLarge { total: u64, cap: u64 },
 }
 
 /// Build a [`Manifest`] from the entries that will be (or are) inside a
@@ -116,6 +116,18 @@ where
 /// entry, smuggled entry not listed in the manifest, or manifest entry
 /// absent from the archive.
 pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestError> {
+    verify_archive_against_manifest_with_caps(zip_bytes, MAX_ENTRY_BYTES, MAX_ARCHIVE_BYTES)
+}
+
+/// Inner implementation of [`verify_archive_against_manifest`] with injectable
+/// byte caps. Using parameterised caps in tests avoids large allocations —
+/// tiny caps (e.g. 8 bytes) let fast unit tests exercise bomb/total-cap paths
+/// without touching the 64/256 MiB production limits.
+fn verify_archive_against_manifest_with_caps(
+    zip_bytes: &[u8],
+    max_entry_bytes: u64,
+    max_archive_bytes: u64,
+) -> Result<(), ManifestError> {
     use std::io::Read;
 
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))?;
@@ -126,16 +138,16 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
         let mut f = archive
             .by_name(MANIFEST_ENTRY_NAME)
             .map_err(|_| ManifestError::Missing)?;
-        if f.size() > MAX_ENTRY_BYTES {
+        if f.size() > max_entry_bytes {
             return Err(ManifestError::EntryTooLarge {
                 path: MANIFEST_ENTRY_NAME.to_string(),
                 size: f.size(),
-                cap: MAX_ENTRY_BYTES,
+                cap: max_entry_bytes,
             });
         }
         let mut body = Vec::new();
         f.by_ref()
-            .take(MAX_ENTRY_BYTES + 1)
+            .take(max_entry_bytes + 1)
             .read_to_end(&mut body)?;
         serde_json::from_slice(&body)
             .map_err(|e| ManifestError::UnsupportedSchema(format!("parse: {e}")))?
@@ -172,33 +184,25 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
             .ok_or_else(|| ManifestError::UnexpectedEntry(name.clone()))?;
 
         // Guard 1: zip header declares an uncompressed size that exceeds the cap.
-        // Lying headers are also caught by Guard 3 below, but checking here
-        // avoids even starting an expensive decompression.
-        if entry.size() > MAX_ENTRY_BYTES {
+        // Lying headers are also caught by Guard 4 below (actual byte count after
+        // decompression), but checking here avoids even starting an expensive
+        // decompression for honest-but-oversized entries.
+        if entry.size() > max_entry_bytes {
             return Err(ManifestError::EntryTooLarge {
                 path: name,
                 size: entry.size(),
-                cap: MAX_ENTRY_BYTES,
+                cap: max_entry_bytes,
             });
         }
 
         // Guard 2: manifest-recorded size exceeds the cap. Catches tampered /
         // maliciously crafted manifests that declare enormous sizes before the
         // archive is decompressed (audit H2).
-        if row.size > MAX_ENTRY_BYTES {
+        if row.size > max_entry_bytes {
             return Err(ManifestError::EntryTooLarge {
                 path: name,
                 size: row.size,
-                cap: MAX_ENTRY_BYTES,
-            });
-        }
-
-        // Guard 3: accumulate uncompressed bytes across all entries (saturating
-        // to avoid wrapping) and reject if the whole archive would exceed the cap.
-        total_uncompressed = total_uncompressed.saturating_add(entry.size());
-        if total_uncompressed > MAX_ARCHIVE_BYTES {
-            return Err(ManifestError::ArchiveTooLarge {
-                cap: MAX_ARCHIVE_BYTES,
+                cap: max_entry_bytes,
             });
         }
 
@@ -207,13 +211,26 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
         let mut body = Vec::new();
         entry
             .by_ref()
-            .take(MAX_ENTRY_BYTES + 1)
+            .take(max_entry_bytes + 1)
             .read_to_end(&mut body)?;
-        if body.len() as u64 > MAX_ENTRY_BYTES {
+        if body.len() as u64 > max_entry_bytes {
             return Err(ManifestError::EntryTooLarge {
                 path: name,
                 size: body.len() as u64,
-                cap: MAX_ENTRY_BYTES,
+                cap: max_entry_bytes,
+            });
+        }
+
+        // Guard 3: accumulate ACTUAL decompressed bytes across all entries
+        // (saturating to avoid wrapping) and reject if the whole archive exceeds
+        // the cap. Must happen AFTER the bounded read so we count real bytes, not
+        // the zip header-declared size (which an attacker can set to 0 to bypass
+        // the total cap — audit H2 fix).
+        total_uncompressed = total_uncompressed.saturating_add(body.len() as u64);
+        if total_uncompressed > max_archive_bytes {
+            return Err(ManifestError::ArchiveTooLarge {
+                total: total_uncompressed,
+                cap: max_archive_bytes,
             });
         }
 
@@ -436,6 +453,73 @@ mod tests {
             verify_archive_against_manifest(&zip_b).is_ok(),
             "zip_b (describe v2) should pass manifest verification — \
              describe.json bytes must not affect the manifest ledger"
+        );
+    }
+
+    /// Guard 4 catches a real decompression bomb: zip header lies about the
+    /// uncompressed size (or is 0), but the actual decompressed bytes exceed
+    /// `max_entry_bytes`. We use a tiny cap (8 bytes) so the test allocates
+    /// nothing large — the 32-byte body is enough to exceed the cap.
+    #[test]
+    fn verify_rejects_real_zip_bomb_via_actual_bytes() {
+        // 32 real bytes in the body; cap is only 8.
+        let wasm_body: &[u8] = b"\0asm\x01\x00\x00\x00\xde\xad\xbe\xef\xca\xfe\xba\xbe\x00\x00\x00\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc";
+        let tiny_cap: u64 = 8;
+
+        // Build a manifest whose sha256/size records the real 32-byte body.
+        let manifest = build_manifest(vec![("extension.wasm", wasm_body)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+
+        let zip_bytes = build_zip(&[
+            ("extension.wasm", wasm_body),
+            ("manifest.json", manifest_json.as_slice()),
+        ]);
+
+        // With max_entry_bytes = 8, Guard 4 must reject the 32-byte body.
+        let err =
+            verify_archive_against_manifest_with_caps(&zip_bytes, tiny_cap, 1024).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::EntryTooLarge { .. }),
+            "expected EntryTooLarge, got {err:?}"
+        );
+    }
+
+    /// Guard 3 (archive total cap) must be evaluated over ACTUAL decompressed
+    /// bytes, not zip header-declared sizes. Two entries of 6 bytes each sum
+    /// to 12, exceeding an archive cap of 8 — even though each individual
+    /// entry is under the per-entry cap of 8.
+    ///
+    /// `max_entry_bytes` must be large enough to read `manifest.json` itself
+    /// (the serialised manifest is ~250 bytes for two entries), so we use 1024
+    /// as the per-entry cap while keeping the archive total cap at 8 bytes.
+    /// This confirms that Guard 3 fires on real (post-decompression) byte totals
+    /// and that the reported `total` field carries the actual accumulated count.
+    #[test]
+    fn verify_rejects_archive_total_over_cap() {
+        let body_a: &[u8] = b"aaaaaa"; // 6 bytes
+        let body_b: &[u8] = b"bbbbbb"; // 6 bytes
+        // Per-entry cap high enough to read manifest.json (~250 bytes) and
+        // each small entry (6 bytes).  Archive cap is tiny (8) so the two
+        // 6-byte entries (12 total) exceed it.
+        let max_entry: u64 = 1024;
+        let max_archive: u64 = 8;
+
+        // Manifest must carry correct sha256/size so verification fails on
+        // the total-cap check, not on ShaMismatch or EntryTooLarge.
+        let manifest = build_manifest(vec![("a.bin", body_a), ("b.bin", body_b)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+
+        let zip_bytes = build_zip(&[
+            ("a.bin", body_a),
+            ("b.bin", body_b),
+            ("manifest.json", manifest_json.as_slice()),
+        ]);
+
+        let err = verify_archive_against_manifest_with_caps(&zip_bytes, max_entry, max_archive)
+            .unwrap_err();
+        assert!(
+            matches!(err, ManifestError::ArchiveTooLarge { .. }),
+            "expected ArchiveTooLarge, got {err:?}"
         );
     }
 }
