@@ -89,6 +89,7 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
         contributions: Contributions::default(),
         localization: None,
         signature: None,
+        manifest_sha256: None,
     };
 
     let describe_path = design_dir.join("describe.json");
@@ -167,6 +168,7 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
         contributions: Contributions::default(),
         localization: None,
         signature: None,
+        manifest_sha256: None,
     };
 
     let describe_path = provider_dir.join("describe.json");
@@ -398,6 +400,7 @@ fn write_provider_fixture_with_capabilities(
         contributions: Contributions::default(),
         localization: None,
         signature: None,
+        manifest_sha256: None,
     };
 
     let describe_path = provider_dir.join("describe.json");

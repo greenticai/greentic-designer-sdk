@@ -158,6 +158,7 @@ mod tests {
             contributions: greentic_extension_sdk_contract::describe::Contributions::default(),
             localization: None,
             signature: None,
+            manifest_sha256: None,
         }
     }
 

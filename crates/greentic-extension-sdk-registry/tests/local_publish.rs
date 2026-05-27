@@ -55,6 +55,7 @@ fn sample_describe(version: &str) -> DescribeJson {
         contributions: Contributions::default(),
         localization: None,
         signature: None,
+        manifest_sha256: None,
     }
 }
 

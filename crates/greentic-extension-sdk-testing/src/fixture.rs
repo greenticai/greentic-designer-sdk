@@ -141,6 +141,7 @@ impl ExtensionFixtureBuilder {
             contributions: greentic_extension_sdk_contract::describe::Contributions::default(),
             localization: None,
             signature: None,
+            manifest_sha256: None,
         };
         let describe_path = dir.path().join("describe.json");
         std::fs::write(&describe_path, serde_json::to_vec_pretty(&describe)?)?;

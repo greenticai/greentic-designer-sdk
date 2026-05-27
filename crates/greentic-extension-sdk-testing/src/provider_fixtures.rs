@@ -96,6 +96,7 @@ pub fn build_provider_fixture_gtxpack(
         contributions: Contributions::default(),
         localization: None,
         signature: None,
+        manifest_sha256: None,
     };
 
     zip.start_file("describe.json", opts).unwrap();

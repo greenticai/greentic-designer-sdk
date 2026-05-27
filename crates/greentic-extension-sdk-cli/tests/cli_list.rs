@@ -85,6 +85,7 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
         contributions: Contributions::default(),
         localization: None,
         signature: None,
+        manifest_sha256: None,
     };
 
     std::fs::write(
