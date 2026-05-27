@@ -33,8 +33,8 @@ pub use self::error::ContractError;
 pub use self::kind::ExtensionKind;
 pub use self::localization::{Locale, LocalizedString};
 pub use self::manifest::{
-    MANIFEST_ENTRY_NAME, MANIFEST_SCHEMA_V1, Manifest, ManifestEntry, ManifestError,
-    build_manifest, verify_archive_against_manifest,
+    DESCRIBE_ENTRY_NAME, MANIFEST_ENTRY_NAME, MANIFEST_SCHEMA_V1, Manifest, ManifestEntry,
+    ManifestError, build_manifest, verify_archive_against_manifest,
 };
 pub use self::migration::{MigrationReport, migrate_v0_4_x_value};
 pub use self::pack_writer::{

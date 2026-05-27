@@ -34,6 +34,7 @@ pub struct ManifestEntry {
 }
 
 pub const MANIFEST_ENTRY_NAME: &str = "manifest.json";
+pub const DESCRIBE_ENTRY_NAME: &str = "describe.json";
 pub const MANIFEST_SCHEMA_V1: &str = "greentic.gtxpack.manifest/v1";
 
 #[derive(Debug, thiserror::Error)]
@@ -72,7 +73,7 @@ where
         .into_iter()
         .filter_map(|(p, b)| {
             let p = p.as_ref();
-            if p == MANIFEST_ENTRY_NAME || p.ends_with('/') {
+            if p == MANIFEST_ENTRY_NAME || p == DESCRIBE_ENTRY_NAME || p.ends_with('/') {
                 return None;
             }
             let body = b.as_ref();
@@ -126,7 +127,7 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         let name = entry.name().to_string();
-        if name == MANIFEST_ENTRY_NAME || entry.is_dir() {
+        if name == MANIFEST_ENTRY_NAME || name == DESCRIBE_ENTRY_NAME || entry.is_dir() {
             continue;
         }
         let row = manifest
@@ -182,6 +183,21 @@ mod tests {
     }
 
     #[test]
+    fn build_manifest_excludes_describe_json() {
+        let m = build_manifest(vec![
+            ("describe.json", &br#"{"k":1}"#[..]),
+            ("extension.wasm", &b"\0asm"[..]),
+            ("manifest.json", &b"{}"[..]),
+        ]);
+        let paths: Vec<&str> = m.entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["extension.wasm"],
+            "describe.json + manifest.json excluded"
+        );
+    }
+
+    #[test]
     fn build_manifest_sorts_entries_and_excludes_self() {
         let m = build_manifest(vec![
             ("z.md", &b"alpha"[..]),
@@ -190,7 +206,7 @@ mod tests {
             ("describe.json", &br#"{"k":1}"#[..]),
         ]);
         let paths: Vec<&str> = m.entries.iter().map(|e| e.path.as_str()).collect();
-        assert_eq!(paths, vec!["a.wasm", "describe.json", "z.md"]);
+        assert_eq!(paths, vec!["a.wasm", "z.md"]);
     }
 
     #[test]
