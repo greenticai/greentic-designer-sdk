@@ -52,3 +52,23 @@ fn unknown_contributions_key_fails_schema() {
     v["contributions"]["lol"] = serde_json::json!([]);
     assert!(validate_describe_v2(&v).is_err());
 }
+
+#[test]
+fn manifest_sha256_valid_hex_passes_schema() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    let valid_sha256 = "a".repeat(64);
+    v["manifestSha256"] = serde_json::json!(valid_sha256);
+    validate_describe_v2(&v).expect("64-char lowercase hex manifestSha256 should be valid");
+}
+
+#[test]
+fn manifest_sha256_invalid_value_fails_schema() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    // Uppercase hex violates the pattern "^[0-9a-f]{64}$"
+    let uppercase_sha256 = "A".repeat(64);
+    v["manifestSha256"] = serde_json::json!(uppercase_sha256);
+    assert!(
+        validate_describe_v2(&v).is_err(),
+        "uppercase hex manifestSha256 should be rejected by the pattern ^[0-9a-f]{{64}}$"
+    );
+}
