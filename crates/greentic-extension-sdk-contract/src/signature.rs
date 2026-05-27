@@ -97,6 +97,34 @@ pub fn verify_describe(describe: &DescribeJson) -> Result<(), ContractError> {
     verify_ed25519(&sig.public_key, &sig.value, &payload)
 }
 
+/// Compute `sha256(manifest_bytes)` and store it on the describe so the
+/// describe signature transitively covers the whole-archive manifest.
+/// Call BEFORE `sign_describe`.
+pub fn bind_manifest(describe: &mut DescribeJson, manifest_bytes: &[u8]) {
+    describe.manifest_sha256 = Some(artifact_sha256(manifest_bytes));
+}
+
+/// Verify the describe's `manifest_sha256` matches the supplied manifest bytes.
+///
+/// # Errors
+/// `SignatureInvalid` if the field is absent or does not match.
+pub fn verify_manifest_binding(
+    describe: &DescribeJson,
+    manifest_bytes: &[u8],
+) -> Result<(), ContractError> {
+    let expected = describe
+        .manifest_sha256
+        .as_deref()
+        .ok_or_else(|| ContractError::SignatureInvalid("describe.manifestSha256 missing".into()))?;
+    let actual = artifact_sha256(manifest_bytes);
+    if expected != actual {
+        return Err(ContractError::SignatureInvalid(format!(
+            "manifestSha256 mismatch: describe={expected}, computed={actual}"
+        )));
+    }
+    Ok(())
+}
+
 fn strip_prefix(s: &str) -> &str {
     s.strip_prefix("ed25519:").unwrap_or(s)
 }

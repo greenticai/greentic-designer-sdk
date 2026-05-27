@@ -43,6 +43,6 @@ pub use self::pack_writer::{
 pub use self::runtime_component::RuntimeComponent;
 pub use self::sha256::Sha256;
 pub use self::signature::{
-    artifact_sha256, canonical_signing_payload, sign_describe, sign_ed25519, verify_describe,
-    verify_ed25519,
+    artifact_sha256, bind_manifest, canonical_signing_payload, sign_describe, sign_ed25519,
+    verify_describe, verify_ed25519, verify_manifest_binding,
 };

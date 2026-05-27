@@ -1,7 +1,8 @@
 use ed25519_dalek::SigningKey;
 use greentic_extension_sdk_contract::{
-    DescribeJson, SignatureAlgorithm, artifact_sha256, canonical_signing_payload, sign_describe,
-    sign_ed25519, verify_describe, verify_ed25519,
+    DescribeJson, SignatureAlgorithm, artifact_sha256, bind_manifest, build_manifest,
+    canonical_signing_payload, sign_describe, sign_ed25519, verify_describe, verify_ed25519,
+    verify_manifest_binding,
 };
 use rand::rngs::OsRng;
 
@@ -208,4 +209,16 @@ fn verify_describe_survives_serde_round_trip() {
     let json = serde_json::to_string(&d1).unwrap();
     let d2: DescribeJson = serde_json::from_str(&json).unwrap();
     verify_describe(&d2).expect("verify after serde roundtrip");
+}
+
+#[test]
+fn bind_then_verify_manifest_binding() {
+    let manifest = build_manifest(vec![("extension.wasm", &b"\0asm"[..])]);
+    let manifest_bytes = serde_jcs::to_vec(&manifest).unwrap();
+    let mut describe = sample_describe_with_sig(None);
+    bind_manifest(&mut describe, &manifest_bytes);
+    assert!(describe.manifest_sha256.is_some());
+    verify_manifest_binding(&describe, &manifest_bytes).expect("binding holds");
+    let tampered = serde_jcs::to_vec(&build_manifest(vec![("evil.wasm", &b"x"[..])])).unwrap();
+    assert!(verify_manifest_binding(&describe, &tampered).is_err());
 }
