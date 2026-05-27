@@ -4,6 +4,55 @@ use greentic_extension_sdk_contract::migration::migrate_v0_4_x_value;
 const V1_AC: &str = include_str!("fixtures/v1_ac.json");
 const V1_LLM: &str = include_str!("fixtures/v1_llm_openai.json");
 
+/// A v1 signature was computed over v1 canonical bytes; after migration the
+/// canonical form is different, so the carried-over signature would be
+/// misleading. The migrator must DROP it and add a warning (audit L2).
+#[test]
+fn migration_strips_stale_signature_and_warns() {
+    let mut v1: serde_json::Value = serde_json::json!({
+        "apiVersion": "greentic.ai/v1",
+        "kind": "DesignExtension",
+        "metadata": {
+            "id": "greentic.test-sig",
+            "name": "Test Sig",
+            "version": "1.0.0",
+            "summary": "Test fixture for signature stripping",
+            "author": { "name": "Greentic" },
+            "license": "MIT"
+        },
+        "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
+        "capabilities": { "offered": [], "required": [] },
+        "runtime": {
+            "component": "extension.wasm",
+            "memoryLimitMB": 32,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+        },
+        "contributions": {}
+    });
+
+    // Inject a stale v1 signature to simulate a signed v1 descriptor.
+    v1.as_object_mut().unwrap().insert(
+        "signature".into(),
+        serde_json::json!({
+            "algorithm": "ed25519",
+            "value": "deadbeefdeadbeef"
+        }),
+    );
+
+    let (out, report) = migrate_v0_4_x_value(&v1).expect("migrate should succeed");
+
+    assert!(
+        out.get("signature").is_none(),
+        "stale v1 signature must be dropped from migrated output; got: {:?}",
+        out.get("signature")
+    );
+    assert!(
+        report.warnings.iter().any(|w| w.contains("signature")),
+        "must warn that re-signing is required; warnings were: {:?}",
+        report.warnings
+    );
+}
+
 #[test]
 fn ac_v1_migrates_to_parseable_v2() {
     let raw: serde_json::Value = serde_json::from_str(V1_AC).unwrap();

@@ -72,8 +72,11 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
     };
     out.insert("contributions".into(), contributions_clean);
 
-    if let Some(sig) = obj.get("signature").cloned() {
-        out.insert("signature".into(), sig);
+    // A v1 signature was computed over v1 canonical bytes; after migration the
+    // canonical form differs entirely, so carrying it would be misleading.
+    // Drop it and require re-signing (audit L2).
+    if obj.get("signature").is_some() {
+        report.warn("dropped v1 signature — migrated descriptor must be re-signed");
     }
 
     Ok((Value::Object(out), report))
