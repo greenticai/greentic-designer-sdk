@@ -18,6 +18,12 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Per-entry uncompressed byte cap (64 MiB) — defends against decompression
+/// bombs. Generous enough for any real extension wasm/asset.
+pub const MAX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+/// Whole-archive uncompressed byte cap (256 MiB).
+pub const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
     /// Schema discriminator. Hard-coded `"greentic.gtxpack.manifest/v1"`.
@@ -57,6 +63,10 @@ pub enum ManifestError {
     MissingEntry { path: String },
     #[error("manifest schema unsupported: {0}")]
     UnsupportedSchema(String),
+    #[error("entry '{path}' declared size {size} exceeds cap {cap}")]
+    EntryTooLarge { path: String, size: u64, cap: u64 },
+    #[error("archive uncompressed size exceeds cap {cap}")]
+    ArchiveTooLarge { cap: u64 },
 }
 
 /// Build a [`Manifest`] from the entries that will be (or are) inside a
@@ -110,12 +120,23 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
 
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))?;
 
+    // Read manifest.json with an uncompressed size guard to prevent OOM from a
+    // crafted manifest entry before we even start verifying real entries.
     let manifest: Manifest = {
         let mut f = archive
             .by_name(MANIFEST_ENTRY_NAME)
             .map_err(|_| ManifestError::Missing)?;
+        if f.size() > MAX_ENTRY_BYTES {
+            return Err(ManifestError::EntryTooLarge {
+                path: MANIFEST_ENTRY_NAME.to_string(),
+                size: f.size(),
+                cap: MAX_ENTRY_BYTES,
+            });
+        }
         let mut body = Vec::new();
-        f.read_to_end(&mut body)?;
+        f.by_ref()
+            .take(MAX_ENTRY_BYTES + 1)
+            .read_to_end(&mut body)?;
         serde_json::from_slice(&body)
             .map_err(|e| ManifestError::UnsupportedSchema(format!("parse: {e}")))?
     };
@@ -123,10 +144,21 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
         return Err(ManifestError::UnsupportedSchema(manifest.schema));
     }
 
+    // Build an O(1) lookup from path → manifest row. Constructed once before
+    // iterating archive entries to avoid O(n²) linear scans (audit M1).
+    let lookup: std::collections::BTreeMap<&str, &ManifestEntry> = manifest
+        .entries
+        .iter()
+        .map(|r| (r.path.as_str(), r))
+        .collect();
+
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut total_uncompressed: u64 = 0;
+
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         let name = entry.name().to_string();
+
         // describe.json is excluded from the manifest ledger on purpose: it
         // carries its own JCS publisher signature and binds the manifest via
         // describe.manifestSha256, so listing it here would be circular
@@ -134,13 +166,57 @@ pub fn verify_archive_against_manifest(zip_bytes: &[u8]) -> Result<(), ManifestE
         if name == MANIFEST_ENTRY_NAME || name == DESCRIBE_ENTRY_NAME || entry.is_dir() {
             continue;
         }
-        let row = manifest
-            .entries
-            .iter()
-            .find(|r| r.path == name)
+
+        let row = lookup
+            .get(name.as_str())
             .ok_or_else(|| ManifestError::UnexpectedEntry(name.clone()))?;
+
+        // Guard 1: zip header declares an uncompressed size that exceeds the cap.
+        // Lying headers are also caught by Guard 3 below, but checking here
+        // avoids even starting an expensive decompression.
+        if entry.size() > MAX_ENTRY_BYTES {
+            return Err(ManifestError::EntryTooLarge {
+                path: name,
+                size: entry.size(),
+                cap: MAX_ENTRY_BYTES,
+            });
+        }
+
+        // Guard 2: manifest-recorded size exceeds the cap. Catches tampered /
+        // maliciously crafted manifests that declare enormous sizes before the
+        // archive is decompressed (audit H2).
+        if row.size > MAX_ENTRY_BYTES {
+            return Err(ManifestError::EntryTooLarge {
+                path: name,
+                size: row.size,
+                cap: MAX_ENTRY_BYTES,
+            });
+        }
+
+        // Guard 3: accumulate uncompressed bytes across all entries (saturating
+        // to avoid wrapping) and reject if the whole archive would exceed the cap.
+        total_uncompressed = total_uncompressed.saturating_add(entry.size());
+        if total_uncompressed > MAX_ARCHIVE_BYTES {
+            return Err(ManifestError::ArchiveTooLarge {
+                cap: MAX_ARCHIVE_BYTES,
+            });
+        }
+
+        // Guard 4: bounded decompression read catches lying zip headers that
+        // claim a small uncompressed size but expand beyond the cap.
         let mut body = Vec::new();
-        entry.read_to_end(&mut body)?;
+        entry
+            .by_ref()
+            .take(MAX_ENTRY_BYTES + 1)
+            .read_to_end(&mut body)?;
+        if body.len() as u64 > MAX_ENTRY_BYTES {
+            return Err(ManifestError::EntryTooLarge {
+                path: name,
+                size: body.len() as u64,
+                cap: MAX_ENTRY_BYTES,
+            });
+        }
+
         let computed = {
             let mut hasher = Sha256::new();
             hasher.update(&body);
@@ -297,6 +373,24 @@ mod tests {
         let err = verify_archive_against_manifest(&bytes).unwrap_err();
         assert!(
             matches!(err, ManifestError::MissingEntry { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn verify_rejects_oversize_declared_entry() {
+        let huge = MAX_ENTRY_BYTES + 1;
+        let mut manifest = build_manifest(vec![("extension.wasm", &b"\0asm"[..])]);
+        manifest.entries[0].size = huge;
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let with_manifest: Vec<(&str, &[u8])> = vec![
+            ("extension.wasm", b"\0asm"),
+            ("manifest.json", &manifest_json),
+        ];
+        let bytes = build_zip(&with_manifest);
+        let err = verify_archive_against_manifest(&bytes).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::EntryTooLarge { .. }),
             "got {err:?}"
         );
     }
