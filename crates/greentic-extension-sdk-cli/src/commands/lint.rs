@@ -250,6 +250,20 @@ struct Surface {
     offered: std::collections::BTreeSet<String>,
 }
 
+/// True when `current` is a semver bump over `prev` that signals a breaking
+/// change: a major bump (for `>=1.0`), or a minor bump while in `0.x` (where
+/// Cargo semver treats minor as breaking). Downgrades and equal versions are
+/// never breaking bumps.
+fn is_breaking_bump(prev: &semver::Version, current: &semver::Version) -> bool {
+    if current <= prev {
+        return false;
+    }
+    if current.major > prev.major {
+        return true;
+    }
+    prev.major == 0 && current.minor > prev.minor
+}
+
 fn check_describe_diff_breaking(describe: &serde_json::Value, home: &Path) -> Vec<Violation> {
     let Some(id) = describe.pointer("/metadata/id").and_then(|v| v.as_str()) else {
         return Vec::new();
@@ -293,8 +307,14 @@ fn check_describe_diff_breaking(describe: &serde_json::Value, home: &Path) -> Ve
     if removed_tools.is_empty() && removed_nodes.is_empty() && removed_offered.is_empty() {
         return Vec::new();
     }
-    if current_version != prev_version {
-        // Version moved — authors signaled the break.
+    // Only suppress when the version moved in a way that actually *signals* a
+    // breaking change. A downgrade, an equal version, or a mere patch/minor
+    // bump (for >=1.0) does not — those still warrant the warning.
+    if let (Ok(prev_v), Ok(cur_v)) = (
+        semver::Version::parse(prev_version),
+        semver::Version::parse(current_version),
+    ) && is_breaking_bump(&prev_v, &cur_v)
+    {
         return Vec::new();
     }
 
@@ -338,6 +358,72 @@ mod tests {
         let v = check_version_semver(&d);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].code, "E_VERSION_SEMVER");
+    }
+
+    #[test]
+    fn breaking_bump_detection() {
+        let v = |s: &str| semver::Version::parse(s).unwrap();
+        assert!(is_breaking_bump(&v("1.0.0"), &v("2.0.0"))); // major bump
+        assert!(!is_breaking_bump(&v("1.0.0"), &v("1.0.1"))); // patch bump
+        assert!(!is_breaking_bump(&v("1.0.0"), &v("1.1.0"))); // minor bump (>=1.0)
+        assert!(!is_breaking_bump(&v("2.0.0"), &v("1.0.0"))); // downgrade
+        assert!(!is_breaking_bump(&v("1.0.0"), &v("1.0.0"))); // equal
+        assert!(is_breaking_bump(&v("0.1.0"), &v("0.2.0"))); // 0.x minor = breaking
+        assert!(!is_breaking_bump(&v("0.1.0"), &v("0.1.1"))); // 0.x patch
+        assert!(is_breaking_bump(&v("0.9.0"), &v("1.0.0"))); // 0.x -> 1.0
+    }
+
+    fn write_installed(home: &Path, id: &str, describe: &serde_json::Value) {
+        let dir = home.join("extensions").join("design").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("describe.json"),
+            serde_json::to_vec(describe).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn describe_diff_warns_on_breaking_change_with_only_patch_bump() {
+        let home = empty_home();
+        let prev = json!({
+            "metadata": {"id": "x", "version": "1.0.0"},
+            "kind": "DesignExtension",
+            "contributions": {"tools": [{"name": "t1"}]}
+        });
+        write_installed(home.path(), "x", &prev);
+        let current = json!({
+            "metadata": {"id": "x", "version": "1.0.1"},
+            "kind": "DesignExtension",
+            "contributions": {"tools": []}
+        });
+        let v = check_describe_diff_breaking(&current, home.path());
+        assert_eq!(
+            v.len(),
+            1,
+            "a patch bump must not suppress a breaking-change warning"
+        );
+        assert_eq!(v[0].code, "W_DESCRIBE_DIFF_BREAKING");
+    }
+
+    #[test]
+    fn describe_diff_suppressed_on_major_bump() {
+        let home = empty_home();
+        let prev = json!({
+            "metadata": {"id": "x", "version": "1.0.0"},
+            "kind": "DesignExtension",
+            "contributions": {"tools": [{"name": "t1"}]}
+        });
+        write_installed(home.path(), "x", &prev);
+        let current = json!({
+            "metadata": {"id": "x", "version": "2.0.0"},
+            "kind": "DesignExtension",
+            "contributions": {"tools": []}
+        });
+        assert!(
+            check_describe_diff_breaking(&current, home.path()).is_empty(),
+            "a major bump signals the break and should suppress the warning"
+        );
     }
 
     #[test]
