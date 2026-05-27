@@ -41,12 +41,16 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 ///
 /// Caller must invoke `Storage::abort_install` on the staging dir if this
 /// returns `Err` — staging will be left populated.
+///
+/// On success returns the path of the `.gtpack` written into the gtdx provider
+/// dir, so the caller can roll it back if a later step (e.g. `commit_install`)
+/// fails — otherwise that copy would be orphaned (a partial install).
 pub(crate) fn post_install_provider(
     staging: &Path,
     describe: &DescribeJson,
     storage_root: &Path,
     force: bool,
-) -> Result<(), RegistryError> {
+) -> Result<std::path::PathBuf, RegistryError> {
     // Step 1: at least one component must carry a gtpack distribution channel.
     let gtpack = describe
         .runtime
@@ -107,7 +111,7 @@ pub(crate) fn post_install_provider(
     // Remove now-empty parent directories (best-effort; ignore errors).
     remove_empty_ancestors(&staged_path, staging);
 
-    Ok(())
+    Ok(dest)
 }
 
 /// Walk upward from `removed_file`'s parent toward (but not including) `stop`

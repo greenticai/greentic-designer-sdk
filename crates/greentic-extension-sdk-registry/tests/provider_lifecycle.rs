@@ -92,6 +92,56 @@ async fn install_provider_extracts_gtpack_to_providers_gtdx_dir() {
     );
 }
 
+#[test]
+fn provider_install_rolls_back_gtpack_when_commit_fails() {
+    let tmp = TempDir::new().unwrap();
+    let tmp_home = TempDir::new().unwrap();
+
+    let gtpack_bytes = b"fake-gtpack-content".to_vec();
+    let sha = support::sha256_hex(&gtpack_bytes);
+    let gtxpack_path = support::build_provider_fixture_gtxpack(
+        tmp.path(),
+        "greentic.provider.fixture",
+        "0.1.0",
+        &gtpack_bytes,
+        &sha,
+    );
+    let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fixture", "0.1.0");
+
+    // Force commit_install to fail: pre-create the final extension path as a
+    // *file*, so the rename/remove during commit errors out.
+    let provider_dir = tmp_home.path().join("extensions/provider");
+    std::fs::create_dir_all(&provider_dir).unwrap();
+    std::fs::write(
+        provider_dir.join("greentic.provider.fixture-0.1.0"),
+        b"not a dir",
+    )
+    .unwrap();
+
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp.path());
+    let installer = Installer::new(storage, &reg);
+
+    let result = installer.install_artifact(
+        &artifact,
+        InstallOptions {
+            trust_policy: TrustPolicy::Loose,
+            accept_permissions: true,
+            force: false,
+        },
+    );
+    assert!(result.is_err(), "install should fail when commit fails");
+
+    // The gtpack copied to the gtdx dir must be rolled back, not orphaned.
+    let gtdx_pack = tmp_home
+        .path()
+        .join("runtime/packs/providers/gtdx/greentic.provider.fixture-0.1.0.gtpack");
+    assert!(
+        !gtdx_pack.exists(),
+        "provider gtpack must be removed when the install does not commit"
+    );
+}
+
 #[tokio::test]
 async fn install_provider_rejects_sha256_mismatch() {
     let tmp = TempDir::new().unwrap();

@@ -96,20 +96,31 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
             result?;
         }
 
+        let mut provider_gtpack_dest: Option<std::path::PathBuf> = None;
         if kind == ExtensionKind::Provider {
-            let post_result = post_install_provider(
+            match post_install_provider(
                 &staging,
                 &artifact.describe,
                 self.storage.root(),
                 opts.force,
-            );
-            if post_result.is_err() {
-                self.storage.abort_install(&staging);
-                post_result?;
+            ) {
+                Ok(dest) => provider_gtpack_dest = Some(dest),
+                Err(e) => {
+                    self.storage.abort_install(&staging);
+                    return Err(e);
+                }
             }
         }
 
-        self.storage.commit_install(&staging, &final_dir)?;
+        if let Err(e) = self.storage.commit_install(&staging, &final_dir) {
+            // Roll back the provider gtpack copied into the gtdx dir so a failed
+            // commit does not leave a half-installed provider behind.
+            self.storage.abort_install(&staging);
+            if let Some(dest) = provider_gtpack_dest {
+                let _ = std::fs::remove_file(dest);
+            }
+            return Err(e);
+        }
         tracing::info!(
             name = %artifact.name,
             version = %artifact.version,

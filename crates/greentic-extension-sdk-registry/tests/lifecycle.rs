@@ -121,6 +121,31 @@ async fn installs_from_local_registry() {
     assert!(dir.join("extension.wasm").exists());
 }
 
+#[test]
+fn begin_install_uses_distinct_staging_dirs() {
+    let tmp_home = TempDir::new().unwrap();
+    let storage = Storage::new(tmp_home.path());
+
+    // Two installs of the same extension (e.g. concurrent processes) must get
+    // distinct staging dirs so neither deletes the other's in-flight staging.
+    let (staging_a, final_a) = storage
+        .begin_install(ExtensionKind::Design, "greentic.ext", "1.0.0")
+        .unwrap();
+    let (staging_b, final_b) = storage
+        .begin_install(ExtensionKind::Design, "greentic.ext", "1.0.0")
+        .unwrap();
+
+    assert_ne!(
+        staging_a, staging_b,
+        "concurrent installs must not share a staging dir"
+    );
+    assert_eq!(final_a, final_b, "final install dir is the same extension");
+    assert!(
+        staging_a.exists() && staging_b.exists(),
+        "neither staging dir may be deleted by the other"
+    );
+}
+
 #[tokio::test]
 async fn uninstall_removes_dir() {
     let tmp_home = TempDir::new().unwrap();

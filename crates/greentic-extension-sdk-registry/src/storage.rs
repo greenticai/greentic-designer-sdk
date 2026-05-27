@@ -46,19 +46,26 @@ impl Storage {
         self.root.join("registry.json")
     }
 
-    /// Creates a `.tmp` staging directory next to the final install path.
-    /// Caller writes into staging, then calls [`commit_install`].
+    /// Creates a unique `.tmp` staging directory next to the final install
+    /// path. Caller writes into staging, then calls [`commit_install`].
+    ///
+    /// The staging name carries a per-process pid + atomic counter so two
+    /// concurrent installs of the same extension never share (or delete) each
+    /// other's staging dir.
     pub fn begin_install(
         &self,
         kind: ExtensionKind,
         name: &str,
         version: &str,
     ) -> Result<(PathBuf, PathBuf), RegistryError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
+
         let final_dir = self.extension_dir(kind, name, version);
-        let staging = final_dir.with_extension("tmp");
-        if staging.exists() {
-            std::fs::remove_dir_all(&staging)?;
-        }
+        let seq = STAGING_SEQ.fetch_add(1, Ordering::Relaxed);
+        let staging = self
+            .kind_dir(kind)
+            .join(format!("{name}-{version}.{}.{seq}.tmp", std::process::id()));
         std::fs::create_dir_all(&staging)?;
         Ok((staging, final_dir))
     }
