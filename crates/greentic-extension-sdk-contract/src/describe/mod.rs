@@ -39,6 +39,15 @@ pub struct DescribeJson {
     pub localization: Option<localization_block::Localization>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<Signature>,
+    /// SHA-256 (lowercase hex) of the canonical `manifest.json`. Binds the
+    /// whole-archive ledger into the signed describe (audit C2/H7). Optional
+    /// only for backward compat during migration; production packs MUST set it.
+    #[serde(
+        rename = "manifestSha256",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub manifest_sha256: Option<String>,
 }
 
 /// Private intermediate for deserialization — identical shape to `DescribeJson`.
@@ -63,6 +72,8 @@ struct DescribeJsonRaw {
     localization: Option<localization_block::Localization>,
     #[serde(default)]
     signature: Option<Signature>,
+    #[serde(rename = "manifestSha256", default)]
+    manifest_sha256: Option<String>,
 }
 
 impl TryFrom<DescribeJsonRaw> for DescribeJson {
@@ -116,6 +127,7 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
             contributions: raw.contributions,
             localization: raw.localization,
             signature: raw.signature,
+            manifest_sha256: raw.manifest_sha256,
         })
     }
 }
