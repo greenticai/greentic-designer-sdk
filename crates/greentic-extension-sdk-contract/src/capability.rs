@@ -65,8 +65,13 @@ pub struct CapabilityRef {
 }
 
 impl CapabilityRef {
-    #[must_use]
-    pub fn version_req(&self) -> VersionReq {
-        VersionReq::parse(&self.version).unwrap_or(VersionReq::STAR)
+    /// Parse the version requirement. Fails closed — a malformed string is an
+    /// error, never a silent `*` match-everything (audit M2).
+    ///
+    /// # Errors
+    /// `MalformedVersion` if `self.version` is not a valid semver requirement.
+    pub fn version_req(&self) -> Result<VersionReq, ContractError> {
+        VersionReq::parse(&self.version)
+            .map_err(|e| ContractError::MalformedVersion(format!("{}: {e}", self.version)))
     }
 }
