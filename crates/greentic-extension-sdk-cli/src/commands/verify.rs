@@ -18,6 +18,15 @@ pub fn run(args: &Args, _home: &Path) -> Result<()> {
     let describe = load_describe(&args.path)?;
     greentic_extension_sdk_contract::verify_describe(&describe)
         .map_err(|e| anyhow::anyhow!("signature invalid: {e}"))?;
+
+    // The describe.json signature only covers describe.json. For an archive,
+    // also verify the whole-archive integrity ledger (manifest.json) so a
+    // tampered `extension.wasm` or smuggled file is caught, not just a tampered
+    // describe. (Publisher trust over the manifest itself is the D.5 work.)
+    if is_archive(&args.path) {
+        verify_archive_integrity(&args.path)?;
+    }
+
     let sig = describe
         .signature
         .as_ref()
@@ -29,6 +38,36 @@ pub fn run(args: &Args, _home: &Path) -> Result<()> {
         &sig.public_key[..16.min(sig.public_key.len())],
     );
     Ok(())
+}
+
+/// True when `path` is a `.gtxpack`/`.zip` archive file (not a directory or
+/// a bare `describe.json`).
+fn is_archive(path: &Path) -> bool {
+    path.is_file()
+        && matches!(
+            path.extension().and_then(|s| s.to_str()),
+            Some("gtxpack" | "zip")
+        )
+}
+
+/// Verify the archive's `manifest.json` integrity ledger. A missing manifest is
+/// reported as a warning (legacy packs predate the ledger) rather than a hard
+/// failure; any hash mismatch or smuggled entry is a hard failure.
+fn verify_archive_integrity(pack_path: &Path) -> Result<()> {
+    let bytes =
+        std::fs::read(pack_path).with_context(|| format!("read {}", pack_path.display()))?;
+    match greentic_extension_sdk_contract::verify_archive_against_manifest(&bytes) {
+        Ok(()) => Ok(()),
+        Err(greentic_extension_sdk_contract::ManifestError::Missing) => {
+            eprintln!(
+                "warning: {} has no manifest.json — integrity ledger unavailable, \
+                 only describe.json signature was checked",
+                pack_path.display()
+            );
+            Ok(())
+        }
+        Err(e) => Err(anyhow::anyhow!("archive integrity check failed: {e}")),
+    }
 }
 
 fn load_describe(path: &Path) -> Result<DescribeJson> {

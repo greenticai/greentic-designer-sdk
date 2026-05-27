@@ -259,3 +259,66 @@ fn verify_accepts_gtxpack_archive() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn verify_rejects_gtxpack_with_tampered_wasm_when_manifest_present() {
+    let tmp = TempDir::new().unwrap();
+    let key_path = tmp.path().join("k.pem");
+    Command::new(gtdx_bin())
+        .arg("keygen")
+        .arg("--out")
+        .arg(&key_path)
+        .output()
+        .unwrap();
+
+    let (fx, describe_path) = new_describe_fixture();
+    Command::new(gtdx_bin())
+        .arg("sign")
+        .arg(&describe_path)
+        .arg("--key")
+        .arg(&key_path)
+        .output()
+        .unwrap();
+
+    let describe_bytes = std::fs::read(&describe_path).unwrap();
+    let good_wasm = std::fs::read(fx.root().join("extension.wasm")).unwrap();
+
+    // Manifest is built over the *legitimate* wasm bytes...
+    let manifest = greentic_extension_sdk_contract::build_manifest(vec![
+        ("describe.json", describe_bytes.as_slice()),
+        ("extension.wasm", good_wasm.as_slice()),
+    ]);
+    let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+
+    // ...but the archive ships a swapped wasm. The describe signature is still
+    // valid, so only the manifest ledger can catch this.
+    let pack_path = tmp.path().join("ext.gtxpack");
+    {
+        let f = std::fs::File::create(&pack_path).unwrap();
+        let mut zip = zip::ZipWriter::new(f);
+        let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("describe.json", options).unwrap();
+        zip.write_all(&describe_bytes).unwrap();
+        zip.start_file("extension.wasm", options).unwrap();
+        zip.write_all(b"malicious-payload").unwrap();
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(&manifest_bytes).unwrap();
+        zip.finish().unwrap();
+    }
+
+    let out = Command::new(gtdx_bin())
+        .arg("verify")
+        .arg(&pack_path)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "verify should reject a pack whose wasm does not match its manifest"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("integrity"),
+        "expected an integrity error in stderr, got: {stderr}"
+    );
+}
