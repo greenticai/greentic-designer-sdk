@@ -16,6 +16,14 @@ pub enum RegistryError {
     #[error("install of {name}@{version} declined: requested permissions were not granted")]
     PermissionDenied { name: String, version: String },
 
+    #[error(
+        "insecure registry url: {0} (https required; http allowed only for localhost/127.0.0.1)"
+    )]
+    InsecureRegistryUrl(String),
+
+    #[error("artifact exceeds maximum size of {limit} bytes")]
+    ArtifactTooLarge { limit: usize },
+
     #[error("auth required for {0}")]
     AuthRequired(String),
 

@@ -140,6 +140,63 @@ async fn store_registry_fetch_rejects_artifact_sha_mismatch() {
 }
 
 #[tokio::test]
+async fn store_registry_fetch_rejects_oversized_artifact() {
+    let server = MockServer::start().await;
+    let describe_json = serde_json::json!({
+        "apiVersion": "greentic.ai/v2",
+        "kind": "DesignExtension",
+        "compat": {
+            "min_designer_version": ">=1.0.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "1.2.0"
+        },
+        "metadata": {
+            "id": "greentic.big", "name": "Big", "version": "1.0.0",
+            "summary": "x", "author": { "name": "G" }, "license": "MIT"
+        },
+        "engine": { "greenticDesigner": "*", "extRuntime": "*" },
+        "capabilities": { "offered": [{"id":"greentic:big/y","version":"1.0.0"}] },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
+        "contributions": {}
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/extensions/greentic.big/1.0.0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "describe": describe_json,
+            "artifactSha256": "deadbeef",
+            "publishedAt": "2026-04-17T00:00:00Z",
+            "yanked": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/extensions/greentic.big/1.0.0/artifact"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 4096]))
+        .mount(&server)
+        .await;
+
+    // Cap the download at 1 KiB; the 4 KiB body must be rejected before it is
+    // fully buffered (and before any sha check).
+    let reg =
+        GreenticStoreRegistry::new("default", server.uri(), None).with_max_artifact_bytes(1024);
+    let err = reg.fetch("greentic.big", "1.0.0").await.unwrap_err();
+    assert!(
+        err.to_string().contains("maximum size"),
+        "expected an artifact-too-large error, got: {err}"
+    );
+}
+
+#[tokio::test]
 async fn store_registry_list_versions_returns_empty_for_404() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
