@@ -79,6 +79,7 @@ pub struct FixtureRootVerifier {
 
 #[cfg(any(test, feature = "testing"))]
 impl FixtureRootVerifier {
+    /// Construct with the given root key (test/integration use only).
     #[must_use]
     pub fn new(root: VerifyingKey) -> Self {
         Self { root }

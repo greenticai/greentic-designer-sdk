@@ -4,7 +4,8 @@
 //! and every other entry unsigned. An attacker who can rewrite a `.gtxpack`
 //! in transit (or a malicious mirror) can swap `extension.wasm` while
 //! re-pointing `describe.metadata.artifact_sha256` — verification still
-//! passes because `verify_describe()` never looks at the archive contents.
+//! passes because `verify_describe_self_consistent()` never looks at the
+//! archive contents.
 //!
 //! The fix: enumerate every archive entry (excluding `manifest.json` itself)
 //! with its sha256 + byte length in a sorted ledger. Sign

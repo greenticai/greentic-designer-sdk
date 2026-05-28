@@ -5,12 +5,24 @@ use sha2::{Digest, Sha256};
 use crate::describe::DescribeJson;
 use crate::error::ContractError;
 
+fn decode_ed25519_pubkey(s: &str) -> Result<ed25519_dalek::VerifyingKey, ContractError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(strip_prefix(s))
+        .map_err(|e| ContractError::SignatureInvalid(format!("pubkey b64: {e}")))?;
+    let arr: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| ContractError::SignatureInvalid("pubkey length != 32".into()))?;
+    ed25519_dalek::VerifyingKey::from_bytes(&arr)
+        .map_err(|e| ContractError::SignatureInvalid(format!("pubkey parse: {e}")))
+}
+
 /// Compute SHA256 of artifact bytes as hex string.
 #[must_use]
 pub fn artifact_sha256(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    crate::hex::encode(hasher.finalize().as_slice())
 }
 
 #[must_use]
@@ -79,11 +91,12 @@ pub fn sign_describe(
     Ok(())
 }
 
-/// Verify the inline `.signature` field of a describe.json. Returns
-/// `Ok(())` iff signature is present, algorithm is `ed25519`, and the
-/// signature matches the canonical payload (describe with `.signature`
-/// stripped, serialized via JCS).
-pub fn verify_describe(describe: &DescribeJson) -> Result<(), ContractError> {
+/// Integrity-only check: verifies the inline signature against the key the
+/// describe *asserts about itself*. This proves the describe has not changed
+/// since signing, but NOT who signed it — an attacker can re-sign with their
+/// own key. Callers needing authenticity MUST use [`verify_describe_with_key`]
+/// against a trust-anchored key (audit C1).
+pub fn verify_describe_self_consistent(describe: &DescribeJson) -> Result<(), ContractError> {
     let sig = describe
         .signature
         .as_ref()
@@ -95,6 +108,48 @@ pub fn verify_describe(describe: &DescribeJson) -> Result<(), ContractError> {
     }
     let payload = canonical_signing_payload(describe)?;
     verify_ed25519(&sig.public_key, &sig.value, &payload)
+}
+
+/// Authenticity check: verifies the inline signature was produced by
+/// `trusted_key` AND that the describe's self-asserted key matches it. This is
+/// the C1-correct verification — the key must come from a trust anchor
+/// (trust store, TOFU pin, or a `PublisherCert` resolved via `RootVerifier`),
+/// never from the artifact alone.
+///
+/// # Errors
+/// `SignatureInvalid` if the signature field is missing, the algorithm is not
+/// ed25519, the self-asserted key does not match `trusted_key`, or the
+/// signature does not verify.
+pub fn verify_describe_with_key(
+    describe: &DescribeJson,
+    trusted_key: &ed25519_dalek::VerifyingKey,
+) -> Result<(), ContractError> {
+    let sig = describe
+        .signature
+        .as_ref()
+        .ok_or_else(|| ContractError::SignatureInvalid("missing signature field".into()))?;
+    if !matches!(sig.algorithm, crate::describe::SignatureAlgorithm::Ed25519) {
+        return Err(ContractError::SignatureInvalid(
+            "unsupported algorithm".into(),
+        ));
+    }
+    let asserted = decode_ed25519_pubkey(&sig.public_key)?;
+    if asserted.to_bytes() != trusted_key.to_bytes() {
+        return Err(ContractError::SignatureInvalid(
+            "describe signing key does not match the trusted key".into(),
+        ));
+    }
+    let payload = canonical_signing_payload(describe)?;
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&sig.value)
+        .map_err(|e| ContractError::SignatureInvalid(format!("sig b64: {e}")))?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| ContractError::SignatureInvalid("sig length != 64".into()))?;
+    trusted_key
+        .verify_strict(&payload, &ed25519_dalek::Signature::from_bytes(&sig_arr))
+        .map_err(|e| ContractError::SignatureInvalid(format!("verify: {e}")))
 }
 
 /// Compute `sha256(manifest_bytes)` and store it in `describe.manifest_sha256`

@@ -49,7 +49,12 @@ pub use self::root_verifier::FixtureRootVerifier;
 pub use self::root_verifier::{EmbeddedRootVerifier, RootVerifier};
 pub use self::runtime_component::RuntimeComponent;
 pub use self::sha256::Sha256;
+#[deprecated(
+    note = "use verify_describe_with_key (authenticity) or verify_describe_self_consistent (integrity-only)"
+)]
+pub use self::signature::verify_describe_self_consistent as verify_describe;
 pub use self::signature::{
     artifact_sha256, bind_manifest, canonical_signing_payload, sign_describe, sign_ed25519,
-    verify_describe, verify_ed25519, verify_manifest_binding,
+    verify_describe_self_consistent, verify_describe_with_key, verify_ed25519,
+    verify_manifest_binding,
 };

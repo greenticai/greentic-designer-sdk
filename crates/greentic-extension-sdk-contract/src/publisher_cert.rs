@@ -29,10 +29,11 @@ impl PublisherCert {
     /// Verify this cert was signed by `root`. Returns the authorized publisher
     /// verifying key on success.
     ///
+    /// # Note
+    /// `not_after` is not enforced here; expiry is the caller's responsibility.
+    ///
     /// # Errors
     /// `CertInvalid` on any decode/length/signature failure.
-    ///
-    /// Note: `not_after` is not enforced here; expiry is the caller's responsibility.
     pub fn verify(&self, root: &VerifyingKey) -> Result<VerifyingKey, ContractError> {
         let pub_bytes = B64
             .decode(&self.publisher_public_key)

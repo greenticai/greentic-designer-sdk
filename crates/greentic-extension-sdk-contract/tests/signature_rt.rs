@@ -1,8 +1,8 @@
 use ed25519_dalek::SigningKey;
 use greentic_extension_sdk_contract::{
     DescribeJson, SignatureAlgorithm, artifact_sha256, bind_manifest, build_manifest,
-    canonical_signing_payload, sign_describe, sign_ed25519, verify_describe, verify_ed25519,
-    verify_manifest_binding,
+    canonical_signing_payload, sign_describe, sign_ed25519, verify_describe_self_consistent,
+    verify_ed25519, verify_manifest_binding,
 };
 use rand::rngs::OsRng;
 
@@ -128,13 +128,13 @@ fn sign_describe_then_verify_describe_roundtrip() {
     let sk = SigningKey::generate(&mut OsRng);
     let mut d = sample_describe_with_sig(None);
     sign_describe(&mut d, &sk).expect("sign");
-    verify_describe(&d).expect("verify");
+    verify_describe_self_consistent(&d).expect("verify");
 }
 
 #[test]
 fn verify_describe_missing_signature_fails() {
     let d = sample_describe_with_sig(None);
-    let err = verify_describe(&d).unwrap_err();
+    let err = verify_describe_self_consistent(&d).unwrap_err();
     assert!(matches!(
         err,
         greentic_extension_sdk_contract::ContractError::SignatureInvalid(_)
@@ -148,7 +148,7 @@ fn verify_describe_rejects_tampered_metadata() {
     let mut d = sample_describe_with_sig(None);
     sign_describe(&mut d, &sk).expect("sign");
     d.metadata.version = "99.99.99".into();
-    let err = verify_describe(&d).unwrap_err();
+    let err = verify_describe_self_consistent(&d).unwrap_err();
     assert!(matches!(
         err,
         greentic_extension_sdk_contract::ContractError::SignatureInvalid(_)
@@ -208,7 +208,7 @@ fn verify_describe_survives_serde_round_trip() {
     sign_describe(&mut d1, &sk).expect("sign");
     let json = serde_json::to_string(&d1).unwrap();
     let d2: DescribeJson = serde_json::from_str(&json).unwrap();
-    verify_describe(&d2).expect("verify after serde roundtrip");
+    verify_describe_self_consistent(&d2).expect("verify after serde roundtrip");
 }
 
 #[test]
