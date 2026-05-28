@@ -119,7 +119,8 @@ pub fn verify_describe_self_consistent(describe: &DescribeJson) -> Result<(), Co
 /// # Errors
 /// `SignatureInvalid` if the signature field is missing, the algorithm is not
 /// ed25519, the self-asserted key does not match `trusted_key`, or the
-/// signature does not verify.
+/// signature does not verify. `Canonicalize` if the describe cannot be
+/// canonicalized for payload computation.
 pub fn verify_describe_with_key(
     describe: &DescribeJson,
     trusted_key: &ed25519_dalek::VerifyingKey,
@@ -140,16 +141,10 @@ pub fn verify_describe_with_key(
         ));
     }
     let payload = canonical_signing_payload(describe)?;
-    let sig_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&sig.value)
-        .map_err(|e| ContractError::SignatureInvalid(format!("sig b64: {e}")))?;
-    let sig_arr: [u8; 64] = sig_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| ContractError::SignatureInvalid("sig length != 64".into()))?;
-    trusted_key
-        .verify_strict(&payload, &ed25519_dalek::Signature::from_bytes(&sig_arr))
-        .map_err(|e| ContractError::SignatureInvalid(format!("verify: {e}")))
+    // The asserted key is proven equal to `trusted_key` above, so verifying
+    // against the embedded key is equivalent to verifying against the trusted
+    // key. Delegate to the shared verifier (which uses verify_strict).
+    verify_ed25519(&sig.public_key, &sig.value, &payload)
 }
 
 /// Compute `sha256(manifest_bytes)` and store it in `describe.manifest_sha256`
