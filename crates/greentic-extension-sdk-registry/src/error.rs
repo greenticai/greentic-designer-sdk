@@ -27,6 +27,16 @@ pub enum RegistryError {
     #[error("{name}@{version} is yanked; re-run with --force to install anyway")]
     Yanked { name: String, version: String },
 
+    #[error(
+        "publisher key for {name} changed (pinned {pinned}, got {presented}); refusing install — \
+         verify the publisher or remove the pin to re-trust"
+    )]
+    PublisherKeyChanged {
+        name: String,
+        pinned: String,
+        presented: String,
+    },
+
     #[error("auth required for {0}")]
     AuthRequired(String),
 

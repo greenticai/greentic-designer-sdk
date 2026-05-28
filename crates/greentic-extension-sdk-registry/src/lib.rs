@@ -16,6 +16,7 @@ pub mod publish;
 pub mod registry;
 pub mod storage;
 pub mod store;
+pub mod trust_store;
 pub mod types;
 
 pub use self::error::RegistryError;

@@ -63,6 +63,9 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         let artifact = self.registry.fetch(name, version).await?;
         Self::verify_signature(&artifact, opts.trust_policy)?;
         verify_integrity(&artifact, opts.trust_policy)?;
+        if opts.trust_policy == TrustPolicy::Normal {
+            tofu_verify(self.storage.root(), &artifact.describe)?;
+        }
         self.install_artifact(&artifact, opts)
     }
 
@@ -203,6 +206,26 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
     }
 }
 
+/// Trust-on-first-use check (`Normal` policy): pin the publisher key that signed
+/// this describe on first install of the id, and require the same key on later
+/// installs. Requires a signed describe (the key to pin comes from its signature).
+fn tofu_verify(
+    root: &std::path::Path,
+    describe: &greentic_extension_sdk_contract::DescribeJson,
+) -> Result<(), RegistryError> {
+    let key = describe
+        .signature
+        .as_ref()
+        .map(|s| s.public_key.as_str())
+        .ok_or_else(|| {
+            RegistryError::SignatureInvalid(
+                "unsigned describe cannot be trusted under Normal policy (TOFU needs a signature)"
+                    .into(),
+            )
+        })?;
+    crate::trust_store::TrustStore::new(root).pin_or_verify(&describe.metadata.id, key)
+}
+
 /// Read the raw `manifest.json` bytes from a `.gtxpack` zip, if present.
 fn read_manifest_bytes(zip_bytes: &[u8]) -> Result<Option<Vec<u8>>, RegistryError> {
     use std::io::Read as _;
@@ -336,5 +359,39 @@ mod tests {
         let describe = base_describe();
         let bytes = zip_bytes(&[("extension.wasm", WASM)]); // no manifest at all
         verify_integrity(&artifact(describe, bytes), TrustPolicy::Loose).unwrap();
+    }
+
+    fn signed_with(describe: &mut greentic_extension_sdk_contract::DescribeJson, pubkey: &str) {
+        describe.signature = Some(greentic_extension_sdk_contract::Signature {
+            algorithm: greentic_extension_sdk_contract::SignatureAlgorithm::Ed25519,
+            public_key: pubkey.into(),
+            value: "sig".into(),
+            key_id: None,
+        });
+    }
+
+    #[test]
+    fn tofu_pins_then_rejects_changed_key() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut d = base_describe();
+        signed_with(&mut d, "PUBKEY1");
+        tofu_verify(tmp.path(), &d).unwrap(); // first use pins
+        tofu_verify(tmp.path(), &d).unwrap(); // same key accepted
+
+        signed_with(&mut d, "PUBKEY2");
+        assert!(
+            matches!(
+                tofu_verify(tmp.path(), &d),
+                Err(RegistryError::PublisherKeyChanged { .. })
+            ),
+            "a different publisher key must be rejected"
+        );
+    }
+
+    #[test]
+    fn tofu_requires_a_signature() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let d = base_describe(); // signature: None
+        assert!(tofu_verify(tmp.path(), &d).is_err());
     }
 }
