@@ -66,15 +66,24 @@ impl OciRegistry {
         self
     }
 
-    fn reference(&self, name: &str, version: &str) -> Reference {
+    fn reference(&self, name: &str, version: &str) -> Result<Reference, RegistryError> {
         let artifact = self.artifact_name.as_deref().unwrap_or(name);
-        format!(
-            "{}/{}/{artifact}:{version}",
-            self.registry_host, self.namespace
-        )
-        .parse()
-        .expect("valid reference")
+        build_reference(&self.registry_host, &self.namespace, artifact, version)
     }
+}
+
+/// Build an OCI [`Reference`] from its parts, returning an error instead of
+/// panicking when the inputs (often config- or registry-derived) don't form a
+/// valid reference.
+fn build_reference(
+    host: &str,
+    namespace: &str,
+    artifact: &str,
+    version: &str,
+) -> Result<Reference, RegistryError> {
+    format!("{host}/{namespace}/{artifact}:{version}")
+        .parse()
+        .map_err(|e| RegistryError::Oci(format!("invalid OCI reference: {e}")))
 }
 
 #[async_trait]
@@ -99,7 +108,7 @@ impl ExtensionRegistry for OciRegistry {
     }
 
     async fn fetch(&self, name: &str, version: &str) -> Result<ExtensionArtifact, RegistryError> {
-        let reference = self.reference(name, version);
+        let reference = self.reference(name, version)?;
         let pulled = self
             .client
             .pull(
@@ -150,7 +159,7 @@ impl ExtensionRegistry for OciRegistry {
         &self,
         req: crate::publish::PublishRequest,
     ) -> Result<crate::publish::PublishReceipt, RegistryError> {
-        let reference = self.reference(&req.ext_name, &req.version);
+        let reference = self.reference(&req.ext_name, &req.version)?;
 
         let layer = ImageLayer::new(
             req.artifact_bytes,
@@ -207,4 +216,27 @@ fn map_oci_error(
         };
     }
     RegistryError::Oci(rendered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_reference;
+    use crate::error::RegistryError;
+
+    #[test]
+    fn build_reference_ok_for_valid_parts() {
+        let r = build_reference("ghcr.io", "greenticai", "ext", "1.0.0").unwrap();
+        assert_eq!(r.whole(), "ghcr.io/greenticai/ext:1.0.0");
+    }
+
+    #[test]
+    fn build_reference_errs_instead_of_panicking_on_invalid() {
+        // A tag containing a space is not a valid OCI reference; the old code
+        // `.expect("valid reference")` would panic here.
+        let err = build_reference("ghcr.io", "greenticai", "ext", "bad tag").unwrap_err();
+        assert!(
+            matches!(err, RegistryError::Oci(_)),
+            "expected RegistryError::Oci, got {err}"
+        );
+    }
 }
