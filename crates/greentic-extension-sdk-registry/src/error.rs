@@ -24,6 +24,9 @@ pub enum RegistryError {
     #[error("artifact exceeds maximum size of {limit} bytes")]
     ArtifactTooLarge { limit: usize },
 
+    #[error("{name}@{version} is yanked; re-run with --force to install anyway")]
+    Yanked { name: String, version: String },
+
     #[error("auth required for {0}")]
     AuthRequired(String),
 

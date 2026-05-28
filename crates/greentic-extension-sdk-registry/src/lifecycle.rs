@@ -48,6 +48,18 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         version: &str,
         opts: InstallOptions,
     ) -> Result<(), RegistryError> {
+        // Best-effort yanked check: refuse a yanked version unless forced.
+        // Skipped silently for registries that don't support metadata
+        // introspection (e.g. OCI), which return an error here.
+        if let Ok(metadata) = self.registry.metadata(name, version).await
+            && metadata.yanked
+            && !opts.force
+        {
+            return Err(RegistryError::Yanked {
+                name: name.into(),
+                version: version.into(),
+            });
+        }
         let artifact = self.registry.fetch(name, version).await?;
         Self::verify_signature(&artifact, opts.trust_policy)?;
         self.install_artifact(&artifact, opts)

@@ -121,6 +121,70 @@ async fn installs_from_local_registry() {
     assert!(dir.join("extension.wasm").exists());
 }
 
+#[tokio::test]
+async fn install_refuses_yanked_version_without_force() {
+    use greentic_extension_sdk_registry::store::GreenticStoreRegistry;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let describe_json = serde_json::json!({
+        "apiVersion": "greentic.ai/v2",
+        "kind": "DesignExtension",
+        "compat": { "min_designer_version": ">=1.0.0", "min_runner_version": "^0.12.0", "contract_version": "1.2.0" },
+        "metadata": { "id": "greentic.yanked", "name": "Y", "version": "1.0.0", "summary": "x", "author": { "name": "G" }, "license": "MIT" },
+        "engine": { "greenticDesigner": "*", "extRuntime": "*" },
+        "capabilities": { "offered": [{"id":"greentic:y/c","version":"1.0.0"}] },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
+        "contributions": {}
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/extensions/greentic.yanked/1.0.0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "describe": describe_json,
+            "artifactSha256": "deadbeef",
+            "publishedAt": "2026-04-17T00:00:00Z",
+            "yanked": true
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp_home = TempDir::new().unwrap();
+    let storage = Storage::new(tmp_home.path());
+    let reg = GreenticStoreRegistry::new("default", server.uri(), None);
+    let installer = Installer::new(storage, &reg);
+
+    let err = installer
+        .install(
+            "greentic.yanked",
+            "1.0.0",
+            InstallOptions {
+                trust_policy: TrustPolicy::Loose,
+                accept_permissions: true,
+                force: false,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            greentic_extension_sdk_registry::error::RegistryError::Yanked { .. }
+        ),
+        "expected Yanked, got {err}"
+    );
+}
+
 #[test]
 fn begin_install_uses_distinct_staging_dirs() {
     let tmp_home = TempDir::new().unwrap();
