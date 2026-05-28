@@ -37,6 +37,11 @@ pub enum RegistryError {
         presented: String,
     },
 
+    #[error(
+        "publisher of {name} is not trusted under Strict policy — its key is not in the trust store"
+    )]
+    UntrustedPublisher { name: String },
+
     #[error("auth required for {0}")]
     AuthRequired(String),
 

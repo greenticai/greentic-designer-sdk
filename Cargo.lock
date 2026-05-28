@@ -990,9 +990,11 @@ version = "1.3.0-research"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "ciborium",
  "dialoguer",
+ "ed25519-dalek",
  "fs2",
  "greentic-extension-sdk-contract",
  "greentic-extension-sdk-testing",
