@@ -62,6 +62,7 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         }
         let artifact = self.registry.fetch(name, version).await?;
         Self::verify_signature(&artifact, opts.trust_policy)?;
+        verify_integrity(&artifact, opts.trust_policy)?;
         self.install_artifact(&artifact, opts)
     }
 
@@ -199,5 +200,141 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         version: &str,
     ) -> Result<(), RegistryError> {
         self.storage.remove_extension(kind, name, version)
+    }
+}
+
+/// Read the raw `manifest.json` bytes from a `.gtxpack` zip, if present.
+fn read_manifest_bytes(zip_bytes: &[u8]) -> Result<Option<Vec<u8>>, RegistryError> {
+    use std::io::Read as _;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
+        .map_err(|e| RegistryError::Storage(format!("zip open: {e}")))?;
+    match archive.by_name(greentic_extension_sdk_contract::MANIFEST_ENTRY_NAME) {
+        Ok(mut entry) => {
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)?;
+            Ok(Some(buf))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+/// Enforce whole-archive integrity for trusted installs: every file must match
+/// the `manifest.json` ledger, and the (signed) describe must commit to that
+/// manifest via `manifestSha256`. Skipped under `Loose` (the dev bypass), which
+/// also skips signature verification.
+fn verify_integrity(
+    artifact: &ExtensionArtifact,
+    policy: TrustPolicy,
+) -> Result<(), RegistryError> {
+    if policy == TrustPolicy::Loose {
+        return Ok(());
+    }
+    let Some(manifest_bytes) = read_manifest_bytes(&artifact.bytes)? else {
+        return Err(RegistryError::SignatureInvalid(
+            "archive has no manifest.json — cannot verify whole-archive integrity".into(),
+        ));
+    };
+    // Every entry hashes to what the ledger records (catches a swapped wasm).
+    greentic_extension_sdk_contract::verify_archive_against_manifest(&artifact.bytes)
+        .map_err(|e| RegistryError::SignatureInvalid(format!("manifest: {e}")))?;
+    // The describe (covered by its signature) commits to exactly this manifest.
+    greentic_extension_sdk_contract::verify_manifest_binding(&artifact.describe, &manifest_bytes)
+        .map_err(|e| RegistryError::SignatureInvalid(e.to_string()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use greentic_extension_sdk_contract::{ExtensionKind, build_manifest};
+    use greentic_extension_sdk_testing::ExtensionFixtureBuilder;
+    use std::io::Write as _;
+
+    fn base_describe() -> greentic_extension_sdk_contract::DescribeJson {
+        let fx = ExtensionFixtureBuilder::new(ExtensionKind::Design, "greentic.itest", "1.0.0")
+            .offer("greentic:i/c", "1.0.0")
+            .with_wasm(vec![])
+            .build()
+            .unwrap();
+        serde_json::from_slice(&std::fs::read(&fx.describe_path).unwrap()).unwrap()
+    }
+
+    fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            for (name, body) in entries {
+                w.start_file::<_, ()>(*name, zip::write::FileOptions::default())
+                    .unwrap();
+                w.write_all(body).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        buf
+    }
+
+    fn artifact(
+        describe: greentic_extension_sdk_contract::DescribeJson,
+        bytes: Vec<u8>,
+    ) -> ExtensionArtifact {
+        ExtensionArtifact {
+            name: "greentic.itest".into(),
+            version: "1.0.0".into(),
+            describe,
+            bytes,
+            signature: None,
+        }
+    }
+
+    const WASM: &[u8] = b"\0asm\x01\x00\x00\x00";
+
+    #[test]
+    fn integrity_ok_for_bound_and_intact_archive() {
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe = base_describe();
+        greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
+        let bytes = zip_bytes(&[("extension.wasm", WASM), ("manifest.json", &manifest_json)]);
+        verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal).unwrap();
+    }
+
+    #[test]
+    fn integrity_rejects_tampered_wasm() {
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe = base_describe();
+        greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
+        // Archive ships a different wasm than the manifest records.
+        let bytes = zip_bytes(&[
+            ("extension.wasm", b"evil"),
+            ("manifest.json", &manifest_json),
+        ]);
+        assert!(verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal).is_err());
+    }
+
+    #[test]
+    fn integrity_rejects_missing_manifest_under_normal() {
+        let describe = base_describe();
+        let bytes = zip_bytes(&[("extension.wasm", WASM)]);
+        assert!(verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal).is_err());
+    }
+
+    #[test]
+    fn integrity_rejects_binding_mismatch() {
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe = base_describe();
+        // Bind to a *different* manifest, so the describe doesn't commit to the
+        // one shipped in the archive.
+        describe.manifest_sha256 = Some("0".repeat(64));
+        let bytes = zip_bytes(&[("extension.wasm", WASM), ("manifest.json", &manifest_json)]);
+        assert!(verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal).is_err());
+    }
+
+    #[test]
+    fn integrity_skipped_under_loose() {
+        let describe = base_describe();
+        let bytes = zip_bytes(&[("extension.wasm", WASM)]); // no manifest at all
+        verify_integrity(&artifact(describe, bytes), TrustPolicy::Loose).unwrap();
     }
 }
