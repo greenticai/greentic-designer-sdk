@@ -16,6 +16,7 @@ pub mod manifest;
 pub mod migration;
 pub mod pack_writer;
 pub mod publisher_cert;
+pub mod root_verifier;
 pub mod runtime_component;
 pub mod schema;
 pub mod sha256;
@@ -43,6 +44,9 @@ pub use self::pack_writer::{
     PackEntry, PackWriterError, build_gtxpack, build_gtxpack_with_manifest, sha256_hex,
 };
 pub use self::publisher_cert::PublisherCert;
+#[cfg(any(test, feature = "testing"))]
+pub use self::root_verifier::FixtureRootVerifier;
+pub use self::root_verifier::{EmbeddedRootVerifier, RootVerifier};
 pub use self::runtime_component::RuntimeComponent;
 pub use self::sha256::Sha256;
 pub use self::signature::{
