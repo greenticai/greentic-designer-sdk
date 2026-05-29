@@ -101,12 +101,20 @@ in parallel commit `67528c0`). The gaps below are what remains.
   / `MockSecretsBackend` optionally enforce declared permissions via
   `restrict_to_hosts` / `restrict_to` (M7).
 
-### P5 — runtime (`greentic-designer-extensions`, separate repo, branch `research`) — ⏳ REMAINING
-- `verify_dir_signature` (`runtime.rs:235`): replace `verify_describe` with
-  `verify_describe_with_key` (anchored) + add `verify_manifest_binding`.
-- `verify_dir_manifest` (`runtime.rs:261`): remove the fail-open on missing
-  `manifest.json` — reject unless `dev-allow-unsigned`. Reference extensions
-  must be rebuilt in the new format (cascade).
+### P5 — runtime (`greentic-designer-extensions`, separate repo) — 🟡 PARTIAL (PR #68 → `research`)
+Done (branch `fix/audit-p5-trust-chain`, `greentic-biz/greentic-designer-extensions` PR #68):
+- Bumped contract `=1.2.3-research` → `=1.3.0-research` (local `[patch.crates-io]` path).
+- `verify_dir_signature`: `verify_describe` → `verify_describe_self_consistent`.
+- `verify_dir_manifest`: **fails closed** — missing `manifest.json` rejected
+  (dev-allow-unsigned escape kept), `verify_manifest_binding` added (describe↔
+  manifest), per-entry hash check retained. Test fixtures rebuilt as real
+  bind→sign→manifest packs; `manifest_gate.rs` rewritten to the fail-closed model.
+
+Remaining:
+- **Publish `1.3.0-research` (contract/registry/testing) to crates.io** before PR
+  #68 leaves `research` — downstream/CI can't resolve the local path patch.
+- Anchored authenticity: `verify_dir_signature` → `verify_describe_with_key`
+  needs a runtime trust store + the org-provisioned root key (org-blocked).
 
 ### store-server (org-blocked)
 KMS root key + `PublisherCert` issuance + advertised signed digests. Not local.
