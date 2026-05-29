@@ -119,6 +119,20 @@ precedence order: `--key <path>`, `--key-id <id>` (loads
 To sign a `describe.json` in isolation (outside a pack), use `gtdx sign --key
 my-key.pem ./`.
 
+### Verify a pack
+
+```bash
+gtdx verify ./dist/my-ext-0.1.0.gtxpack                  # integrity + binding + ledger
+gtdx verify ./dist/my-ext-0.1.0.gtxpack --trusted-key <b64-pubkey>  # + authenticity
+```
+
+For an archive, `verify` runs the full chain: the `describe.json` signature, the
+manifest binding (`manifestSha256`), and the whole-archive integrity ledger
+(`manifest.json`) — so a tampered `extension.wasm` or smuggled file is caught,
+not just a tampered descriptor. Without `--trusted-key` the signature is only
+checked for self-consistency (the describe is unmodified); pass `--trusted-key`
+to additionally anchor *who* signed it.
+
 ## Audit + roadmap
 
 The May 2026 extensions audit completion summary, design rationale, and
