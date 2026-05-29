@@ -102,12 +102,22 @@ watcher loop).
 
 ### Sign and publish
 
+`keygen`, `sign`, and `publish --sign` all use one key format: **PKCS8 PEM**
+ed25519.
+
 ```bash
-gtdx keygen > my-key.pem
-gtdx sign --key my-key.pem ./
-gtdx login                       # auth to Greentic Store
-gtdx publish ./
+gtdx keygen --out my-key.pem            # PKCS8 PEM private key (mode 0600)
+gtdx login                              # auth to Greentic Store
+gtdx publish --sign --key my-key.pem ./ # bind manifest, then sign — one step
 ```
+
+`publish --sign` binds the whole-archive manifest into `describe.json` and then
+signs, so the embedded signature covers the entire pack. Key sources, in
+precedence order: `--key <path>`, `--key-id <id>` (loads
+`~/.greentic/keys/<id>.key`), or the `GREENTIC_EXT_SIGNING_KEY_PEM` env var (CI).
+
+To sign a `describe.json` in isolation (outside a pack), use `gtdx sign --key
+my-key.pem ./`.
 
 ## Audit + roadmap
 

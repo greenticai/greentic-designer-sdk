@@ -23,13 +23,23 @@ pub struct Args {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Sign .gtxpack with local key from ~/.greentic/keys/.
+    /// Sign .gtxpack (requires a key via --key, --key-id, or --key-env).
     #[arg(long)]
     pub sign: bool,
 
-    /// Signing key id (requires --sign).
+    /// Signing key id. Loads the PKCS8 PEM at ~/.greentic/keys/<id>.key and
+    /// labels the signature with <id>. Ignored when --key is given.
     #[arg(long)]
     pub key_id: Option<String>,
+
+    /// Explicit PKCS8 PEM signing-key file (overrides --key-id).
+    #[arg(long)]
+    pub key: Option<PathBuf>,
+
+    /// Read the PKCS8 PEM signing key from this env var when no file/key-id is
+    /// given (CI / headless). Default: `GREENTIC_EXT_SIGNING_KEY_PEM`.
+    #[arg(long, default_value = crate::signing::DEFAULT_KEY_ENV)]
+    pub key_env: String,
 
     /// loose | normal | strict
     #[arg(long, default_value = "loose")]
@@ -67,9 +77,10 @@ pub struct Args {
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
-    if args.sign {
+    if args.sign && args.key.is_none() && args.key_id.is_none() {
         eprintln!(
-            "warning: Phase 1 signing reuses Wave 1 JCS sign_describe. Safe to use, but key management + rotation land in Phase 2."
+            "note: --sign with no --key/--key-id; reading PKCS8 PEM from ${}",
+            args.key_env
         );
     }
     let project_dir = project_dir_from_manifest(&args.manifest)?;
@@ -88,6 +99,8 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         force: args.force,
         sign: args.sign,
         key_id: args.key_id,
+        key_path: args.key,
+        key_env: args.key_env,
         version_override: args.version,
         trust_policy: args.trust,
         verify_only: args.verify_only,

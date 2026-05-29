@@ -4,6 +4,7 @@ mod commands;
 mod dev;
 mod publish;
 mod scaffold;
+mod signing;
 
 use clap::{Parser, Subcommand};
 
