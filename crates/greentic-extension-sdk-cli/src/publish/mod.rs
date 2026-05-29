@@ -12,7 +12,7 @@ use greentic_extension_sdk_registry::publish::{PublishRequest, SignatureBlob};
 use greentic_extension_sdk_registry::registry::ExtensionRegistry;
 
 use crate::dev::builder::{Profile, run_build};
-use crate::dev::packer::build_pack;
+use crate::dev::packer::build_pack_with_key;
 use crate::publish::receipt::{PublishReceiptJson, write_receipt};
 use crate::publish::validator::{format_errors, validate_for_publish};
 
@@ -300,27 +300,39 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
     let build = run_build(&cfg.project_dir, cfg.profile)
         .map_err(|e| PublishError::Build(format!("cargo component build: {e}")))?;
 
-    // 5. Pack deterministic .gtxpack (staging file).
-    let staging_pack = cfg.project_dir.join("dist/publish-staging.gtxpack");
-    let info = build_pack(&cfg.project_dir, &build.wasm_path, &staging_pack)
-        .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
-    let pack_bytes = std::fs::read(&staging_pack).map_err(io_err)?;
-
-    // 6. Optional signing (reuse Wave 1 JCS sign_describe).
-    let signature = if cfg.sign {
+    // 5. Resolve the signing key first (if requested), so the *pack's*
+    //    describe.json is manifest-bound and signed — the installable artifact
+    //    carries the authenticated descriptor, not just the registry metadata.
+    let key_and_id = if cfg.sign {
         let key_id = cfg
             .key_id
             .clone()
             .ok_or_else(|| PublishError::Other(anyhow::anyhow!("--sign requires --key-id")))?;
         let signing_key = load_signing_key(&cfg.home, &key_id)
             .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
-        greentic_extension_sdk_contract::sign_describe(&mut describe, &signing_key)
-            .map_err(|e| PublishError::Other(anyhow::anyhow!("sign: {e}")))?;
-        let sig = describe
-            .signature
-            .as_ref()
-            .ok_or_else(|| PublishError::Other(anyhow::anyhow!("signing produced no signature")))?;
-        Some(SignatureBlob {
+        Some((signing_key, key_id))
+    } else {
+        None
+    };
+
+    // 6. Pack deterministic .gtxpack (manifest-bound; signed when a key is set).
+    let staging_pack = cfg.project_dir.join("dist/publish-staging.gtxpack");
+    let info = build_pack_with_key(
+        &cfg.project_dir,
+        &build.wasm_path,
+        &staging_pack,
+        key_and_id.as_ref().map(|(key, _)| key),
+    )
+    .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
+    let pack_bytes = std::fs::read(&staging_pack).map_err(io_err)?;
+
+    // The pack's describe.json is now authoritative (bound + signed); use it for
+    // the registry metadata so the two match exactly.
+    describe = serde_json::from_slice(&info.describe_bytes)
+        .map_err(|e| PublishError::Other(anyhow::anyhow!("parse signed describe: {e}")))?;
+
+    let signature = match (&key_and_id, &describe.signature) {
+        (Some((_, key_id)), Some(sig)) => Some(SignatureBlob {
             algorithm: match sig.algorithm {
                 greentic_extension_sdk_contract::SignatureAlgorithm::Ed25519 => {
                     "ed25519".to_string()
@@ -328,10 +340,9 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
             },
             public_key: sig.public_key.clone(),
             value: sig.value.clone(),
-            key_id,
-        })
-    } else {
-        None
+            key_id: key_id.clone(),
+        }),
+        _ => None,
     };
 
     if cfg.dry_run {

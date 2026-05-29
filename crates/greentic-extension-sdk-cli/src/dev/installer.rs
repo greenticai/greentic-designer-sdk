@@ -90,6 +90,7 @@ mod tests {
             ext_name: "demo".into(),
             ext_version: "0.1.0".into(),
             ext_kind: "design".into(),
+            describe_bytes: desc.to_vec(),
         };
         (pack, info)
     }
