@@ -3,10 +3,12 @@
 *.pdb
 .DS_Store
 .idea/
-.vscode/
+temp_auto_push.bat
 .env
 .env.*
 !.env.example
 *.pem
 *.key
 credentials.toml
+.gitignore
+branch_structure.json

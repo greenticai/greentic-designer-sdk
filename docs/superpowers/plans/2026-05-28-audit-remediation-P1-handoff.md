@@ -7,7 +7,7 @@
 > same branch. This note hands off the remaining trust-model wiring so the
 > P1 machinery is not orphaned.
 
-## What P1 delivered (contract crate `greentic-extension-sdk-contract`, v1.3.0-research)
+## What P1 delivered (contract crate `greentic-extension-sdk-contract`, v1.2.4-research)
 
 The acyclic trust chain primitives + the C1 authenticity machinery:
 
@@ -103,7 +103,7 @@ in parallel commit `67528c0`). The gaps below are what remains.
 
 ### P5 — runtime (`greentic-designer-extensions`, separate repo) — 🟡 PARTIAL (PR #68 → `research`)
 Done (branch `fix/audit-p5-trust-chain`, `greentic-biz/greentic-designer-extensions` PR #68):
-- Bumped contract `=1.2.3-research` → `=1.3.0-research` (local `[patch.crates-io]` path).
+- Bumped contract `=1.2.3-research` → `=1.2.4-research` (local `[patch.crates-io]` path).
 - `verify_dir_signature`: `verify_describe` → `verify_describe_self_consistent`.
 - `verify_dir_manifest`: **fails closed** — missing `manifest.json` rejected
   (dev-allow-unsigned escape kept), `verify_manifest_binding` added (describe↔
@@ -111,7 +111,7 @@ Done (branch `fix/audit-p5-trust-chain`, `greentic-biz/greentic-designer-extensi
   bind→sign→manifest packs; `manifest_gate.rs` rewritten to the fail-closed model.
 
 Remaining:
-- **Publish `1.3.0-research` (contract/registry/testing) to crates.io** before PR
+- **Publish `1.2.4-research` (contract/registry/testing) to crates.io** before PR
   #68 leaves `research` — downstream/CI can't resolve the local path patch.
 - Anchored authenticity: `verify_dir_signature` → `verify_describe_with_key`
   needs a runtime trust store + the org-provisioned root key (org-blocked).
