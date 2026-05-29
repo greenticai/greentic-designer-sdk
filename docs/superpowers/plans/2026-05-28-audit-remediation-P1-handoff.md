@@ -111,8 +111,12 @@ Done (branch `fix/audit-p5-trust-chain`, `greentic-biz/greentic-designer-extensi
   bind→sign→manifest packs; `manifest_gate.rs` rewritten to the fail-closed model.
 
 Remaining:
-- **Publish `1.2.4-research` (contract/registry/testing) to crates.io** before PR
-  #68 leaves `research` — downstream/CI can't resolve the local path patch.
+- **Do NOT publish `1.2.4-research` to crates.io.** `-research` versions are
+  intentionally registry-blocked (`release.yml` `publish-crates` skips tags
+  containing `research`, added in `fb57181` / audit H6/M16). Research consumers
+  resolve via the `[patch.crates-io]` local sibling checkout — that patch is the
+  intended state and stays. crates.io publish only happens when the work
+  graduates research→develop under a non-research version.
 - Anchored authenticity: `verify_dir_signature` → `verify_describe_with_key`
   needs a runtime trust store + the org-provisioned root key (org-blocked).
 
