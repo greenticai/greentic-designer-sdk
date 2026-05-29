@@ -187,7 +187,7 @@ repo is available and the org decision is made.
 
 ## Versioning & rollout
 
-- Bump the contract crate (e.g. `1.3.0-research`) — breaking `describe`/manifest
+- Bump the contract crate (e.g. `1.2.4-research`) — breaking `describe`/manifest
   format.
 - Reference-extension cascade rebuild (the ~8 repos from the Phase-D plan) is a
   tracked follow-up; only repos present locally are touched here.

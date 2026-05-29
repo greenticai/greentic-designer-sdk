@@ -253,7 +253,7 @@ mod tests {
         let desc = br#"{
   "apiVersion": "greentic.ai/v2",
   "kind": "DesignExtension",
-  "compat": {"min_designer_version": ">=1.0.0", "min_runner_version": "^0.12.0", "contract_version": "1.3.0-research"},
+  "compat": {"min_designer_version": ">=1.0.0", "min_runner_version": "^0.12.0", "contract_version": "1.2.4-research"},
   "metadata": {"id": "com.example.demo", "name": "demo", "version": "0.1.0", "summary": "x", "author": {"name": "a"}, "license": "Apache-2.0"},
   "engine": {"greenticDesigner": "^0.1.0", "extRuntime": "^0.1.0"},
   "capabilities": {"offered": [], "required": []},
@@ -495,7 +495,7 @@ mod tests {
             "compat": {
                 "min_designer_version": ">=1.0.0",
                 "min_runner_version": "^0.12.0",
-                "contract_version": "1.3.0-research"
+                "contract_version": "1.2.4-research"
             },
             "metadata": {
                 "id": "com.example.provider",
