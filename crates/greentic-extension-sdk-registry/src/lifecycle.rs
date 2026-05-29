@@ -61,11 +61,8 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
             });
         }
         let artifact = self.registry.fetch(name, version).await?;
-        Self::verify_signature(&artifact, opts.trust_policy)?;
         verify_integrity(&artifact, opts.trust_policy)?;
-        if opts.trust_policy == TrustPolicy::Normal {
-            tofu_verify(self.storage.root(), &artifact.describe)?;
-        }
+        verify_authenticity(self.storage.root(), &artifact.describe, opts.trust_policy)?;
         self.install_artifact(&artifact, opts)
     }
 
@@ -183,19 +180,6 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         Ok(())
     }
 
-    fn verify_signature(
-        artifact: &ExtensionArtifact,
-        policy: TrustPolicy,
-    ) -> Result<(), RegistryError> {
-        match policy {
-            TrustPolicy::Loose => Ok(()),
-            TrustPolicy::Strict | TrustPolicy::Normal => {
-                greentic_extension_sdk_contract::verify_describe(&artifact.describe)
-                    .map_err(|e| RegistryError::SignatureInvalid(e.to_string()))
-            }
-        }
-    }
-
     pub fn uninstall(
         &self,
         kind: greentic_extension_sdk_contract::ExtensionKind,
@@ -206,24 +190,68 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
     }
 }
 
-/// Trust-on-first-use check (`Normal` policy): pin the publisher key that signed
-/// this describe on first install of the id, and require the same key on later
-/// installs. Requires a signed describe (the key to pin comes from its signature).
-fn tofu_verify(
+/// Parse a base64 (optionally `ed25519:`-prefixed) ed25519 public key.
+fn parse_verifying_key(b64: &str) -> Result<ed25519_dalek::VerifyingKey, RegistryError> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    let bytes = B64
+        .decode(b64.strip_prefix("ed25519:").unwrap_or(b64))
+        .map_err(|e| RegistryError::SignatureInvalid(format!("publisher key b64: {e}")))?;
+    let arr: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| RegistryError::SignatureInvalid("publisher key length != 32".into()))?;
+    ed25519_dalek::VerifyingKey::from_bytes(&arr)
+        .map_err(|e| RegistryError::SignatureInvalid(format!("publisher key parse: {e}")))
+}
+
+/// Verify the describe is authentically signed *by a trusted key* — not merely
+/// self-consistent. The signature is checked first (so a bad signature never
+/// poisons the trust store), then the trust anchor is applied per policy:
+/// - `Loose`  → skipped (dev bypass).
+/// - `Normal` → TOFU: pin the signing key on first install, require it after.
+/// - `Strict` → the signing key must already be in the trust store.
+///
+/// (`PublisherCert`→root resolution is wired in the contract crate but stays
+/// fail-closed until the production root key is provisioned, so Strict today
+/// trusts keys pinned via a prior Normal install or added out-of-band.)
+fn verify_authenticity(
     root: &std::path::Path,
     describe: &greentic_extension_sdk_contract::DescribeJson,
+    policy: TrustPolicy,
 ) -> Result<(), RegistryError> {
-    let key = describe
+    if policy == TrustPolicy::Loose {
+        return Ok(());
+    }
+    let key_b64 = describe
         .signature
         .as_ref()
-        .map(|s| s.public_key.as_str())
+        .map(|s| s.public_key.clone())
         .ok_or_else(|| {
             RegistryError::SignatureInvalid(
-                "unsigned describe cannot be trusted under Normal policy (TOFU needs a signature)"
-                    .into(),
+                "unsigned describe cannot be trusted under Normal/Strict policy".into(),
             )
         })?;
-    crate::trust_store::TrustStore::new(root).pin_or_verify(&describe.metadata.id, key)
+
+    // 1. The signature must actually verify against the key it claims.
+    let verifying_key = parse_verifying_key(&key_b64)?;
+    greentic_extension_sdk_contract::verify_describe_with_key(describe, &verifying_key)
+        .map_err(|e| RegistryError::SignatureInvalid(e.to_string()))?;
+
+    // 2. Apply the trust anchor.
+    let store = crate::trust_store::TrustStore::new(root);
+    match policy {
+        TrustPolicy::Loose => unreachable!("handled above"),
+        TrustPolicy::Normal => store.pin_or_verify(&describe.metadata.id, &key_b64),
+        TrustPolicy::Strict => {
+            if store.is_trusted(&describe.metadata.id, &key_b64)? {
+                Ok(())
+            } else {
+                Err(RegistryError::UntrustedPublisher {
+                    name: describe.metadata.id.clone(),
+                })
+            }
+        }
+    }
 }
 
 /// Read the raw `manifest.json` bytes from a `.gtxpack` zip, if present.
@@ -361,37 +389,69 @@ mod tests {
         verify_integrity(&artifact(describe, bytes), TrustPolicy::Loose).unwrap();
     }
 
-    fn signed_with(describe: &mut greentic_extension_sdk_contract::DescribeJson, pubkey: &str) {
-        describe.signature = Some(greentic_extension_sdk_contract::Signature {
-            algorithm: greentic_extension_sdk_contract::SignatureAlgorithm::Ed25519,
-            public_key: pubkey.into(),
-            value: "sig".into(),
-            key_id: None,
-        });
-    }
-
-    #[test]
-    fn tofu_pins_then_rejects_changed_key() {
-        let tmp = tempfile::TempDir::new().unwrap();
+    /// A describe really signed by the ed25519 key derived from `seed`.
+    fn signed_describe(seed: u8) -> greentic_extension_sdk_contract::DescribeJson {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
         let mut d = base_describe();
-        signed_with(&mut d, "PUBKEY1");
-        tofu_verify(tmp.path(), &d).unwrap(); // first use pins
-        tofu_verify(tmp.path(), &d).unwrap(); // same key accepted
-
-        signed_with(&mut d, "PUBKEY2");
-        assert!(
-            matches!(
-                tofu_verify(tmp.path(), &d),
-                Err(RegistryError::PublisherKeyChanged { .. })
-            ),
-            "a different publisher key must be rejected"
-        );
+        greentic_extension_sdk_contract::sign_describe(&mut d, &sk).unwrap();
+        d
     }
 
     #[test]
-    fn tofu_requires_a_signature() {
+    fn authenticity_normal_pins_then_accepts_same_key() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let d = base_describe(); // signature: None
-        assert!(tofu_verify(tmp.path(), &d).is_err());
+        let d = signed_describe(1);
+        verify_authenticity(tmp.path(), &d, TrustPolicy::Normal).unwrap(); // pins
+        verify_authenticity(tmp.path(), &d, TrustPolicy::Normal).unwrap(); // same key ok
+    }
+
+    #[test]
+    fn authenticity_normal_rejects_changed_key() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        verify_authenticity(tmp.path(), &signed_describe(1), TrustPolicy::Normal).unwrap();
+        // Same extension id, signed by a different key.
+        let other = signed_describe(2);
+        assert!(matches!(
+            verify_authenticity(tmp.path(), &other, TrustPolicy::Normal),
+            Err(RegistryError::PublisherKeyChanged { .. })
+        ));
+    }
+
+    #[test]
+    fn authenticity_strict_rejects_untrusted_then_accepts_after_pin() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let d = signed_describe(1);
+        // Strict with an empty trust store → rejected (no auto-pin).
+        assert!(matches!(
+            verify_authenticity(tmp.path(), &d, TrustPolicy::Strict),
+            Err(RegistryError::UntrustedPublisher { .. })
+        ));
+        // Pin via a Normal install, then Strict accepts the same key.
+        verify_authenticity(tmp.path(), &d, TrustPolicy::Normal).unwrap();
+        verify_authenticity(tmp.path(), &d, TrustPolicy::Strict).unwrap();
+    }
+
+    #[test]
+    fn authenticity_rejects_tampered_describe_and_pins_nothing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut d = signed_describe(1);
+        // Mutate after signing → signature no longer valid.
+        d.metadata.version = "9.9.9".into();
+        assert!(verify_authenticity(tmp.path(), &d, TrustPolicy::Normal).is_err());
+        // The bad key must NOT have been pinned.
+        let store = crate::trust_store::TrustStore::new(tmp.path());
+        assert!(store.pinned(&d.metadata.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn authenticity_skipped_under_loose() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        verify_authenticity(tmp.path(), &base_describe(), TrustPolicy::Loose).unwrap();
+    }
+
+    #[test]
+    fn authenticity_requires_signature_under_normal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(verify_authenticity(tmp.path(), &base_describe(), TrustPolicy::Normal).is_err());
     }
 }

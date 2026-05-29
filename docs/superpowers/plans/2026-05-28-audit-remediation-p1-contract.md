@@ -32,7 +32,7 @@
 | `src/pack_writer.rs` | gtxpack writer | use `hex::encode` |
 | `src/error.rs` | error enum | Add `CertInvalid`, `TrustRootUnavailable` |
 | `src/lib.rs` | exports | Register new modules + symbols |
-| `Cargo.toml` (workspace) | version | Bump to `1.3.0-research`; add `testing` feature |
+| `Cargo.toml` (workspace) | version | Bump to `1.2.4-research`; add `testing` feature |
 
 ---
 
@@ -1230,11 +1230,11 @@ git commit -m "feat(contract): trust-anchored verify_describe_with_key + rename 
 
 - [ ] **Step 1: Bump version**
 
-Determine where the version is set (the contract crate uses `version.workspace = true`). In the workspace root `Cargo.toml`, bump `[workspace.package] version` from `1.2.3-research` to `1.3.0-research` (breaking describe format).
+Determine where the version is set (the contract crate uses `version.workspace = true`). In the workspace root `Cargo.toml`, bump `[workspace.package] version` from `1.2.3-research` to `1.2.4-research` (breaking describe format).
 
 - [ ] **Step 2: Update path-dep pins if pinned with `=`**
 
-Run: `grep -rn "1.2.3-research" --include=Cargo.toml .` across the workspace and update any `=1.2.3-research` pin to `=1.3.0-research`.
+Run: `grep -rn "1.2.3-research" --include=Cargo.toml .` across the workspace and update any `=1.2.3-research` pin to `=1.2.4-research`.
 
 - [ ] **Step 3: Verify workspace still builds**
 
@@ -1245,7 +1245,7 @@ Expected: PASS.
 
 ```bash
 git add Cargo.toml
-git commit -m "chore(contract): bump to 1.3.0-research (breaking describe/manifest format)"
+git commit -m "chore(contract): bump to 1.2.4-research (breaking describe/manifest format)"
 ```
 
 ---

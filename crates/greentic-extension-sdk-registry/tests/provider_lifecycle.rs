@@ -45,7 +45,8 @@ async fn install_provider_extracts_gtpack_to_providers_gtdx_dir() {
         "0.1.0",
         &gtpack_bytes,
         &sha,
-    );
+    )
+    .unwrap();
 
     let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fixture", "0.1.0");
 
@@ -105,7 +106,8 @@ fn provider_install_rolls_back_gtpack_when_commit_fails() {
         "0.1.0",
         &gtpack_bytes,
         &sha,
-    );
+    )
+    .unwrap();
     let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fixture", "0.1.0");
 
     // Force commit_install to fail: pre-create the final extension path as a
@@ -156,7 +158,8 @@ async fn install_provider_rejects_sha256_mismatch() {
         "0.1.0",
         &real_bytes,
         &wrong_sha,
-    );
+    )
+    .unwrap();
 
     let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fake", "0.1.0");
 
@@ -191,7 +194,7 @@ async fn install_provider_refuses_conflict_with_manual_pack() {
     std::fs::create_dir_all(&manual_dir).unwrap();
     std::fs::write(
         manual_dir.join("telegram.gtpack"),
-        support::encode_gtpack_with_pack_id("greentic.provider.telegram"),
+        support::encode_gtpack_with_pack_id("greentic.provider.telegram").unwrap(),
     )
     .unwrap();
 
@@ -204,7 +207,8 @@ async fn install_provider_refuses_conflict_with_manual_pack() {
         "0.1.0",
         &gtpack_bytes,
         &sha,
-    );
+    )
+    .unwrap();
 
     let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.telegram", "0.1.0");
 

@@ -429,7 +429,8 @@ fn gtdx_install_provider_from_gtxpack_places_files() {
         "0.1.0",
         &gtpack_bytes,
         &sha,
-    );
+    )
+    .unwrap();
 
     let output = std::process::Command::new(gtdx_bin())
         .args([

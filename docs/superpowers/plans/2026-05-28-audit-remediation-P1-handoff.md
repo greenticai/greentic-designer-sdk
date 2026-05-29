@@ -7,7 +7,7 @@
 > same branch. This note hands off the remaining trust-model wiring so the
 > P1 machinery is not orphaned.
 
-## What P1 delivered (contract crate `greentic-extension-sdk-contract`, v1.3.0-research)
+## What P1 delivered (contract crate `greentic-extension-sdk-contract`, v1.2.4-research)
 
 The acyclic trust chain primitives + the C1 authenticity machinery:
 
@@ -54,7 +54,15 @@ The registry already does C2 (see `registry/src/lifecycle.rs` `verify_integrity`
 composing `verify_archive_against_manifest` + `verify_manifest_binding` — landed
 in parallel commit `67528c0`). The gaps below are what remains.
 
-### P2 — registry (`greentic-extension-sdk-registry`)
+> **Status (2026-05-29):** P2, P3, and P4 are COMPLETE on
+> `fix/integrity-verification`. Trust chain producer→verify is closed
+> end-to-end locally; only P5 (separate `greentic-designer-extensions` repo)
+> and the org-blocked store-server / prod root key remain. New commits:
+> C2 producer `a8ae3ef`, H5 PKCS8 PEM `4dc7c04`, verify full-chain `578aa60`,
+> H8 state dir-fsync `7b3917e`, P4 testing M6/M7 `4efeb85`. (C1/C3/C4 landed
+> earlier: `d6aaec2`, `617b8a8`, `67528c0`, `c2c3836`.)
+
+### P2 — registry (`greentic-extension-sdk-registry`) — ✅ SHIPPED
 1. **C1 authenticity (the key orphan risk):** `lifecycle.rs:189` still calls the
    deprecated `verify_describe` (integrity-only). Replace with
    `verify_describe_with_key(&describe, &trusted_key)` where `trusted_key` is
@@ -72,7 +80,7 @@ in parallel commit `67528c0`). The gaps below are what remains.
 4. (Already landed in parallel: https enforcement `a3a4022`, creds 0600 `a6bd3f2`,
    path-traversal `b891cfe`, staging rollback `67e27b5`, C2 enforcement `67528c0`.)
 
-### P3 — CLI (`greentic-extension-sdk-cli`)
+### P3 — CLI (`greentic-extension-sdk-cli`) — ✅ SHIPPED
 1. **bind+sign producer (no production producer binds today):** `dev/packer.rs`
    `build_pack` calls `build_gtxpack_with_manifest` but never `bind_manifest`
    nor signs → CLI packs ship `manifestSha256: None`, unsigned. In the
@@ -85,18 +93,28 @@ in parallel commit `67528c0`). The gaps below are what remains.
 4. (Already landed in parallel: H4 parse_pack_name `b9cd21f`, M8/M9/M10 wasm
    selection/dist/key-id `443713a`, lint breaking-bump WIP.)
 
-### P4 — state + testing
-- state: already landed in parallel (`820a936` RMW + lock). Confirm dir-fsync
-  (audit H8) is included; if not, add parent-dir `sync_all()` after rename.
-- testing crate: `build_provider_fixture_gtxpack` / `encode_gtpack_with_pack_id`
-  should return `Result`; mocks should optionally enforce declared permissions.
+### P4 — state + testing — ✅ SHIPPED
+- state: RMW + lock landed in parallel (`820a936`); dir-fsync (audit H8) added in
+  `7b3917e` (parent-dir `sync_all()` after rename, Unix; no-op on Windows).
+- testing crate (`4efeb85`): `build_provider_fixture_gtxpack` /
+  `encode_gtpack_with_pack_id` now return `anyhow::Result` (M6); `MockHttpClient`
+  / `MockSecretsBackend` optionally enforce declared permissions via
+  `restrict_to_hosts` / `restrict_to` (M7).
 
-### P5 — runtime (`greentic-designer-extensions`, separate repo, branch `research`)
-- `verify_dir_signature` (`runtime.rs:235`): replace `verify_describe` with
-  `verify_describe_with_key` (anchored) + add `verify_manifest_binding`.
-- `verify_dir_manifest` (`runtime.rs:261`): remove the fail-open on missing
-  `manifest.json` — reject unless `dev-allow-unsigned`. Reference extensions
-  must be rebuilt in the new format (cascade).
+### P5 — runtime (`greentic-designer-extensions`, separate repo) — 🟡 PARTIAL (PR #68 → `research`)
+Done (branch `fix/audit-p5-trust-chain`, `greentic-biz/greentic-designer-extensions` PR #68):
+- Bumped contract `=1.2.3-research` → `=1.2.4-research` (local `[patch.crates-io]` path).
+- `verify_dir_signature`: `verify_describe` → `verify_describe_self_consistent`.
+- `verify_dir_manifest`: **fails closed** — missing `manifest.json` rejected
+  (dev-allow-unsigned escape kept), `verify_manifest_binding` added (describe↔
+  manifest), per-entry hash check retained. Test fixtures rebuilt as real
+  bind→sign→manifest packs; `manifest_gate.rs` rewritten to the fail-closed model.
+
+Remaining:
+- **Publish `1.2.4-research` (contract/registry/testing) to crates.io** before PR
+  #68 leaves `research` — downstream/CI can't resolve the local path patch.
+- Anchored authenticity: `verify_dir_signature` → `verify_describe_with_key`
+  needs a runtime trust store + the org-provisioned root key (org-blocked).
 
 ### store-server (org-blocked)
 KMS root key + `PublisherCert` issuance + advertised signed digests. Not local.

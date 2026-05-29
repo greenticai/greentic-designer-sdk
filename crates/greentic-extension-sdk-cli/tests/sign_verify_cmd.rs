@@ -322,3 +322,140 @@ fn verify_rejects_gtxpack_with_tampered_wasm_when_manifest_present() {
         "expected an integrity error in stderr, got: {stderr}"
     );
 }
+
+/// Build a manifest-bound, signed `.gtxpack` at `pack_path` from `fx`'s
+/// describe + wasm, signed with `signing_key`. Mirrors the producer order:
+/// build manifest → bind → sign → pack.
+fn build_bound_signed_pack(
+    fx: &ExtensionFixture,
+    describe_path: &std::path::Path,
+    pack_path: &std::path::Path,
+    signing_key: &ed25519_dalek::SigningKey,
+    include_manifest: bool,
+) {
+    use greentic_extension_sdk_contract::{
+        DescribeJson, bind_manifest, build_manifest, sign_describe,
+    };
+
+    let wasm = std::fs::read(fx.root().join("extension.wasm")).unwrap();
+    let manifest = build_manifest(vec![("extension.wasm", wasm.as_slice())]);
+    let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+
+    let raw = std::fs::read_to_string(describe_path).unwrap();
+    let mut describe: DescribeJson = serde_json::from_str(&raw).unwrap();
+    bind_manifest(&mut describe, &manifest_bytes);
+    sign_describe(&mut describe, signing_key).unwrap();
+    let describe_bytes = serde_json::to_vec_pretty(&describe).unwrap();
+
+    let f = std::fs::File::create(pack_path).unwrap();
+    let mut zip = zip::ZipWriter::new(f);
+    let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("describe.json", options).unwrap();
+    zip.write_all(&describe_bytes).unwrap();
+    zip.start_file("extension.wasm", options).unwrap();
+    zip.write_all(&wasm).unwrap();
+    if include_manifest {
+        zip.start_file("manifest.json", options).unwrap();
+        zip.write_all(&manifest_bytes).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+fn pubkey_b64(signing_key: &ed25519_dalek::SigningKey) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(signing_key.verifying_key().to_bytes())
+}
+
+#[test]
+fn verify_runs_full_chain_on_manifest_bound_pack() {
+    let tmp = TempDir::new().unwrap();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[5u8; 32]);
+    let (fx, describe_path) = new_describe_fixture();
+    let pack_path = tmp.path().join("ext.gtxpack");
+    build_bound_signed_pack(&fx, &describe_path, &pack_path, &signing_key, true);
+
+    // Plain verify: self-consistency + manifest binding + archive ledger.
+    let out = Command::new(gtdx_bin())
+        .arg("verify")
+        .arg(&pack_path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Anchored verify against the correct key: full C1+C2 chain.
+    let out = Command::new(gtdx_bin())
+        .arg("verify")
+        .arg(&pack_path)
+        .arg("--trusted-key")
+        .arg(pubkey_b64(&signing_key))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "anchored verify stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("(anchored)"),
+        "anchored verify should note it, got: {stdout}"
+    );
+}
+
+#[test]
+fn verify_rejects_wrong_trusted_key() {
+    let tmp = TempDir::new().unwrap();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[5u8; 32]);
+    let attacker_key = ed25519_dalek::SigningKey::from_bytes(&[6u8; 32]);
+    let (fx, describe_path) = new_describe_fixture();
+    let pack_path = tmp.path().join("ext.gtxpack");
+    build_bound_signed_pack(&fx, &describe_path, &pack_path, &signing_key, true);
+
+    let out = Command::new(gtdx_bin())
+        .arg("verify")
+        .arg(&pack_path)
+        .arg("--trusted-key")
+        .arg(pubkey_b64(&attacker_key))
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "verify must reject a signature not produced by the trusted key"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("authenticity"),
+        "expected an authenticity error, got: {stderr}"
+    );
+}
+
+#[test]
+fn verify_rejects_bound_describe_with_missing_manifest() {
+    // A describe that claims a manifest binding over an archive that dropped its
+    // manifest.json — a removed ledger, which must hard-fail (not warn).
+    let tmp = TempDir::new().unwrap();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[5u8; 32]);
+    let (fx, describe_path) = new_describe_fixture();
+    let pack_path = tmp.path().join("ext.gtxpack");
+    build_bound_signed_pack(&fx, &describe_path, &pack_path, &signing_key, false);
+
+    let out = Command::new(gtdx_bin())
+        .arg("verify")
+        .arg(&pack_path)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "bound describe + no manifest.json must fail"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("ledger"),
+        "expected a removed-ledger error, got: {stderr}"
+    );
+}

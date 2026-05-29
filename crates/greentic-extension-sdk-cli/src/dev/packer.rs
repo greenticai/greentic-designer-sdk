@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use greentic_extension_sdk_contract::pack_writer::{
     PackEntry, build_gtxpack_with_manifest, sha256_hex,
 };
+use greentic_extension_sdk_contract::{DescribeJson, bind_manifest, sign_describe};
 use walkdir::WalkDir;
 
 /// Summary of a packed `.gtxpack`.
@@ -19,6 +20,10 @@ pub struct PackInfo {
     pub ext_version: String,
     #[allow(dead_code)] // Reserved for richer InstallOk events in Phase 2.
     pub ext_kind: String,
+    /// The final `describe.json` bytes written into the pack — manifest-bound
+    /// (and signed, when a key was supplied). Publish sends these so the
+    /// registry metadata matches the pack exactly.
+    pub describe_bytes: Vec<u8>,
 }
 
 /// Walk `describe.runtime.components.<key>.gtpack` and append every referenced
@@ -117,6 +122,32 @@ pub fn build_pack(
     wasm_path: &Path,
     output_pack: &Path,
 ) -> anyhow::Result<PackInfo> {
+    build_pack_with_key(project_dir, wasm_path, output_pack, None)
+}
+
+/// Read the raw `manifest.json` bytes from a freshly-built `.gtxpack`.
+fn read_manifest_from_zip(zip_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))?;
+    let mut entry = archive
+        .by_name("manifest.json")
+        .map_err(|e| anyhow::anyhow!("packer produced no manifest.json: {e}"))?;
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+/// Like [`build_pack`], but binds the whole-archive manifest into `describe.json`
+/// (`manifestSha256`) and, when `signing_key` is `Some`, signs the bound
+/// describe. The binding is keyless and always applied so the produced pack
+/// passes manifest-binding verification; signing is what makes it install under
+/// the Normal/Strict trust policies.
+pub fn build_pack_with_key(
+    project_dir: &Path,
+    wasm_path: &Path,
+    output_pack: &Path,
+    signing_key: Option<&ed25519_dalek::SigningKey>,
+) -> anyhow::Result<PackInfo> {
     let describe_path = project_dir.join("describe.json");
     let describe_bytes =
         std::fs::read(&describe_path).map_err(|e| anyhow::anyhow!("read describe.json: {e}"))?;
@@ -167,10 +198,28 @@ pub fn build_pack(
     if let Some(parent) = output_pack.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    // Use the manifest-aware packer (D.4.2/D.4.3) so the produced .gtxpack
-    // carries a `manifest.json` listing every entry's sha256. Runtime
-    // verification (verify_archive_against_manifest) detects post-publish
-    // tampering of any file, not just describe.json.
+    // Pass 1: pack to obtain the canonical `manifest.json` bytes the writer
+    // produces (post-normalization, sorted) — the exact bytes a verifier will
+    // hash. `manifest.json` excludes `describe.json`, so editing describe below
+    // does not change it on the second pass.
+    let zip1 = build_gtxpack_with_manifest(entries.clone())
+        .map_err(|e| anyhow::anyhow!("build_gtxpack_with_manifest: {e}"))?;
+    let manifest_bytes = read_manifest_from_zip(&zip1)?;
+
+    // Bind the manifest into describe (and sign when a key is supplied), then
+    // re-emit describe.json so the pack carries an authenticated descriptor.
+    let mut describe_typed: DescribeJson = serde_json::from_value(describe.clone())
+        .map_err(|e| anyhow::anyhow!("parse describe.json as typed: {e}"))?;
+    bind_manifest(&mut describe_typed, &manifest_bytes);
+    if let Some(key) = signing_key {
+        sign_describe(&mut describe_typed, key).map_err(|e| anyhow::anyhow!("sign: {e}"))?;
+    }
+    let final_describe_bytes = serde_json::to_vec_pretty(&describe_typed)?;
+    if let Some(entry) = entries.iter_mut().find(|e| e.path == "describe.json") {
+        entry.bytes.clone_from(&final_describe_bytes);
+    }
+
+    // Pass 2: final pack with the bound/signed describe.json.
     let zip_bytes = build_gtxpack_with_manifest(entries)
         .map_err(|e| anyhow::anyhow!("build_gtxpack_with_manifest: {e}"))?;
     std::fs::write(output_pack, &zip_bytes)?;
@@ -191,6 +240,7 @@ pub fn build_pack(
         ext_name,
         ext_version,
         ext_kind,
+        describe_bytes: final_describe_bytes,
     })
 }
 
@@ -203,10 +253,11 @@ mod tests {
         let desc = br#"{
   "apiVersion": "greentic.ai/v2",
   "kind": "DesignExtension",
+  "compat": {"min_designer_version": ">=1.0.0", "min_runner_version": "^0.12.0", "contract_version": "1.2.4-research"},
   "metadata": {"id": "com.example.demo", "name": "demo", "version": "0.1.0", "summary": "x", "author": {"name": "a"}, "license": "Apache-2.0"},
   "engine": {"greenticDesigner": "^0.1.0", "extRuntime": "^0.1.0"},
   "capabilities": {"offered": [], "required": []},
-  "runtime": {"components": {}, "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}},
+  "runtime": {"components": {"stub": {"oci_ref": "oci://ghcr.io/example/stub:latest", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "world": "greentic:component/stub@0.1.0"}}, "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}},
   "contributions": {}
 }"#;
         std::fs::write(root.join("describe.json"), desc).unwrap();
@@ -235,6 +286,47 @@ mod tests {
             .collect();
         assert!(names.iter().any(|n| n == "describe.json"));
         assert!(names.iter().any(|n| n == "extension.wasm"));
+    }
+
+    #[test]
+    fn build_pack_with_key_produces_verifiable_signed_pack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wasm = make_project(tmp.path());
+        let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+
+        let info = build_pack_with_key(tmp.path(), &wasm, &out, Some(&sk)).unwrap();
+        let zip_bytes = std::fs::read(&out).unwrap();
+        let manifest_bytes = read_manifest_from_zip(&zip_bytes).unwrap();
+        let describe: DescribeJson = serde_json::from_slice(&info.describe_bytes).unwrap();
+
+        // The produced pack must pass exactly the checks the registry runs at
+        // install: archive integrity, manifest binding, anchored authenticity.
+        greentic_extension_sdk_contract::verify_archive_against_manifest(&zip_bytes).unwrap();
+        greentic_extension_sdk_contract::verify_manifest_binding(&describe, &manifest_bytes)
+            .unwrap();
+        greentic_extension_sdk_contract::verify_describe_with_key(&describe, &sk.verifying_key())
+            .unwrap();
+    }
+
+    #[test]
+    fn build_pack_unsigned_is_manifest_bound_but_unsigned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wasm = make_project(tmp.path());
+        let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+
+        let info = build_pack(tmp.path(), &wasm, &out).unwrap();
+        let describe: DescribeJson = serde_json::from_slice(&info.describe_bytes).unwrap();
+        assert!(
+            describe.manifest_sha256.is_some(),
+            "manifest must be bound even without a signing key"
+        );
+        assert!(describe.signature.is_none(), "no key → no signature");
+
+        let zip_bytes = std::fs::read(&out).unwrap();
+        let manifest_bytes = read_manifest_from_zip(&zip_bytes).unwrap();
+        greentic_extension_sdk_contract::verify_manifest_binding(&describe, &manifest_bytes)
+            .unwrap();
     }
 
     #[test]
@@ -371,14 +463,40 @@ mod tests {
     /// Write a minimal provider describe.json with a single `provider` component
     /// whose `gtpack` block uses `gtpack_field` (or `null` to test the absent case).
     fn write_provider_describe(root: &Path, gtpack_field: &serde_json::Value) {
+        // Every component needs a top-level sha256 + world to be a valid
+        // `RuntimeComponent`. Absent-gtpack uses oci_ref (the offline-fallback
+        // gtpack is simply not declared); present-gtpack carries the full
+        // `RuntimeGtpack` block (file, sha256, pack_id, component_version).
+        const ZERO_SHA: &str = "0000000000000000000000000000000000000000000000000000000000000000";
         let component = if gtpack_field.is_null() {
-            serde_json::json!({})
+            serde_json::json!({
+                "oci_ref": "oci://ghcr.io/example/provider:latest",
+                "sha256": ZERO_SHA,
+                "world": "greentic:component/provider@0.1.0"
+            })
         } else {
-            serde_json::json!({ "gtpack": gtpack_field })
+            // Augment the caller's {file, sha256} block with the fields the
+            // contract requires so the describe parses as typed.
+            let mut gtpack = gtpack_field.clone();
+            let obj = gtpack.as_object_mut().expect("gtpack block is an object");
+            obj.entry("pack_id")
+                .or_insert_with(|| serde_json::json!("com.example.provider.runtime"));
+            obj.entry("component_version")
+                .or_insert_with(|| serde_json::json!("0.1.0"));
+            serde_json::json!({
+                "gtpack": gtpack,
+                "sha256": ZERO_SHA,
+                "world": "greentic:component/provider@0.1.0"
+            })
         };
         let desc = serde_json::json!({
             "apiVersion": "greentic.ai/v2",
             "kind": "ProviderExtension",
+            "compat": {
+                "min_designer_version": ">=1.0.0",
+                "min_runner_version": "^0.12.0",
+                "contract_version": "1.2.4-research"
+            },
             "metadata": {
                 "id": "com.example.provider",
                 "name": "provider",

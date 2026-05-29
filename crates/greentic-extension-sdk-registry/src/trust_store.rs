@@ -49,6 +49,13 @@ impl TrustStore {
         Ok(self.load()?.publishers.remove(id))
     }
 
+    /// Read-only check (used by `Strict`): is `key` the trusted key for `id`?
+    /// Unlike [`Self::pin_or_verify`] this never pins — under Strict an unknown
+    /// publisher must be rejected, not trusted on first use.
+    pub fn is_trusted(&self, id: &str, key: &str) -> Result<bool, RegistryError> {
+        Ok(self.pinned(id)?.as_deref() == Some(key))
+    }
+
     /// TOFU check for `id`:
     /// - not pinned yet → pin `key` and accept (first use),
     /// - pinned and equal → accept,
@@ -160,6 +167,16 @@ mod tests {
             .pin_or_verify("ext.a", "KEY2")
             .unwrap_err();
         assert!(matches!(err, RegistryError::PublisherKeyChanged { .. }));
+    }
+
+    #[test]
+    fn is_trusted_only_after_pin_and_only_for_matching_key() {
+        let tmp = TempDir::new().unwrap();
+        let store = TrustStore::new(tmp.path());
+        assert!(!store.is_trusted("ext.a", "KEY1").unwrap()); // unknown → not trusted
+        store.pin_or_verify("ext.a", "KEY1").unwrap();
+        assert!(store.is_trusted("ext.a", "KEY1").unwrap()); // pinned key → trusted
+        assert!(!store.is_trusted("ext.a", "KEY2").unwrap()); // other key → not trusted
     }
 
     #[test]

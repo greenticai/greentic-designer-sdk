@@ -12,7 +12,7 @@ use greentic_extension_sdk_registry::publish::{PublishRequest, SignatureBlob};
 use greentic_extension_sdk_registry::registry::ExtensionRegistry;
 
 use crate::dev::builder::{Profile, run_build};
-use crate::dev::packer::build_pack;
+use crate::dev::packer::build_pack_with_key;
 use crate::publish::receipt::{PublishReceiptJson, write_receipt};
 use crate::publish::validator::{format_errors, validate_for_publish};
 
@@ -236,6 +236,10 @@ pub struct PublishConfig {
     pub force: bool,
     pub sign: bool,
     pub key_id: Option<String>,
+    /// Explicit PKCS8 PEM signing-key file (takes precedence over `key_id`).
+    pub key_path: Option<PathBuf>,
+    /// Env var holding a PKCS8 PEM signing key (fallback when no file/key-id).
+    pub key_env: String,
     pub version_override: Option<String>,
     pub trust_policy: String,
     pub verify_only: bool,
@@ -300,27 +304,33 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
     let build = run_build(&cfg.project_dir, cfg.profile)
         .map_err(|e| PublishError::Build(format!("cargo component build: {e}")))?;
 
-    // 5. Pack deterministic .gtxpack (staging file).
+    // 5. Resolve the signing key first (if requested), so the *pack's*
+    //    describe.json is manifest-bound and signed — the installable artifact
+    //    carries the authenticated descriptor, not just the registry metadata.
+    let key_and_id = if cfg.sign {
+        Some(resolve_signing_key(cfg).map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?)
+    } else {
+        None
+    };
+
+    // 6. Pack deterministic .gtxpack (manifest-bound; signed when a key is set).
     let staging_pack = cfg.project_dir.join("dist/publish-staging.gtxpack");
-    let info = build_pack(&cfg.project_dir, &build.wasm_path, &staging_pack)
-        .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
+    let info = build_pack_with_key(
+        &cfg.project_dir,
+        &build.wasm_path,
+        &staging_pack,
+        key_and_id.as_ref().map(|(key, _)| key),
+    )
+    .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
     let pack_bytes = std::fs::read(&staging_pack).map_err(io_err)?;
 
-    // 6. Optional signing (reuse Wave 1 JCS sign_describe).
-    let signature = if cfg.sign {
-        let key_id = cfg
-            .key_id
-            .clone()
-            .ok_or_else(|| PublishError::Other(anyhow::anyhow!("--sign requires --key-id")))?;
-        let signing_key = load_signing_key(&cfg.home, &key_id)
-            .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
-        greentic_extension_sdk_contract::sign_describe(&mut describe, &signing_key)
-            .map_err(|e| PublishError::Other(anyhow::anyhow!("sign: {e}")))?;
-        let sig = describe
-            .signature
-            .as_ref()
-            .ok_or_else(|| PublishError::Other(anyhow::anyhow!("signing produced no signature")))?;
-        Some(SignatureBlob {
+    // The pack's describe.json is now authoritative (bound + signed); use it for
+    // the registry metadata so the two match exactly.
+    describe = serde_json::from_slice(&info.describe_bytes)
+        .map_err(|e| PublishError::Other(anyhow::anyhow!("parse signed describe: {e}")))?;
+
+    let signature = match (&key_and_id, &describe.signature) {
+        (Some((_, key_id)), Some(sig)) => Some(SignatureBlob {
             algorithm: match sig.algorithm {
                 greentic_extension_sdk_contract::SignatureAlgorithm::Ed25519 => {
                     "ed25519".to_string()
@@ -328,10 +338,9 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
             },
             public_key: sig.public_key.clone(),
             value: sig.value.clone(),
-            key_id,
-        })
-    } else {
-        None
+            key_id: key_id.clone(),
+        }),
+        _ => None,
     };
 
     if cfg.dry_run {
@@ -494,38 +503,115 @@ fn write_canonical_dist(
     Ok(final_dist)
 }
 
-fn load_signing_key(home: &Path, key_id: &str) -> anyhow::Result<ed25519_dalek::SigningKey> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-    if !is_safe_key_id(key_id) {
-        anyhow::bail!("invalid --key-id {key_id:?}: must not contain path separators or '..'");
+/// Resolve the signing key + its logical `key_id` label for `--sign`.
+///
+/// Key material is a PKCS8 PEM (the one format `gtdx keygen` emits and `gtdx
+/// sign` consumes — audit H5). Sources, in precedence order:
+/// 1. `--key <path>` — explicit PEM file.
+/// 2. `--key-id <id>` — PEM at `<home>/keys/<id>.key`.
+/// 3. `--key-env <VAR>` — PEM read from an env var (CI / headless).
+///
+/// The returned label populates `SignatureBlob.key_id` in the registry
+/// metadata: the explicit `--key-id` when given, else a value derived from the
+/// key source (file stem, or `"env"`).
+fn resolve_signing_key(cfg: &PublishConfig) -> anyhow::Result<(ed25519_dalek::SigningKey, String)> {
+    if let Some(path) = &cfg.key_path {
+        let key = crate::signing::load_signing_key(Some(path), &cfg.key_env)?;
+        let label = cfg.key_id.clone().unwrap_or_else(|| key_id_from_path(path));
+        return Ok((key, label));
     }
-    let key_path = home.join("keys").join(format!("{key_id}.key"));
-    let bytes = std::fs::read_to_string(&key_path)
-        .map_err(|e| anyhow::anyhow!("read {}: {e}", key_path.display()))?;
-    let decoded = B64
-        .decode(bytes.trim())
-        .map_err(|e| anyhow::anyhow!("decode {key_id}.key: {e}"))?;
-    let arr: [u8; 32] = decoded
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("{key_id}.key must be 32 bytes base64"))?;
-    Ok(ed25519_dalek::SigningKey::from_bytes(&arr))
+    if let Some(key_id) = &cfg.key_id {
+        if !is_safe_key_id(key_id) {
+            anyhow::bail!("invalid --key-id {key_id:?}: must not contain path separators or '..'");
+        }
+        let key_path = cfg.home.join("keys").join(format!("{key_id}.key"));
+        let key = crate::signing::load_signing_key(Some(&key_path), &cfg.key_env)?;
+        return Ok((key, key_id.clone()));
+    }
+    // Fall back to the env var (no file path / key-id supplied).
+    let key = crate::signing::load_signing_key(None, &cfg.key_env)?;
+    Ok((key, "env".to_string()))
+}
+
+/// Derive a `key_id` label from a PEM file path (the file stem, or `"default"`).
+fn key_id_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("default")
+        .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::pkcs8::{EncodePrivateKey, spki::der::pem::LineEnding};
+
+    /// A `PublishConfig` carrying only the signing-related fields under test;
+    /// everything else is an inert default (these tests never reach packing).
+    fn signing_cfg(home: &Path, key_id: Option<&str>, key_path: Option<PathBuf>) -> PublishConfig {
+        PublishConfig {
+            project_dir: home.to_path_buf(),
+            registry_uri: "local".into(),
+            home: home.to_path_buf(),
+            dist_dir: home.join("dist"),
+            profile: Profile::Debug,
+            dry_run: true,
+            force: false,
+            sign: true,
+            key_id: key_id.map(str::to_string),
+            key_path,
+            key_env: crate::signing::DEFAULT_KEY_ENV.to_string(),
+            version_override: None,
+            trust_policy: "loose".into(),
+            verify_only: false,
+            oci_token: None,
+        }
+    }
+
+    fn write_pem_key(path: &Path, seed: [u8; 32]) {
+        let pem = ed25519_dalek::SigningKey::from_bytes(&seed)
+            .to_pkcs8_pem(LineEnding::LF)
+            .unwrap();
+        std::fs::write(path, pem.as_bytes()).unwrap();
+    }
 
     #[test]
-    fn load_signing_key_rejects_path_traversal() {
+    fn resolve_signing_key_rejects_path_traversal() {
         let tmp = tempfile::tempdir().unwrap();
         for bad in ["../../etc/passwd", "..", "a/b", "a\\b", ""] {
-            let err = load_signing_key(tmp.path(), bad).unwrap_err();
+            let err = resolve_signing_key(&signing_cfg(tmp.path(), Some(bad), None)).unwrap_err();
             assert!(
                 err.to_string().contains("key-id"),
                 "key_id {bad:?} should be rejected as unsafe, got: {err}"
             );
         }
+    }
+
+    #[test]
+    fn resolve_signing_key_loads_pkcs8_pem_by_key_id() {
+        // A key written by `gtdx keygen --out ~/.greentic/keys/<id>.key` (PKCS8
+        // PEM) must load verbatim — the format `publish` previously rejected.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("keys")).unwrap();
+        write_pem_key(&tmp.path().join("keys/ci.key"), [9u8; 32]);
+
+        let (key, label) = resolve_signing_key(&signing_cfg(tmp.path(), Some("ci"), None)).unwrap();
+        assert_eq!(key.to_bytes(), [9u8; 32]);
+        assert_eq!(label, "ci", "key_id label must be the explicit --key-id");
+    }
+
+    #[test]
+    fn resolve_signing_key_prefers_explicit_path_and_derives_label() {
+        let tmp = tempfile::tempdir().unwrap();
+        let key_file = tmp.path().join("release-signing.key");
+        write_pem_key(&key_file, [3u8; 32]);
+
+        // --key with no --key-id → label derived from the file stem.
+        let (key, label) =
+            resolve_signing_key(&signing_cfg(tmp.path(), None, Some(key_file))).unwrap();
+        assert_eq!(key.to_bytes(), [3u8; 32]);
+        assert_eq!(label, "release-signing");
     }
 
     #[test]

@@ -5,6 +5,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context as _, Result};
 use greentic_extension_sdk_contract::{
     Compat, DescribeJson, ExtensionKind, LocalizedString, RuntimeGtpack,
     describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
@@ -24,16 +25,20 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// The `describe.json` is serialized from a real [`DescribeJson`] struct so it
 /// always round-trips correctly.
-#[must_use]
+///
+/// # Errors
+/// Returns an error if `sha256` is not a valid 64-char hex digest, or if the
+/// archive cannot be created or written.
 pub fn build_provider_fixture_gtxpack(
     staging_root: &Path,
     id: &str,
     version: &str,
     gtpack_bytes: &[u8],
     sha256: &str,
-) -> PathBuf {
+) -> Result<PathBuf> {
     let out = staging_root.join(format!("{id}-{version}.gtxpack"));
-    let file = std::fs::File::create(&out).unwrap();
+    let file = std::fs::File::create(&out)
+        .with_context(|| format!("create fixture gtxpack {}", out.display()))?;
     let mut zip = zip::ZipWriter::new(file);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
@@ -46,20 +51,25 @@ pub fn build_provider_fixture_gtxpack(
     let component = greentic_extension_sdk_contract::RuntimeComponent {
         oci_ref: None,
         gtpack: Some(gtpack),
-        sha256: sha256.parse().expect("valid sha256 fixture"),
+        sha256: sha256
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid sha256 fixture {sha256:?}: {e}"))?,
         world: "greentic:component/stub@0.1.0".into(),
     };
     let mut components = std::collections::BTreeMap::new();
-    components.insert("stub".parse().expect("valid component id"), component);
+    let component_id = "stub"
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid component id: {e}"))?;
+    components.insert(component_id, component);
 
     let describe = DescribeJson {
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Provider,
         compat: Compat {
-            min_designer_version: ">=1.0.0".parse().unwrap(),
-            min_runner_version: "^0.12.0".parse().unwrap(),
-            contract_version: "1.2.0".parse().unwrap(),
+            min_designer_version: ">=1.0.0".parse().context("min_designer_version")?,
+            min_runner_version: "^0.12.0".parse().context("min_runner_version")?,
+            contract_version: "1.2.0".parse().context("contract_version")?,
         },
         metadata: Metadata {
             id: id.into(),
@@ -99,36 +109,45 @@ pub fn build_provider_fixture_gtxpack(
         manifest_sha256: None,
     };
 
-    zip.start_file("describe.json", opts).unwrap();
-    zip.write_all(serde_json::to_string_pretty(&describe).unwrap().as_bytes())
-        .unwrap();
+    let describe_json = serde_json::to_string_pretty(&describe).context("serialize describe")?;
+    zip.start_file("describe.json", opts)
+        .context("zip describe.json")?;
+    zip.write_all(describe_json.as_bytes())
+        .context("write describe.json")?;
 
-    zip.start_file("wasm/stub.wasm", opts).unwrap();
-    zip.write_all(b"").unwrap();
+    zip.start_file("wasm/stub.wasm", opts)
+        .context("zip wasm/stub.wasm")?;
+    zip.write_all(b"").context("write wasm/stub.wasm")?;
 
-    zip.start_file("runtime/provider.gtpack", opts).unwrap();
-    zip.write_all(gtpack_bytes).unwrap();
+    zip.start_file("runtime/provider.gtpack", opts)
+        .context("zip runtime/provider.gtpack")?;
+    zip.write_all(gtpack_bytes)
+        .context("write runtime/provider.gtpack")?;
 
-    zip.finish().unwrap();
-    out
+    zip.finish().context("finish gtxpack zip")?;
+    Ok(out)
 }
 
 /// Build a minimal `.gtpack` ZIP whose `manifest.cbor` entry contains
 /// `{"pack_id": pack_id, "version": "0.1.0"}` encoded in CBOR.
-#[must_use]
-pub fn encode_gtpack_with_pack_id(pack_id: &str) -> Vec<u8> {
+///
+/// # Errors
+/// Returns an error if the CBOR cannot be encoded or the archive cannot be
+/// written.
+pub fn encode_gtpack_with_pack_id(pack_id: &str) -> Result<Vec<u8>> {
     let manifest = serde_json::json!({ "pack_id": pack_id, "version": "0.1.0" });
     let mut cbor_bytes = Vec::new();
-    ciborium::into_writer(&manifest, &mut cbor_bytes).unwrap();
+    ciborium::into_writer(&manifest, &mut cbor_bytes).context("encode manifest.cbor")?;
 
     let mut buf = Vec::new();
     {
         let cursor = std::io::Cursor::new(&mut buf);
         let mut zip = zip::ZipWriter::new(cursor);
         let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-        zip.start_file("manifest.cbor", opts).unwrap();
-        zip.write_all(&cbor_bytes).unwrap();
-        zip.finish().unwrap();
+        zip.start_file("manifest.cbor", opts)
+            .context("zip manifest.cbor")?;
+        zip.write_all(&cbor_bytes).context("write manifest.cbor")?;
+        zip.finish().context("finish gtpack zip")?;
     }
-    buf
+    Ok(buf)
 }

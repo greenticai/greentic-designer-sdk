@@ -102,12 +102,36 @@ watcher loop).
 
 ### Sign and publish
 
+`keygen`, `sign`, and `publish --sign` all use one key format: **PKCS8 PEM**
+ed25519.
+
 ```bash
-gtdx keygen > my-key.pem
-gtdx sign --key my-key.pem ./
-gtdx login                       # auth to Greentic Store
-gtdx publish ./
+gtdx keygen --out my-key.pem            # PKCS8 PEM private key (mode 0600)
+gtdx login                              # auth to Greentic Store
+gtdx publish --sign --key my-key.pem ./ # bind manifest, then sign — one step
 ```
+
+`publish --sign` binds the whole-archive manifest into `describe.json` and then
+signs, so the embedded signature covers the entire pack. Key sources, in
+precedence order: `--key <path>`, `--key-id <id>` (loads
+`~/.greentic/keys/<id>.key`), or the `GREENTIC_EXT_SIGNING_KEY_PEM` env var (CI).
+
+To sign a `describe.json` in isolation (outside a pack), use `gtdx sign --key
+my-key.pem ./`.
+
+### Verify a pack
+
+```bash
+gtdx verify ./dist/my-ext-0.1.0.gtxpack                  # integrity + binding + ledger
+gtdx verify ./dist/my-ext-0.1.0.gtxpack --trusted-key <b64-pubkey>  # + authenticity
+```
+
+For an archive, `verify` runs the full chain: the `describe.json` signature, the
+manifest binding (`manifestSha256`), and the whole-archive integrity ledger
+(`manifest.json`) — so a tampered `extension.wasm` or smuggled file is caught,
+not just a tampered descriptor. Without `--trusted-key` the signature is only
+checked for self-consistency (the describe is unmodified); pass `--trusted-key`
+to additionally anchor *who* signed it.
 
 ## Audit + roadmap
 
