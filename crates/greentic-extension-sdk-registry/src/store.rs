@@ -16,6 +16,7 @@ pub struct GreenticStoreRegistry {
     token: Option<String>,
     client: Client,
     max_artifact_bytes: usize,
+    insecure_allowed: bool,
 }
 
 impl GreenticStoreRegistry {
@@ -33,6 +34,7 @@ impl GreenticStoreRegistry {
                 .build()
                 .expect("reqwest client"),
             max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
+            insecure_allowed: false,
         }
     }
 
@@ -40,6 +42,18 @@ impl GreenticStoreRegistry {
     #[must_use]
     pub fn with_max_artifact_bytes(mut self, limit: usize) -> Self {
         self.max_artifact_bytes = limit;
+        self
+    }
+
+    /// Opt-in to talk to a non-HTTPS, non-loopback registry URL. Required for
+    /// publishing into a Greentic Store that has not yet been fronted by TLS;
+    /// off by default because anything that *can* be reached over HTTPS *must*
+    /// be (otherwise the bearer token + signed describe travel in cleartext).
+    /// Callers should only set this when they have out-of-band assurance that
+    /// the network path is trusted (private VPC, SSH tunnel, dev loopback).
+    #[must_use]
+    pub fn with_insecure_allowed(mut self, allowed: bool) -> Self {
+        self.insecure_allowed = allowed;
         self
     }
 
@@ -63,7 +77,7 @@ impl GreenticStoreRegistry {
     /// Guard called before every network request so an insecure base URL can
     /// never leak a bearer token or fetch an artifact over cleartext http.
     fn ensure_secure_url(&self) -> Result<(), RegistryError> {
-        validate_registry_url(&self.base_url)
+        validate_registry_url(&self.base_url, self.insecure_allowed)
     }
 }
 
@@ -114,8 +128,10 @@ struct PublishResponseDto {
 /// Reject registry URLs that would send bearer tokens or download artifacts in
 /// cleartext. `https://` is always allowed; `http://` is allowed only for
 /// loopback hosts (`localhost` / `127.0.0.1` / `::1`) to keep local dev and
-/// tests working.
-fn validate_registry_url(url: &str) -> Result<(), RegistryError> {
+/// tests working. Callers that have out-of-band assurance the path is trusted
+/// (private VPC, SSH tunnel, the migration window before a Store gets TLS)
+/// can pass `allow_insecure = true` to opt back into cleartext.
+fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), RegistryError> {
     if let Some(rest) = url.strip_prefix("https://") {
         if rest.is_empty() {
             return Err(RegistryError::InsecureRegistryUrl(url.into()));
@@ -130,6 +146,9 @@ fn validate_registry_url(url: &str) -> Result<(), RegistryError> {
             .trim_end_matches(']')
             .trim_start_matches('[');
         if matches!(host, "localhost" | "127.0.0.1" | "::1") {
+            return Ok(());
+        }
+        if allow_insecure {
             return Ok(());
         }
         return Err(RegistryError::InsecureRegistryUrl(url.into()));
@@ -365,31 +384,51 @@ mod tests {
 
     #[test]
     fn https_url_is_allowed() {
-        assert!(validate_registry_url("https://store.greentic.ai").is_ok());
+        assert!(validate_registry_url("https://store.greentic.ai", false).is_ok());
     }
 
     #[test]
     fn http_localhost_is_allowed() {
-        assert!(validate_registry_url("http://127.0.0.1:8080").is_ok());
-        assert!(validate_registry_url("http://localhost:3000/api").is_ok());
+        assert!(validate_registry_url("http://127.0.0.1:8080", false).is_ok());
+        assert!(validate_registry_url("http://localhost:3000/api", false).is_ok());
     }
 
     #[test]
     fn http_remote_is_rejected() {
         assert!(matches!(
-            validate_registry_url("http://store.greentic.ai"),
+            validate_registry_url("http://store.greentic.ai", false),
             Err(RegistryError::InsecureRegistryUrl(_))
         ));
     }
 
     #[test]
-    fn non_http_scheme_is_rejected() {
+    fn http_remote_allowed_when_insecure_opt_in() {
+        // Escape hatch for trusted-path Stores that have not been fronted by
+        // TLS yet. `allow_insecure = true` must let the URL through even when
+        // the host is neither HTTPS nor loopback.
+        assert!(validate_registry_url("http://62.171.174.152:3030", true).is_ok());
+        assert!(validate_registry_url("http://store.greentic.ai", true).is_ok());
+    }
+
+    #[test]
+    fn non_http_scheme_is_rejected_even_with_opt_in() {
+        // The escape hatch is for `http://` only. Anything else (ftp, raw
+        // hostname) is still a hard reject — the opt-in does not turn off
+        // scheme parsing.
         assert!(matches!(
-            validate_registry_url("ftp://store.greentic.ai"),
+            validate_registry_url("ftp://store.greentic.ai", false),
             Err(RegistryError::InsecureRegistryUrl(_))
         ));
         assert!(matches!(
-            validate_registry_url("store.greentic.ai"),
+            validate_registry_url("ftp://store.greentic.ai", true),
+            Err(RegistryError::InsecureRegistryUrl(_))
+        ));
+        assert!(matches!(
+            validate_registry_url("store.greentic.ai", false),
+            Err(RegistryError::InsecureRegistryUrl(_))
+        ));
+        assert!(matches!(
+            validate_registry_url("store.greentic.ai", true),
             Err(RegistryError::InsecureRegistryUrl(_))
         ));
     }
