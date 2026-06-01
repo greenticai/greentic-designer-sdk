@@ -134,11 +134,11 @@ fn resolve_backend(
         })?;
 
     let token = resolve_token(home, entry);
-    Ok(Backend::Store(GreenticStoreRegistry::new(
-        &entry.name,
-        &entry.url,
-        token,
-    )))
+    let allow_insecure = crate::registry_security::insecure_registry_opt_in();
+    Ok(Backend::Store(
+        GreenticStoreRegistry::new(&entry.name, &entry.url, token)
+            .with_insecure_allowed(allow_insecure),
+    ))
 }
 
 /// Parse `oci://<host>/<namespace>[/<artifact-name>]` into an `OciRegistry`.

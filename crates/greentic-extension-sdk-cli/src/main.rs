@@ -3,6 +3,7 @@
 mod commands;
 mod dev;
 mod publish;
+mod registry_security;
 mod scaffold;
 mod signing;
 

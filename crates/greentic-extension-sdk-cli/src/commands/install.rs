@@ -93,7 +93,8 @@ async fn install_from_registry(
         .token_env
         .as_deref()
         .and_then(|e| std::env::var(e).ok());
-    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token);
+    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token)
+        .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
     let installer = Installer::new(storage.clone_shallow(), &reg);
     installer
         .install(
