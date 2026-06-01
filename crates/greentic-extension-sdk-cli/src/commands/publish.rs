@@ -1,10 +1,39 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use clap::Args as ClapArgs;
+use clap::ValueEnum;
 
 use crate::dev::builder::Profile;
 use crate::dev::project_dir_from_manifest;
 use crate::publish::{PublishConfig, PublishOutcome, run_publish};
+
+/// Trust policy recorded on the publish receipt. Validated at parse time so an
+/// unknown value (e.g. `--trust banana`) is rejected by clap with the list of
+/// valid options, instead of being silently passed through as a free string.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+#[value(rename_all = "lower")]
+pub enum TrustArg {
+    Loose,
+    Normal,
+    Strict,
+}
+
+impl TrustArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Loose => "loose",
+            Self::Normal => "normal",
+            Self::Strict => "strict",
+        }
+    }
+}
+
+impl fmt::Display for TrustArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(ClapArgs, Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -42,8 +71,8 @@ pub struct Args {
     pub key_env: String,
 
     /// loose | normal | strict
-    #[arg(long, default_value = "loose")]
-    pub trust: String,
+    #[arg(long, value_enum, default_value_t = TrustArg::Loose)]
+    pub trust: TrustArg,
 
     /// Copy artifact here as well.
     #[arg(long, default_value = "./dist")]
@@ -102,7 +131,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         key_path: args.key,
         key_env: args.key_env,
         version_override: args.version,
-        trust_policy: args.trust,
+        trust_policy: args.trust.as_str().to_string(),
         verify_only: args.verify_only,
         oci_token: args.oci_token,
     };

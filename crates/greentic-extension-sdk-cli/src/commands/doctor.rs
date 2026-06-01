@@ -94,10 +94,18 @@ async fn check_registries(home: &Path, offline: bool) -> usize {
         return 0;
     }
     let mut fails = 0;
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .expect("reqwest client");
+    {
+        Ok(c) => c,
+        Err(e) => {
+            // `doctor` is the command users run on a broken machine — a TLS/HTTP
+            // backend init failure must be reported, not panic the diagnostics.
+            println!("  \u{2717} cannot build HTTP client to probe registries: {e}");
+            return cfg.registries.len();
+        }
+    };
     for entry in &cfg.registries {
         if offline {
             println!(
