@@ -31,9 +31,9 @@ clap = { workspace = true }
 dialoguer = { workspace = true }
 directories = { workspace = true }
 ed25519-dalek = { workspace = true, features = ["pkcs8", "pem"] }
-greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "1.2.5-research" }
-greentic-extension-sdk-registry = { path = "../greentic-extension-sdk-registry", version = "1.2.5-research" }
-greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "1.2.5-research" }
+greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "1.2.6-research" }
+greentic-extension-sdk-registry = { path = "../greentic-extension-sdk-registry", version = "1.2.6-research" }
+greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "1.2.6-research" }
 include_dir = { workspace = true }
 notify-debouncer-full = { workspace = true }
 pkcs8 = { workspace = true }
@@ -57,7 +57,7 @@ zip = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
-greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "1.2.5-research" }
+greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "1.2.6-research" }
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
 
