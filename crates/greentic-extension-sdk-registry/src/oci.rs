@@ -86,6 +86,14 @@ fn build_reference(
         .map_err(|e| RegistryError::Oci(format!("invalid OCI reference: {e}")))
 }
 
+/// Verify a pulled OCI layer's actual digest against the digest declared in the
+/// image manifest, in constant time. Both arguments are full descriptor digest
+/// strings (e.g. `sha256:<hex>`). Returns [`RegistryError::ArtifactHashMismatch`]
+/// on mismatch (audit P0-3).
+fn verify_layer_digest(declared: &str, computed: &str) -> Result<(), RegistryError> {
+    crate::digest::verify_digest(declared, computed)
+}
+
 #[async_trait]
 impl ExtensionRegistry for OciRegistry {
     fn name(&self) -> &str {
@@ -121,11 +129,25 @@ impl ExtensionRegistry for OciRegistry {
 
         let first_layer = pulled
             .layers
-            .into_iter()
-            .next()
+            .first()
             .ok_or_else(|| RegistryError::Storage("no layers in manifest".into()))?;
 
-        let bytes = first_layer.data;
+        // Defense in depth: re-verify the pulled layer bytes against the digest
+        // the OCI image manifest committed to (audit P0-3). `oci-client` already
+        // checks blob digests during transfer, but we do not want install
+        // integrity to silently depend on that implementation detail — verify
+        // here, unconditionally and constant-time, before trusting the bytes.
+        let declared_digest = pulled
+            .manifest
+            .as_ref()
+            .and_then(|m| m.layers.first())
+            .map(|d| d.digest.as_str())
+            .ok_or_else(|| {
+                RegistryError::Oci("image manifest declares no layer digest to verify".into())
+            })?;
+        verify_layer_digest(declared_digest, &first_layer.sha256_digest())?;
+
+        let bytes = first_layer.data.clone();
 
         let describe = {
             let cursor = std::io::Cursor::new(&bytes);
@@ -220,8 +242,9 @@ fn map_oci_error(
 
 #[cfg(test)]
 mod tests {
-    use super::build_reference;
+    use super::{build_reference, verify_layer_digest};
     use crate::error::RegistryError;
+    use oci_client::client::ImageLayer;
 
     #[test]
     fn build_reference_ok_for_valid_parts() {
@@ -238,5 +261,46 @@ mod tests {
             matches!(err, RegistryError::Oci(_)),
             "expected RegistryError::Oci, got {err}"
         );
+    }
+
+    #[test]
+    fn verify_layer_digest_accepts_matching_digest() {
+        // A layer whose declared digest equals its actual sha256 passes.
+        let layer = ImageLayer::new(b"hello world".to_vec(), "media".into(), None);
+        let declared = layer.sha256_digest();
+        verify_layer_digest(&declared, &layer.sha256_digest()).unwrap();
+    }
+
+    #[test]
+    fn verify_layer_digest_rejects_tampered_bytes() {
+        // Declared digest computed over the honest bytes; the layer actually
+        // carries swapped bytes -> mismatch must be caught (audit P0-3).
+        let honest = ImageLayer::new(b"hello world".to_vec(), "media".into(), None);
+        let declared = honest.sha256_digest();
+        let tampered = ImageLayer::new(b"evil payload".to_vec(), "media".into(), None);
+        let err = verify_layer_digest(&declared, &tampered.sha256_digest()).unwrap_err();
+        assert!(matches!(err, RegistryError::ArtifactHashMismatch { .. }));
+    }
+
+    #[test]
+    fn verify_layer_digest_rejects_truncated_bytes() {
+        // Truncation (a partial download) changes the digest and must be caught.
+        let full = ImageLayer::new(b"hello world".to_vec(), "media".into(), None);
+        let declared = full.sha256_digest();
+        let truncated = ImageLayer::new(b"hello".to_vec(), "media".into(), None);
+        assert!(verify_layer_digest(&declared, &truncated.sha256_digest()).is_err());
+    }
+
+    #[test]
+    fn verify_layer_digest_reports_expected_and_computed() {
+        // The error surfaces both digests so logs make the mismatch diagnosable.
+        let err = verify_layer_digest("sha256:aaaa", "sha256:bbbb").unwrap_err();
+        match err {
+            RegistryError::ArtifactHashMismatch { expected, computed } => {
+                assert_eq!(expected, "sha256:aaaa");
+                assert_eq!(computed, "sha256:bbbb");
+            }
+            other => panic!("expected ArtifactHashMismatch, got {other}"),
+        }
     }
 }

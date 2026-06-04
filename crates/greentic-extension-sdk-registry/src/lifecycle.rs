@@ -269,16 +269,27 @@ fn read_manifest_bytes(zip_bytes: &[u8]) -> Result<Option<Vec<u8>>, RegistryErro
     }
 }
 
-/// Enforce whole-archive integrity for trusted installs: every file must match
-/// the `manifest.json` ledger, and the (signed) describe must commit to that
-/// manifest via `manifestSha256`. Skipped under `Loose` (the dev bypass), which
-/// also skips signature verification.
+/// Enforce whole-archive integrity for every install: every file must match
+/// the `manifest.json` ledger, and the describe must commit to that manifest
+/// via `manifestSha256`.
+///
+/// Integrity is **not** authenticity. `Loose` waives the *signature* check
+/// (`verify_authenticity` returns early), but it must NOT waive integrity — a
+/// corrupt or tampered archive should never be extracted to disk, dev bypass
+/// or not (audit P0-3). So this check runs unconditionally regardless of
+/// `policy`; under `Loose` we emit a `tracing::warn!` to make the bypassed
+/// *authenticity* boundary auditable while still proving the bytes are intact.
 fn verify_integrity(
     artifact: &ExtensionArtifact,
     policy: TrustPolicy,
 ) -> Result<(), RegistryError> {
     if policy == TrustPolicy::Loose {
-        return Ok(());
+        tracing::warn!(
+            name = %artifact.name,
+            version = %artifact.version,
+            "TrustPolicy::Loose: publisher signature is NOT verified; \
+             whole-archive integrity is still enforced"
+        );
     }
     let Some(manifest_bytes) = read_manifest_bytes(&artifact.bytes)? else {
         return Err(RegistryError::SignatureInvalid(
@@ -383,10 +394,40 @@ mod tests {
     }
 
     #[test]
-    fn integrity_skipped_under_loose() {
+    fn integrity_enforced_even_under_loose_rejects_missing_manifest() {
+        // Loose waives *authenticity* (signature), not *integrity*. An archive
+        // with no manifest.json cannot prove its bytes are intact, so it must be
+        // rejected even under the dev bypass (audit P0-3).
         let describe = base_describe();
         let bytes = zip_bytes(&[("extension.wasm", WASM)]); // no manifest at all
+        assert!(verify_integrity(&artifact(describe, bytes), TrustPolicy::Loose).is_err());
+    }
+
+    #[test]
+    fn integrity_ok_under_loose_for_bound_and_intact_archive() {
+        // A correctly-bound, intact archive still passes under Loose — only the
+        // signature check is skipped, the manifest ledger is honoured.
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe = base_describe();
+        greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
+        let bytes = zip_bytes(&[("extension.wasm", WASM), ("manifest.json", &manifest_json)]);
         verify_integrity(&artifact(describe, bytes), TrustPolicy::Loose).unwrap();
+    }
+
+    #[test]
+    fn integrity_under_loose_rejects_tampered_wasm() {
+        // Even with the signature waived, a swapped wasm must be caught by the
+        // manifest ledger.
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe = base_describe();
+        greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
+        let bytes = zip_bytes(&[
+            ("extension.wasm", b"evil"),
+            ("manifest.json", &manifest_json),
+        ]);
+        assert!(verify_integrity(&artifact(describe, bytes), TrustPolicy::Loose).is_err());
     }
 
     /// A describe really signed by the ed25519 key derived from `seed`.
