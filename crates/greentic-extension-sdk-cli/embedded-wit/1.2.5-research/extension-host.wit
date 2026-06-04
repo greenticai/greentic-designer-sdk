@@ -46,10 +46,61 @@ interface http {
   fetch: func(req: request) -> result<response, string>;
 }
 
+/// In-process pack building. The host backs this with greentic-pack-lib
+/// (PackBuilder): flows are validated + compiled via greentic-flow,
+/// component pins extracted from the compiled flows are resolved to WASM
+/// via the host's component index + OCI distributor, and the result is a
+/// canonical .gtpack with manifest.flows[] and manifest.components[]
+/// populated. Coarse-grained on purpose: one call, one artifact.
+interface pack-build {
+  /// One flow to compile into the pack. `ygtc-yaml` must be a complete
+  /// YGTC document (schema_version 2).
+  record flow-source {
+    name: string,
+    ygtc-yaml: string,
+  }
+  /// Raw file to embed. `path` is the in-pack path (e.g. "assets/cards/x.json").
+  record asset-entry {
+    path: string,
+    bytes: list<u8>,
+  }
+  enum signing-mode {
+    dev,
+    none,
+    /// Reserved: production signing with an external key. Hosts reject
+    /// this in v1 with a descriptive error; declared now so adding real
+    /// support is not a breaking WIT change.
+    release,
+  }
+  record pack-spec {
+    /// JSON object: { "pack_id", "name", "version", "kind", "authors",
+    /// "entry_flows" } — host fills created_at_utc and provenance.
+    meta-json: string,
+    flows: list<flow-source>,
+    assets: list<asset-entry>,
+    /// Extra component OCI refs beyond what the host derives from the
+    /// flows' component pins. Usually empty.
+    component-refs: list<string>,
+    signing: signing-mode,
+  }
+  record pack-artifact {
+    filename: string,
+    bytes: list<u8>,
+    /// SHA-256 of the raw .gtpack archive bytes, lowercase hex, no prefix
+    /// (same convention as bundle-artifact.sha256).
+    sha256: string,
+    /// BLAKE3 of the canonical CBOR manifest inside the archive, lowercase
+    /// hex, no prefix (PackBuilder's manifest_hash_blake3).
+    manifest-hash: string,
+  }
+  build-pack: func(spec: pack-spec) -> result<pack-artifact, string>;
+}
+
 world extension-host-world {
   import logging;
   import i18n;
   import secrets;
   import broker;
   import http;
+  import pack-build;
 }
