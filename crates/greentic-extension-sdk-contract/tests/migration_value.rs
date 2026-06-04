@@ -60,11 +60,66 @@ fn ac_v1_migrates_to_parseable_v2() {
     let d: DescribeJson = serde_json::from_value(v2.clone()).expect("v2 parses");
     assert_eq!(d.api_version, "greentic.ai/v2");
     assert!(!d.runtime.components.is_empty());
-    // AC has no gtpack in v1 — migration emits a zero-sha warning.
+    // AC has no gtpack in v1 — migration carries the `runtime.component`
+    // path through with a placeholder sha and warns it must be re-hashed
+    // before publishing (audit P0-2 / P1-8).
     assert!(
-        report.warnings.iter().any(|w| w.contains("zero sha256")),
-        "expected zero-sha warning, got {:?}",
+        report.warnings.iter().any(|w| w.contains("sha256")),
+        "expected placeholder-sha warning, got {:?}",
         report.warnings
+    );
+}
+
+/// Audit P0-2: a v1 describe whose only artifact reference is
+/// `runtime.component` (the WASM path) must NOT lose that path during
+/// migration. The previous behaviour emitted a `placeholder://zero`
+/// `oci_ref` and dropped the real path entirely, turning every gtpack-less
+/// v1 extension into an un-publishable placeholder.
+#[test]
+fn migration_carries_runtime_component_path() {
+    let v1 = serde_json::json!({
+        "apiVersion": "greentic.ai/v1",
+        "kind": "DesignExtension",
+        "metadata": {
+            "id": "greentic.carry-test",
+            "name": "Carry Test",
+            "version": "1.0.0",
+            "summary": "Fixture for runtime.component carry-through",
+            "author": { "name": "Greentic" },
+            "license": "MIT"
+        },
+        "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
+        "capabilities": { "offered": [], "required": [] },
+        "runtime": {
+            "component": "build/my-extension.wasm",
+            "memoryLimitMB": 32,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+        },
+        "contributions": {}
+    });
+
+    let (v2, _report) = migrate_v0_4_x_value(&v1).expect("migrate should succeed");
+    let d: DescribeJson = serde_json::from_value(v2).expect("v2 parses");
+    let comp = d
+        .runtime
+        .components
+        .values()
+        .next()
+        .expect("at least one component");
+
+    // The real WASM path must survive — not a `placeholder://zero` oci_ref.
+    assert_ne!(
+        comp.oci_ref.as_deref(),
+        Some("placeholder://zero"),
+        "migration dropped runtime.component and emitted a placeholder oci_ref"
+    );
+    let gtpack = comp
+        .gtpack
+        .as_ref()
+        .expect("runtime.component must be carried into a gtpack entry");
+    assert_eq!(
+        gtpack.file, "build/my-extension.wasm",
+        "the v1 runtime.component path must be preserved in gtpack.file"
     );
 }
 
