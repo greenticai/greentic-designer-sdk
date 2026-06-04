@@ -134,6 +134,62 @@ fn llm_openai_v1_migrates_carrying_gtpack() {
     assert_eq!(g.pack_id, "greentic.llm-openai");
 }
 
+/// Audit P0-2: when a v1 doc carries BOTH `runtime.gtpack` and
+/// `runtime.component`, the gtpack (the richer, sha-bearing artifact ref)
+/// must win and round-trip into the v2 `gtpack` entry with its real sha256
+/// preserved — the bare component path must not clobber it.
+#[test]
+fn migration_prefers_gtpack_over_component_when_both_present() {
+    let real_sha = "a".repeat(64);
+    let v1 = serde_json::json!({
+        "apiVersion": "greentic.ai/v1",
+        "kind": "ProviderExtension",
+        "metadata": {
+            "id": "greentic.both-test",
+            "name": "Both Test",
+            "version": "1.0.0",
+            "summary": "Fixture for gtpack+component precedence",
+            "author": { "name": "Greentic" },
+            "license": "MIT"
+        },
+        "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
+        "capabilities": { "offered": [], "required": [] },
+        "runtime": {
+            "component": "build/should-be-ignored.wasm",
+            "gtpack": {
+                "file": "dist/provider.gtpack",
+                "sha256": real_sha,
+                "pack_id": "greentic.both-test",
+                "component_version": "1.0.0"
+            },
+            "memoryLimitMB": 32,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+        },
+        "contributions": {}
+    });
+
+    let (v2, _report) = migrate_v0_4_x_value(&v1).expect("migrate should succeed");
+    let d: DescribeJson = serde_json::from_value(v2).expect("v2 parses");
+    let comp = d
+        .runtime
+        .components
+        .values()
+        .next()
+        .expect("at least one component");
+    let gtpack = comp
+        .gtpack
+        .as_ref()
+        .expect("gtpack must be carried when present in v1");
+    assert_eq!(
+        gtpack.file, "dist/provider.gtpack",
+        "gtpack must win over the bare runtime.component path"
+    );
+    assert_eq!(
+        gtpack.sha256, real_sha,
+        "the real gtpack sha256 must survive, not a placeholder"
+    );
+}
+
 #[test]
 fn deploy_targets_dropped_with_warning() {
     let raw = serde_json::json!({
