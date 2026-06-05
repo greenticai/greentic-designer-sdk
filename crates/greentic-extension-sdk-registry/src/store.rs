@@ -256,13 +256,10 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         // in its metadata. This catches truncation, corruption, and an artifact
         // swapped on the (separate) artifact endpoint. It does NOT establish
         // publisher trust — that is the trust-root work tracked under D.5.
+        // Constant-time compare so a forged digest can't be probed byte-by-byte
+        // via response timing (audit P0-3).
         let computed = greentic_extension_sdk_contract::artifact_sha256(&bytes);
-        if computed != metadata.artifact_sha256 {
-            return Err(RegistryError::ArtifactHashMismatch {
-                expected: metadata.artifact_sha256,
-                computed,
-            });
-        }
+        crate::digest::verify_digest(&metadata.artifact_sha256, &computed)?;
 
         Ok(ExtensionArtifact {
             name: metadata.name,

@@ -298,6 +298,65 @@ fn scaffolded_describe_json_validates_against_schema() {
 }
 
 #[test]
+fn scaffolded_describe_json_deserializes_into_v2_contract_types() {
+    // Audit P0-1: the v1->v2 regression was that a scaffolded describe.json
+    // would pass JSON-schema validation yet fail to deserialize into the
+    // v2-only `DescribeJson` contract struct (`compat` required,
+    // `deny_unknown_fields`, `runtime.components` map). Schema validation and
+    // contract-type deserialization are distinct checks; this test exercises
+    // the latter per kind so a future template regression to v1 shape is
+    // caught here instead of silently breaking `gtdx dev` / `gtdx publish`.
+    use greentic_extension_sdk_contract::describe::DescribeJson;
+    use greentic_extension_sdk_contract::kind::ExtensionKind;
+
+    for (kind_flag, scaffold_name, expected_kind) in [
+        ("design", "design-rt", ExtensionKind::Design),
+        ("bundle", "bundle-rt", ExtensionKind::Bundle),
+        ("deploy", "deploy-rt", ExtensionKind::Deploy),
+        ("provider", "provider-rt", ExtensionKind::Provider),
+        ("wasm-component", "greentic.wc-rt", ExtensionKind::Design),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join(scaffold_name);
+        let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+            .arg("new")
+            .arg(scaffold_name)
+            .arg("--kind")
+            .arg(kind_flag)
+            .arg("--dir")
+            .arg(&proj)
+            .arg("-y")
+            .arg("--no-git"));
+        assert!(
+            ok,
+            "gtdx new --kind {kind_flag} failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+
+        let describe_bytes = std::fs::read(proj.join("describe.json")).unwrap();
+        let describe: DescribeJson = serde_json::from_slice(&describe_bytes).unwrap_or_else(|e| {
+            let raw = String::from_utf8_lossy(&describe_bytes);
+            panic!(
+                "scaffolded describe.json for kind={kind_flag} did not \
+                 deserialize into the v2 contract type: {e}\n{raw}"
+            )
+        });
+
+        assert_eq!(
+            describe.api_version, "greentic.ai/v2",
+            "kind={kind_flag} must scaffold apiVersion greentic.ai/v2"
+        );
+        assert_eq!(
+            describe.kind, expected_kind,
+            "kind={kind_flag} scaffolded an unexpected ExtensionKind"
+        );
+        assert!(
+            !describe.runtime.components.is_empty(),
+            "kind={kind_flag} must scaffold at least one runtime.components entry"
+        );
+    }
+}
+
+#[test]
 fn new_wasm_component_accepts_node_type_id_and_label() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("greentic.test-tool");

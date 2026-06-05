@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod credentials;
+pub mod digest;
 pub mod error;
 pub mod hex;
 pub mod lifecycle;

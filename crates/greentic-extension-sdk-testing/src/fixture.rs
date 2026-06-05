@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use greentic_extension_sdk_contract::{
-    CapabilityRef, DescribeJson, ExtensionKind, LocalizedString,
+    CapabilityRef, DescribeJson, ExtensionKind, LocalizedString, bind_manifest, build_manifest,
 };
 use tempfile::TempDir;
 
@@ -80,7 +80,7 @@ impl ExtensionFixtureBuilder {
             })
             .collect();
 
-        let describe = DescribeJson {
+        let mut describe = DescribeJson {
             schema_ref: None,
             api_version: "greentic.ai/v2".into(),
             kind: self.kind,
@@ -143,9 +143,26 @@ impl ExtensionFixtureBuilder {
             signature: None,
             manifest_sha256: None,
         };
+        // Write the WASM component first, then build a whole-archive manifest
+        // over the on-disk entries and bind it into the describe BEFORE the
+        // describe is serialized. The install path enforces this manifest
+        // integrity ledger unconditionally (audit P0-3), so a fixture without
+        // a bound manifest.json would fail to install. `build_manifest` excludes
+        // describe.json and manifest.json itself, so the manifest covers only
+        // `extension.wasm` here — and binding it does not depend on the (not yet
+        // serialized) describe.json bytes.
+        std::fs::write(dir.path().join("extension.wasm"), &self.wasm_bytes)?;
+        let manifest = build_manifest(vec![("extension.wasm", self.wasm_bytes.as_slice())]);
+        let manifest_json = serde_json::to_vec(&manifest)?;
+        bind_manifest(&mut describe, &manifest_json);
+
         let describe_path = dir.path().join("describe.json");
         std::fs::write(&describe_path, serde_json::to_vec_pretty(&describe)?)?;
-        std::fs::write(dir.path().join("extension.wasm"), &self.wasm_bytes)?;
+        std::fs::write(
+            dir.path()
+                .join(greentic_extension_sdk_contract::MANIFEST_ENTRY_NAME),
+            &manifest_json,
+        )?;
         Ok(ExtensionFixture { dir, describe_path })
     }
 }

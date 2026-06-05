@@ -76,10 +76,30 @@ mod tests {
 "capabilities":{"offered":[],"required":[]},
 "runtime":{"memoryLimitMB":64,"permissions":{"network":[],"secrets":[],"callExtensionKinds":[]},"components":{"stub":{"oci_ref":"oci://ghcr.io/example/stub:latest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","world":"greentic:component/stub@0.1.0"}}},
 "contributions":{}}"#;
+        let wasm = b"\0asm\x01\x00\x00\x00";
+
+        // The install path enforces whole-archive integrity unconditionally
+        // (audit P0-3): every archive must carry a manifest.json ledger that the
+        // describe commits to via manifestSha256. Build that ledger over the
+        // payload, bind it into the describe, then write a self-consistent
+        // archive — otherwise install rejects this fixture even under Loose.
+        let manifest = greentic_extension_sdk_contract::build_manifest(vec![(
+            "extension.wasm",
+            wasm.as_slice(),
+        )]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe: greentic_extension_sdk_contract::DescribeJson =
+            serde_json::from_slice(desc).unwrap();
+        greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
+        let desc = serde_json::to_vec(&describe).unwrap();
+
         zip.start_file("describe.json", opts).unwrap();
-        zip.write_all(desc).unwrap();
+        zip.write_all(&desc).unwrap();
         zip.start_file("extension.wasm", opts).unwrap();
-        zip.write_all(b"\0asm\x01\x00\x00\x00").unwrap();
+        zip.write_all(wasm).unwrap();
+        zip.start_file(greentic_extension_sdk_contract::MANIFEST_ENTRY_NAME, opts)
+            .unwrap();
+        zip.write_all(&manifest_json).unwrap();
         zip.finish().unwrap();
 
         let info = PackInfo {
@@ -90,7 +110,7 @@ mod tests {
             ext_name: "demo".into(),
             ext_version: "0.1.0".into(),
             ext_kind: "design".into(),
-            describe_bytes: desc.to_vec(),
+            describe_bytes: desc.clone(),
         };
         (pack, info)
     }

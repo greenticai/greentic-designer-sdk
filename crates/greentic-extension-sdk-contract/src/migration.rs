@@ -121,9 +121,34 @@ fn build_component_entry(rt: &Map<String, Value>, report: &mut MigrationReport) 
         entry.insert("gtpack".into(), gtpack);
         entry.insert("sha256".into(), Value::String(sha));
         entry.insert("world".into(), Value::String("main".into()));
+    } else if let Some(component_path) = rt.get("component").and_then(Value::as_str) {
+        // No gtpack, but the v1 doc carries `runtime.component` — the WASM
+        // artifact path (e.g. "extension.wasm"). Carry it into a gtpack entry
+        // so the only component reference the extension has is preserved.
+        // The sha256 is not known at migration time (the v1 schema doesn't
+        // record it), so emit a placeholder and warn it must be re-hashed
+        // before publishing (audit P0-2 / P1-8).
+        let zero_sha = "0".repeat(64);
+        entry.insert(
+            "gtpack".into(),
+            json!({
+                "file": component_path,
+                "sha256": zero_sha,
+                "pack_id": "main",
+                "component_version": "0.0.0"
+            }),
+        );
+        entry.insert("sha256".into(), Value::String(zero_sha.clone()));
+        entry.insert("world".into(), Value::String("main".into()));
+        report.warn(format!(
+            "runtime.components[\"main\"] carried v1 runtime.component path \
+             \"{component_path}\" into gtpack with a zero sha256; re-hash the \
+             artifact before publishing"
+        ));
     } else {
-        // No gtpack in v1 — emit a placeholder oci_ref so RuntimeComponent
-        // deserialises (it requires at least one of oci_ref or gtpack).
+        // Neither gtpack nor runtime.component — nothing to point at. Emit a
+        // placeholder oci_ref so RuntimeComponent deserialises (it requires at
+        // least one of oci_ref or gtpack) and warn loudly.
         entry.insert("oci_ref".into(), Value::String("placeholder://zero".into()));
         entry.insert("sha256".into(), Value::String("0".repeat(64)));
         entry.insert("world".into(), Value::String("main".into()));

@@ -351,6 +351,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
+name = "constant_time_eq"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -928,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-cli"
-version = "1.2.5-research"
+version = "1.2.6-research"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -966,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-contract"
-version = "1.2.5-research"
+version = "1.2.6-research"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -986,13 +992,14 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-registry"
-version = "1.2.5-research"
+version = "1.2.6-research"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
  "chrono",
  "ciborium",
+ "constant_time_eq",
  "dialoguer",
  "ed25519-dalek",
  "fs2",
@@ -1015,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-state"
-version = "1.2.5-research"
+version = "1.2.6-research"
 dependencies = [
  "fs2",
  "serde",
@@ -1026,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-testing"
-version = "1.2.5-research"
+version = "1.2.6-research"
 dependencies = [
  "anyhow",
  "ciborium",

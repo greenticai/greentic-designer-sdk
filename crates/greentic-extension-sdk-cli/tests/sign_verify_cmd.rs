@@ -213,7 +213,11 @@ fn verify_accepts_directory() {
 }
 
 #[test]
-fn verify_accepts_gtxpack_archive() {
+fn verify_rejects_manifestless_gtxpack_archive() {
+    // Audit P0-3: whole-archive integrity is enforced unconditionally. A
+    // signed describe is no longer sufficient — an archive that omits the
+    // manifest.json ledger has no way to prove its payload was not swapped,
+    // so verify must reject it rather than silently trusting the signature.
     let tmp = TempDir::new().unwrap();
     let key_path = tmp.path().join("k.pem");
     Command::new(gtdx_bin())
@@ -232,7 +236,8 @@ fn verify_accepts_gtxpack_archive() {
         .output()
         .unwrap();
 
-    // Zip describe.json + extension.wasm into a .gtxpack archive.
+    // Zip describe.json + extension.wasm into a .gtxpack archive, deliberately
+    // omitting manifest.json.
     let pack_path = tmp.path().join("ext.gtxpack");
     {
         let f = std::fs::File::create(&pack_path).unwrap();
@@ -254,9 +259,13 @@ fn verify_accepts_gtxpack_archive() {
         .output()
         .unwrap();
     assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
+        !out.status.success(),
+        "verify must reject a gtxpack with no manifest.json ledger"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("manifest"),
+        "expected a missing-manifest error in stderr, got: {stderr}"
     );
 }
 

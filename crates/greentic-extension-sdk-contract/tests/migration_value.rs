@@ -60,11 +60,66 @@ fn ac_v1_migrates_to_parseable_v2() {
     let d: DescribeJson = serde_json::from_value(v2.clone()).expect("v2 parses");
     assert_eq!(d.api_version, "greentic.ai/v2");
     assert!(!d.runtime.components.is_empty());
-    // AC has no gtpack in v1 — migration emits a zero-sha warning.
+    // AC has no gtpack in v1 — migration carries the `runtime.component`
+    // path through with a placeholder sha and warns it must be re-hashed
+    // before publishing (audit P0-2 / P1-8).
     assert!(
-        report.warnings.iter().any(|w| w.contains("zero sha256")),
-        "expected zero-sha warning, got {:?}",
+        report.warnings.iter().any(|w| w.contains("sha256")),
+        "expected placeholder-sha warning, got {:?}",
         report.warnings
+    );
+}
+
+/// Audit P0-2: a v1 describe whose only artifact reference is
+/// `runtime.component` (the WASM path) must NOT lose that path during
+/// migration. The previous behaviour emitted a `placeholder://zero`
+/// `oci_ref` and dropped the real path entirely, turning every gtpack-less
+/// v1 extension into an un-publishable placeholder.
+#[test]
+fn migration_carries_runtime_component_path() {
+    let v1 = serde_json::json!({
+        "apiVersion": "greentic.ai/v1",
+        "kind": "DesignExtension",
+        "metadata": {
+            "id": "greentic.carry-test",
+            "name": "Carry Test",
+            "version": "1.0.0",
+            "summary": "Fixture for runtime.component carry-through",
+            "author": { "name": "Greentic" },
+            "license": "MIT"
+        },
+        "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
+        "capabilities": { "offered": [], "required": [] },
+        "runtime": {
+            "component": "build/my-extension.wasm",
+            "memoryLimitMB": 32,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+        },
+        "contributions": {}
+    });
+
+    let (v2, _report) = migrate_v0_4_x_value(&v1).expect("migrate should succeed");
+    let d: DescribeJson = serde_json::from_value(v2).expect("v2 parses");
+    let comp = d
+        .runtime
+        .components
+        .values()
+        .next()
+        .expect("at least one component");
+
+    // The real WASM path must survive — not a `placeholder://zero` oci_ref.
+    assert_ne!(
+        comp.oci_ref.as_deref(),
+        Some("placeholder://zero"),
+        "migration dropped runtime.component and emitted a placeholder oci_ref"
+    );
+    let gtpack = comp
+        .gtpack
+        .as_ref()
+        .expect("runtime.component must be carried into a gtpack entry");
+    assert_eq!(
+        gtpack.file, "build/my-extension.wasm",
+        "the v1 runtime.component path must be preserved in gtpack.file"
     );
 }
 
@@ -77,6 +132,62 @@ fn llm_openai_v1_migrates_carrying_gtpack() {
     assert!(comp.gtpack.is_some());
     let g = comp.gtpack.as_ref().unwrap();
     assert_eq!(g.pack_id, "greentic.llm-openai");
+}
+
+/// Audit P0-2: when a v1 doc carries BOTH `runtime.gtpack` and
+/// `runtime.component`, the gtpack (the richer, sha-bearing artifact ref)
+/// must win and round-trip into the v2 `gtpack` entry with its real sha256
+/// preserved — the bare component path must not clobber it.
+#[test]
+fn migration_prefers_gtpack_over_component_when_both_present() {
+    let real_sha = "a".repeat(64);
+    let v1 = serde_json::json!({
+        "apiVersion": "greentic.ai/v1",
+        "kind": "ProviderExtension",
+        "metadata": {
+            "id": "greentic.both-test",
+            "name": "Both Test",
+            "version": "1.0.0",
+            "summary": "Fixture for gtpack+component precedence",
+            "author": { "name": "Greentic" },
+            "license": "MIT"
+        },
+        "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
+        "capabilities": { "offered": [], "required": [] },
+        "runtime": {
+            "component": "build/should-be-ignored.wasm",
+            "gtpack": {
+                "file": "dist/provider.gtpack",
+                "sha256": real_sha,
+                "pack_id": "greentic.both-test",
+                "component_version": "1.0.0"
+            },
+            "memoryLimitMB": 32,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+        },
+        "contributions": {}
+    });
+
+    let (v2, _report) = migrate_v0_4_x_value(&v1).expect("migrate should succeed");
+    let d: DescribeJson = serde_json::from_value(v2).expect("v2 parses");
+    let comp = d
+        .runtime
+        .components
+        .values()
+        .next()
+        .expect("at least one component");
+    let gtpack = comp
+        .gtpack
+        .as_ref()
+        .expect("gtpack must be carried when present in v1");
+    assert_eq!(
+        gtpack.file, "dist/provider.gtpack",
+        "gtpack must win over the bare runtime.component path"
+    );
+    assert_eq!(
+        gtpack.sha256, real_sha,
+        "the real gtpack sha256 must survive, not a placeholder"
+    );
 }
 
 #[test]

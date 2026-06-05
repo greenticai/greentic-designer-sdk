@@ -10,7 +10,7 @@ members = [
 
 [workspace.package]
 edition = "2024"
-version = "1.2.5-research"
+version = "1.2.6-research"
 license = "MIT"
 repository = "https://github.com/greenticai/greentic-designer-sdk"
 rust-version = "1.95"
@@ -23,6 +23,7 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 ciborium = "0.2"
 clap = { version = "4.5", features = ["derive", "env"] }
+constant_time_eq = "0.3"
 dialoguer = "0.11"
 directories = "5"
 ed25519-dalek = { version = "2.1", features = ["serde", "rand_core"] }
