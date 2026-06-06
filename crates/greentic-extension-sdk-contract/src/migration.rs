@@ -41,7 +41,7 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
     out.insert("apiVersion".into(), Value::String("greentic.ai/v2".into()));
     out.insert(
         "$schema".into(),
-        Value::String("https://store.greentic.ai/schemas/describe-v2.json".into()),
+        Value::String("https://store.greentic.cloud/schemas/describe-v2.json".into()),
     );
 
     for key in ["kind", "metadata", "engine", "capabilities"] {

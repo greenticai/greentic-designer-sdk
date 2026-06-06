@@ -1,7 +1,7 @@
 use greentic_extension_sdk_contract::schema::validate_describe_v2;
 
 const VALID: &str = r#"{
-  "$schema": "https://store.greentic.ai/schemas/describe-v2.json",
+  "$schema": "https://store.greentic.cloud/schemas/describe-v2.json",
   "apiVersion": "greentic.ai/v2",
   "kind": "DesignExtension",
   "compat": {
