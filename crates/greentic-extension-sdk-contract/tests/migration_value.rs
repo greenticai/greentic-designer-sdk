@@ -214,6 +214,20 @@ fn deploy_targets_dropped_with_warning() {
             "targets": [{ "id": "x", "displayName": "X", "supportsRollback": true }]
         }
     });
-    let (_v2, report) = migrate_v0_4_x_value(&raw).unwrap();
+    let (v2, report) = migrate_v0_4_x_value(&raw).unwrap();
     assert!(report.dropped_keys.contains(&"targets".to_string()));
+
+    // `targets` is a DeployExtension-only concept with no v2 equivalent — it
+    // must be dropped outright, NOT hoisted into a top-level `execution` block.
+    // `execution` is only valid for kind=BundleExtension, so producing it for a
+    // DeployExtension yields a v2 document that cannot be deserialized (audit
+    // cycle-2 N1). Round-trip through DescribeJson to catch the regression that
+    // the dropped_keys-only assertion above masked.
+    assert!(
+        v2.get("execution").is_none(),
+        "migrating a DeployExtension must not synthesize a top-level `execution`; got: {:?}",
+        v2.get("execution")
+    );
+    let _d: DescribeJson = serde_json::from_value(v2.clone())
+        .expect("migrated DeployExtension must deserialize as v2 DescribeJson");
 }

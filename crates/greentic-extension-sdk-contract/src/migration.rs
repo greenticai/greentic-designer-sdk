@@ -61,16 +61,7 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
 
     let (runtime_val, contributions_val) = migrate_runtime_and_contributions(obj, &mut report);
     out.insert("runtime".into(), runtime_val);
-
-    if let Some(execution) = contributions_val.get("__execution__").cloned() {
-        out.insert("execution".into(), execution);
-    }
-    let contributions_clean = {
-        let mut m = contributions_val.as_object().cloned().unwrap_or_default();
-        m.remove("__execution__");
-        Value::Object(m)
-    };
-    out.insert("contributions".into(), contributions_clean);
+    out.insert("contributions".into(), contributions_val);
 
     // A v1 signature was computed over v1 canonical bytes; after migration the
     // canonical form differs entirely, so carrying it would be misleading.
@@ -82,9 +73,7 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
     Ok((Value::Object(out), report))
 }
 
-/// Build the v2 `runtime` object and accumulate `contributions`. Returns them
-/// both; the caller strips the internal `__execution__` sentinel from the
-/// contributions map if present.
+/// Build the v2 `runtime` object and the v2 `contributions` object.
 fn migrate_runtime_and_contributions(
     obj: &Map<String, Value>,
     report: &mut MigrationReport,
@@ -191,11 +180,13 @@ fn migrate_contributions(obj: &Map<String, Value>, report: &mut MigrationReport)
         }
     }
 
-    // targets is a DeployExtension-only concept dropped in v2.
-    if let Some(targets) = contributions_in.get("targets").cloned() {
+    // `targets` is a DeployExtension-only concept with no v2 equivalent, so it
+    // is dropped outright. It must NOT be turned into a top-level `execution`
+    // block: `execution` is only valid for kind=BundleExtension, and `targets`
+    // only ever appears on a DeployExtension, so synthesizing `execution` here
+    // produces a v2 document that fails `DescribeJson` validation (audit N1).
+    if contributions_in.get("targets").is_some() {
         report.dropped("targets");
-        // Stash the execution block under a sentinel key; the caller hoists it.
-        out.insert("__execution__".into(), json!({ "legacy_targets": targets }));
     }
 
     Value::Object(out)
