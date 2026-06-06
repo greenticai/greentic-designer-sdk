@@ -12,6 +12,7 @@ static TEMPLATES_PROVIDER: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates
 static TEMPLATES_WASM_COMPONENT: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/templates/wasm-component");
 static TEMPLATES_LLM: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/llm");
+static TEMPLATES_MCP: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/mcp");
 
 #[derive(Debug, Clone)]
 pub struct TemplateEntry {
@@ -63,6 +64,7 @@ pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
         "provider" => collect(&TEMPLATES_PROVIDER),
         "wasm-component" => collect(&TEMPLATES_WASM_COMPONENT),
         "llm" => collect(&TEMPLATES_LLM),
+        "mcp" => collect(&TEMPLATES_MCP),
         _ => Vec::new(),
     }
 }
@@ -208,6 +210,7 @@ mod tests {
             "provider",
             "wasm-component",
             "llm",
+            "mcp",
         ] {
             let entries = load_templates_kind(kind);
             let toolchain = entries
@@ -227,7 +230,7 @@ mod tests {
     /// older intrinsics that newer cargo-component rejects.
     #[test]
     fn every_kind_template_ships_wit_bindgen_rt_0_41() {
-        for kind in ["design", "bundle", "deploy", "provider", "llm"] {
+        for kind in ["design", "bundle", "deploy", "provider", "llm", "mcp"] {
             let entries = load_templates_kind(kind);
             let cargo_toml = entries
                 .iter()
@@ -256,6 +259,7 @@ mod tests {
             "provider",
             "wasm-component",
             "llm",
+            "mcp",
         ] {
             let entries = load_templates_kind(kind);
             let describe = entries
@@ -308,5 +312,26 @@ mod tests {
             names.contains(&"rust-toolchain.toml"),
             "missing rust-toolchain.toml: {names:?}"
         );
+    }
+
+    /// The `mcp` template tree resolves through `load_templates_kind` and ships
+    /// the full multi-tool REST MCP server skeleton (5 design-extension files
+    /// plus the split `input`/`output`/`tool_meta` modules).
+    #[test]
+    fn load_kind_mcp_returns_full_template_set() {
+        let entries = load_templates_kind("mcp");
+        let names: Vec<&str> = entries.iter().map(|e| e.dst_rel.as_str()).collect();
+        for expected in [
+            "Cargo.toml",
+            "describe.json",
+            "src/lib.rs",
+            "src/input.rs",
+            "src/output.rs",
+            "src/tool_meta.rs",
+            "wit/world.wit",
+            "rust-toolchain.toml",
+        ] {
+            assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        }
     }
 }

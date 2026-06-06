@@ -167,6 +167,82 @@ fn scaffolds_provider_extension_with_correct_wit_deps() {
 }
 
 #[test]
+fn scaffolds_mcp_extension_as_multi_tool_design_extension() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("greentic.mcp-demo");
+    let (ok, _o, e) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("greentic.mcp-demo")
+        .arg("--kind")
+        .arg("mcp")
+        .arg("--id")
+        .arg("greentic.mcp-demo")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new mcp failed: {e}");
+
+    // The multi-tool REST MCP server skeleton ships the split source modules
+    // that the shipped `component-*-ext` extensions use.
+    for rel in [
+        "Cargo.toml",
+        "describe.json",
+        "src/lib.rs",
+        "src/input.rs",
+        "src/output.rs",
+        "src/tool_meta.rs",
+        "wit/world.wit",
+        // mcp reuses the design WIT package set.
+        "wit/deps/greentic/extension-base/world.wit",
+        "wit/deps/greentic/extension-host/world.wit",
+        "wit/deps/greentic/extension-design/world.wit",
+    ] {
+        assert!(proj.join(rel).exists(), "missing expected file: {rel}");
+    }
+    // No bundle/deploy/provider WIT bleed-through.
+    assert!(
+        !proj
+            .join("wit/deps/greentic/extension-bundle/world.wit")
+            .exists()
+    );
+
+    let describe = std::fs::read_to_string(proj.join("describe.json")).unwrap();
+    assert!(describe.contains("\"kind\": \"DesignExtension\""));
+    // The starter demonstrates the secret + network REST-proxy skeleton.
+    assert!(describe.contains("https://api.example.com/*"));
+    assert!(describe.contains("secret://"));
+    // Two tools are advertised as contributions.
+    assert!(describe.contains("example_search"));
+    assert!(describe.contains("example_fetch"));
+
+    // describe.json parses and reports kind DesignExtension.
+    let describe_json: serde_json::Value =
+        serde_json::from_str(&describe).expect("describe.json parses");
+    assert_eq!(
+        describe_json.get("kind").and_then(|v| v.as_str()),
+        Some("DesignExtension")
+    );
+
+    // No leftover unrendered placeholders anywhere in the generated tree.
+    for rel in [
+        "Cargo.toml",
+        "describe.json",
+        "src/lib.rs",
+        "src/input.rs",
+        "src/output.rs",
+        "src/tool_meta.rs",
+        "wit/world.wit",
+    ] {
+        let body = std::fs::read_to_string(proj.join(rel)).unwrap();
+        assert!(
+            !body.contains("{{"),
+            "unrendered placeholder left in {rel}:\n{body}"
+        );
+    }
+}
+
+#[test]
 fn target_dir_conflict_without_force_fails() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("demo");
@@ -265,6 +341,7 @@ fn scaffolded_describe_json_validates_against_schema() {
         ("bundle", "bundle-demo"),
         ("deploy", "deploy-demo"),
         ("provider", "provider-demo"),
+        ("mcp", "mcp-demo"),
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join(scaffold_name);
@@ -315,6 +392,7 @@ fn scaffolded_describe_json_deserializes_into_v2_contract_types() {
         ("deploy", "deploy-rt", ExtensionKind::Deploy),
         ("provider", "provider-rt", ExtensionKind::Provider),
         ("wasm-component", "greentic.wc-rt", ExtensionKind::Design),
+        ("mcp", "greentic.mcp-rt", ExtensionKind::Design),
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join(scaffold_name);

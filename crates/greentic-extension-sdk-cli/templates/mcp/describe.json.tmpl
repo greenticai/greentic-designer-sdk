@@ -1,0 +1,72 @@
+{
+  "$schema": "https://store.greentic.cloud/schemas/describe-v2.json",
+  "apiVersion": "greentic.ai/v2",
+  "kind": "DesignExtension",
+  "compat": {
+    "min_designer_version": ">={{sdk_version}}",
+    "min_runner_version": "^{{sdk_version}}",
+    "contract_version": "{{sdk_version}}"
+  },
+  "metadata": {
+    "id": "{{id}}",
+    "name": "{{name}}",
+    "version": "{{version}}",
+    "summary": "A multi-tool REST MCP server exposing two agentic-worker tools.",
+    "description": "Design extension exposing two agentic-worker tools: `example_search` (query an upstream REST API) and `example_fetch` (fetch a record by id). The API key is injected by the host from a secret reference and never returned. Outbound calls are restricted to api.example.com.",
+    "author": {
+      "name": "{{author}}"
+    },
+    "license": "{{license}}"
+  },
+  "engine": {
+    "greenticDesigner": ">={{sdk_version}}",
+    "extRuntime": "^{{sdk_version}}"
+  },
+  "capabilities": {
+    "offered": [
+      {
+        "id": "greentic:{{runtime_ref_key}}/search",
+        "version": "1.0.0"
+      }
+    ],
+    "required": []
+  },
+  "runtime": {
+    "memoryLimitMB": 64,
+    "components": {
+      "{{runtime_ref_key}}": {
+        "gtpack": {
+          "file": "extension.wasm",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pack_id": "{{id}}",
+          "component_version": "{{version}}"
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "world": "{{id_wit}}/design-extension@1.0.0"
+      }
+    },
+    "permissions": {
+      "network": [
+        "https://api.example.com/*"
+      ],
+      "secrets": [
+        "secret://{{runtime_ref_key}}/"
+      ],
+      "callExtensionKinds": []
+    }
+  },
+  "contributions": {
+    "tools": [
+      {
+        "name": "example_search",
+        "export": "greentic:extension-design/tools.invoke-tool",
+        "runtime_ref": "{{runtime_ref_key}}"
+      },
+      {
+        "name": "example_fetch",
+        "export": "greentic:extension-design/tools.invoke-tool",
+        "runtime_ref": "{{runtime_ref_key}}"
+      }
+    ]
+  }
+}

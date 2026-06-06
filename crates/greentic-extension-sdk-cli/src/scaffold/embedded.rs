@@ -34,12 +34,12 @@ pub fn wit_files() -> Vec<WitFile> {
 /// Returns the subset of WIT files needed to scaffold an extension of the given kind.
 /// Always includes `extension-base.wit` and `extension-host.wit`.
 ///
-/// `wasm-component` reuses the `design` WIT files: the scaffolded world imports
-/// `greentic:extension-design/tools@0.1.0`, so `cargo component build` needs the
-/// same package set as a `design` extension.
+/// `wasm-component`, `llm`, and `mcp` reuse the `design` WIT files: their
+/// scaffolded worlds import `greentic:extension-design/tools@0.1.0`, so
+/// `cargo component build` needs the same package set as a `design` extension.
 pub fn files_for_kind(kind: &str) -> Vec<WitFile> {
     let kind_file = match kind {
-        "wasm-component" | "llm" => "extension-design.wit".to_string(),
+        "wasm-component" | "llm" | "mcp" => "extension-design.wit".to_string(),
         other => format!("extension-{other}.wit"),
     };
     wit_files()
@@ -113,6 +113,21 @@ mod tests {
     #[test]
     fn files_for_kind_llm_uses_design_wit() {
         let files = files_for_kind("llm");
+        let names: Vec<_> = files.iter().map(|f| f.name).collect();
+        assert!(names.contains(&"extension-base.wit"));
+        assert!(names.contains(&"extension-host.wit"));
+        assert!(names.contains(&"extension-design.wit"));
+        assert!(!names.contains(&"extension-bundle.wit"));
+        assert!(!names.contains(&"extension-deploy.wit"));
+        assert!(!names.contains(&"extension-provider.wit"));
+    }
+
+    /// `mcp` is a design-extension subtype (a multi-tool REST MCP server) — its
+    /// WIT set must mirror `design` (no separate `extension-mcp.wit`), so
+    /// `cargo component build` can resolve the scaffolded world.
+    #[test]
+    fn files_for_kind_mcp_uses_design_wit() {
+        let files = files_for_kind("mcp");
         let names: Vec<_> = files.iter().map(|f| f.name).collect();
         assert!(names.contains(&"extension-base.wit"));
         assert!(names.contains(&"extension-host.wit"));

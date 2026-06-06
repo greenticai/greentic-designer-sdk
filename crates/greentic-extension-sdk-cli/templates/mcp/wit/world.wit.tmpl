@@ -1,0 +1,20 @@
+package {{id_wit}};
+
+// Multi-tool REST MCP server world.
+//
+// Mirrors the shipped `component-*-ext` design extensions (e.g. Tavily):
+// the server is a `DesignExtension` that exports `extension-design/tools`
+// only. `list-tools` advertises N tools and `invoke-tool` dispatches by
+// name, proxying each call to an upstream REST API. The host injects the
+// API key via `extension-host/secrets` and performs the request via
+// `extension-host/http`.
+world design-extension {
+  import greentic:extension-base/types@{{contract_version}};
+  import greentic:extension-host/logging@{{contract_version}};
+  import greentic:extension-host/secrets@{{contract_version}};
+  import greentic:extension-host/http@{{contract_version}};
+
+  export greentic:extension-base/manifest@{{contract_version}};
+  export greentic:extension-base/lifecycle@{{contract_version}};
+  export greentic:extension-design/tools@{{contract_version}};
+}
