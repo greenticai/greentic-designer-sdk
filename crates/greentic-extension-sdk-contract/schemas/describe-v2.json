@@ -258,6 +258,13 @@
               "items": {
                 "type": "string"
               }
+            },
+            "llm_roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "LLM roles (wire names, e.g. sorla_composer) this extension may request from the host greentic:extension-host/llm import."
             }
           }
         },
