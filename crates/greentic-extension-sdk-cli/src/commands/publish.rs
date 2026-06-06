@@ -103,6 +103,13 @@ pub struct Args {
     /// order), then anonymous.
     #[arg(long)]
     pub oci_token: Option<String>,
+
+    /// Pack this pre-built `wasm32-wasip2` component instead of running
+    /// `cargo component build`. For externally produced components (e.g. a
+    /// generated MCP component). The describe.json in --manifest's directory
+    /// still drives the pack; only the build step is bypassed.
+    #[arg(long, value_name = "PATH")]
+    pub wasm: Option<PathBuf>,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
@@ -134,6 +141,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         trust_policy: args.trust.as_str().to_string(),
         verify_only: args.verify_only,
         oci_token: args.oci_token,
+        wasm_override: args.wasm,
     };
     match run_publish(&cfg).await {
         Ok(outcome) => {

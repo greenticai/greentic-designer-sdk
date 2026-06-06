@@ -119,6 +119,16 @@ precedence order: `--key <path>`, `--key-id <id>` (loads
 To sign a `describe.json` in isolation (outside a pack), use `gtdx sign --key
 my-key.pem ./`.
 
+To publish a component that was **built outside this CLI** (e.g. a generated MCP
+component), pass `--wasm <path>` so `publish` packs that artifact instead of
+running `cargo component build`. The `describe.json` in `--manifest`'s directory
+still drives the pack, signing, and registry metadata — only the build step is
+skipped:
+
+```bash
+gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml ./
+```
+
 ### Verify a pack
 
 ```bash
