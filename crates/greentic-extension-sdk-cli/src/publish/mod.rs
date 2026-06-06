@@ -247,6 +247,11 @@ pub struct PublishConfig {
     /// `resolve_backend` falls back to `GHCR_TOKEN` / `GITHUB_TOKEN` /
     /// `OCI_TOKEN` env vars, then anonymous.
     pub oci_token: Option<String>,
+    /// Pre-built `wasm32-wasip2` component to pack instead of running
+    /// `cargo component build` from `project_dir`. Lets an externally produced
+    /// component (e.g. a generated MCP component) be packed + signed + published
+    /// through the same path. When `None`, the project is built from source.
+    pub wasm_override: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -270,6 +275,25 @@ pub enum PublishOutcome {
         signed: bool,
         registry_url: String,
     },
+}
+
+/// Resolve the component `.wasm` to pack: an externally-built artifact when
+/// `--wasm` is given (skips `cargo component build`), otherwise a fresh build
+/// of the project. Kept separate from `run_publish` so the override branch is
+/// unit-testable without invoking the toolchain.
+fn resolve_publish_wasm(cfg: &PublishConfig) -> Result<PathBuf, PublishError> {
+    if let Some(wasm) = &cfg.wasm_override {
+        if !wasm.is_file() {
+            return Err(PublishError::Build(format!(
+                "--wasm path is not a file: {}",
+                wasm.display()
+            )));
+        }
+        return Ok(wasm.clone());
+    }
+    let build = run_build(&cfg.project_dir, cfg.profile)
+        .map_err(|e| PublishError::Build(format!("cargo component build: {e}")))?;
+    Ok(build.wasm_path)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -300,9 +324,9 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
         return verify_only(&backend, &describe, cfg.force);
     }
 
-    // 4. Build (release unless cfg says otherwise).
-    let build = run_build(&cfg.project_dir, cfg.profile)
-        .map_err(|e| PublishError::Build(format!("cargo component build: {e}")))?;
+    // 4. Resolve the component wasm: an externally-built artifact (`--wasm`,
+    //    e.g. a generated MCP component) or a fresh `cargo component build`.
+    let wasm_path = resolve_publish_wasm(cfg)?;
 
     // 5. Resolve the signing key first (if requested), so the *pack's*
     //    describe.json is manifest-bound and signed — the installable artifact
@@ -317,7 +341,7 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
     let staging_pack = cfg.project_dir.join("dist/publish-staging.gtxpack");
     let info = build_pack_with_key(
         &cfg.project_dir,
-        &build.wasm_path,
+        &wasm_path,
         &staging_pack,
         key_and_id.as_ref().map(|(key, _)| key),
     )
@@ -566,7 +590,55 @@ mod tests {
             trust_policy: "loose".into(),
             verify_only: false,
             oci_token: None,
+            wasm_override: None,
         }
+    }
+
+    #[test]
+    fn wasm_override_uses_provided_file_and_skips_build() {
+        // A pre-built component (e.g. a generated MCP component) is packed as-is
+        // — resolve must return the exact path without touching the toolchain.
+        let tmp = tempfile::tempdir().unwrap();
+        let wasm = tmp.path().join("component.wasm");
+        std::fs::write(&wasm, b"\0asm\x01\0\0\0").unwrap();
+        let mut cfg = signing_cfg(tmp.path(), None, None);
+        cfg.sign = false;
+        cfg.wasm_override = Some(wasm.clone());
+
+        let got = resolve_publish_wasm(&cfg).unwrap();
+        assert_eq!(got, wasm);
+    }
+
+    #[test]
+    fn wasm_override_missing_file_errors_before_build() {
+        // A bad `--wasm` path must fail fast with a Build error, not fall
+        // through to `cargo component build`.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = signing_cfg(tmp.path(), None, None);
+        cfg.sign = false;
+        cfg.wasm_override = Some(tmp.path().join("does-not-exist.wasm"));
+
+        let err = resolve_publish_wasm(&cfg).unwrap_err();
+        assert!(
+            matches!(err, PublishError::Build(ref m) if m.contains("--wasm path is not a file")),
+            "expected Build error naming the missing --wasm path, got: {err}"
+        );
+    }
+
+    #[test]
+    fn wasm_override_rejects_a_directory() {
+        // `is_file()` guards against pointing `--wasm` at a directory.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("not-a-file");
+        std::fs::create_dir(&dir).unwrap();
+        let mut cfg = signing_cfg(tmp.path(), None, None);
+        cfg.sign = false;
+        cfg.wasm_override = Some(dir);
+
+        assert!(matches!(
+            resolve_publish_wasm(&cfg).unwrap_err(),
+            PublishError::Build(_)
+        ));
     }
 
     fn write_pem_key(path: &Path, seed: [u8; 32]) {
