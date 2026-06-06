@@ -14,6 +14,7 @@ pub enum Kind {
     Provider,
     WasmComponent,
     Mcp,
+    Llm,
 }
 
 impl Kind {
@@ -25,6 +26,7 @@ impl Kind {
             Kind::Provider => "provider",
             Kind::WasmComponent => "wasm-component",
             Kind::Mcp => "mcp",
+            Kind::Llm => "llm",
         }
     }
 }
@@ -41,5 +43,10 @@ mod tests {
     #[test]
     fn mcp_kind_str() {
         assert_eq!(Kind::Mcp.as_str(), "mcp");
+    }
+
+    #[test]
+    fn llm_kind_str() {
+        assert_eq!(Kind::Llm.as_str(), "llm");
     }
 }
