@@ -18,15 +18,19 @@ pub struct WitFile {
 }
 
 pub fn wit_files() -> Vec<WitFile> {
+    // Skip any entry without a valid UTF-8 file name rather than panicking; the
+    // files are compile-time-embedded so this never fires, but the no-panic
+    // guardrail forbids the construct (audit cycle-2 P3).
     EMBEDDED
         .files()
-        .map(|f| WitFile {
-            name: f
-                .path()
+        .filter_map(|f| {
+            f.path()
                 .file_name()
                 .and_then(|s| s.to_str())
-                .expect("embedded wit filename"),
-            bytes: f.contents(),
+                .map(|name| WitFile {
+                    name,
+                    bytes: f.contents(),
+                })
         })
         .collect()
 }
@@ -54,9 +58,10 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(bytes);
     let mut out = String::with_capacity(64);
-    for byte in digest {
-        use std::fmt::Write as _;
-        write!(&mut out, "{byte:02x}").expect("write to string");
+    for b in digest {
+        // from_digit only returns None for radix>36, so these never fall back.
+        out.push(char::from_digit(u32::from(b >> 4), 16).unwrap_or('0'));
+        out.push(char::from_digit(u32::from(b & 0xf), 16).unwrap_or('0'));
     }
     out
 }

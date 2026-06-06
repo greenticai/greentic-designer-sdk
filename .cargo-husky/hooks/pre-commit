@@ -8,7 +8,7 @@ set -euo pipefail
 echo "[husky pre-commit] cargo fmt --all -- --check"
 cargo fmt --all -- --check
 
-echo "[husky pre-commit] cargo clippy --workspace --all-targets --locked -- -D warnings"
-cargo clippy --workspace --all-targets --locked -- -D warnings
+echo "[husky pre-commit] cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 echo "[husky pre-commit] OK"

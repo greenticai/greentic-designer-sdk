@@ -117,6 +117,31 @@ fn force_overwrites_existing_version() {
 }
 
 #[test]
+fn corrupt_index_is_not_silently_zeroed() {
+    // A corrupt index.json must NOT be replaced with an empty default and
+    // re-persisted — that would permanently drop every prior entry. Publish
+    // should fail loudly and leave the existing index untouched (audit N14).
+    let tmp = tempfile::tempdir().unwrap();
+    let reg = LocalFilesystemRegistry::new("test", tmp.path().to_path_buf());
+    reg.publish_local(&sample_req("0.1.0", false)).unwrap();
+
+    let index_path = tmp.path().join("index.json");
+    std::fs::write(&index_path, b"{ this is not valid json").unwrap();
+
+    let err = reg.publish_local(&sample_req("0.2.0", false)).unwrap_err();
+    assert!(
+        matches!(err, greentic_extension_sdk_registry::RegistryError::Json(_)),
+        "corrupt index should surface a parse error, got: {err:?}"
+    );
+    // The corrupt file is preserved (not overwritten with an empty index).
+    let after = std::fs::read(&index_path).unwrap();
+    assert_eq!(
+        after, b"{ this is not valid json",
+        "publish must not overwrite a corrupt index with a default"
+    );
+}
+
+#[test]
 fn index_tracks_multiple_versions() {
     let tmp = tempfile::tempdir().unwrap();
     let reg = LocalFilesystemRegistry::new("test", tmp.path().to_path_buf());

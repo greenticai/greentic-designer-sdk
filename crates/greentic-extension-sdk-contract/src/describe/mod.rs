@@ -84,6 +84,16 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
             return Err("runtime.components must declare at least one entry".into());
         }
 
+        // Mirror the JSON Schema bound (memoryLimitMB ∈ [1, 1024]) in the type
+        // itself, so a doc deserialized without first running schema validation
+        // can't carry 0 or a multi-gigabyte value (audit cycle-2 N8).
+        if !(1..=1024).contains(&raw.runtime.memory_limit_mb) {
+            return Err(format!(
+                "runtime.memoryLimitMB must be in [1, 1024] (got {})",
+                raw.runtime.memory_limit_mb
+            ));
+        }
+
         if raw.execution.is_some() && raw.kind != ExtensionKind::Bundle {
             return Err(format!(
                 "`execution` is only allowed when kind=BundleExtension (got kind={:?})",

@@ -54,6 +54,17 @@ fn migration_strips_stale_signature_and_warns() {
 }
 
 #[test]
+fn migrating_an_already_v2_doc_is_idempotent() {
+    // Running `gtdx migrate` twice must not error on the already-migrated doc;
+    // a v2 input migrates to itself with no warnings (audit cycle-2 P3).
+    let raw: serde_json::Value = serde_json::from_str(V1_AC).unwrap();
+    let (v2, _) = migrate_v0_4_x_value(&raw).unwrap();
+    let (again, report) = migrate_v0_4_x_value(&v2).expect("v2 input must pass through");
+    assert_eq!(again, v2, "already-v2 doc must migrate to itself unchanged");
+    assert!(report.warnings.is_empty() && report.dropped_keys.is_empty());
+}
+
+#[test]
 fn ac_v1_migrates_to_parseable_v2() {
     let raw: serde_json::Value = serde_json::from_str(V1_AC).unwrap();
     let (v2, report) = migrate_v0_4_x_value(&raw).unwrap();
@@ -214,6 +225,20 @@ fn deploy_targets_dropped_with_warning() {
             "targets": [{ "id": "x", "displayName": "X", "supportsRollback": true }]
         }
     });
-    let (_v2, report) = migrate_v0_4_x_value(&raw).unwrap();
+    let (v2, report) = migrate_v0_4_x_value(&raw).unwrap();
     assert!(report.dropped_keys.contains(&"targets".to_string()));
+
+    // `targets` is a DeployExtension-only concept with no v2 equivalent — it
+    // must be dropped outright, NOT hoisted into a top-level `execution` block.
+    // `execution` is only valid for kind=BundleExtension, so producing it for a
+    // DeployExtension yields a v2 document that cannot be deserialized (audit
+    // cycle-2 N1). Round-trip through DescribeJson to catch the regression that
+    // the dropped_keys-only assertion above masked.
+    assert!(
+        v2.get("execution").is_none(),
+        "migrating a DeployExtension must not synthesize a top-level `execution`; got: {:?}",
+        v2.get("execution")
+    );
+    let _d: DescribeJson = serde_json::from_value(v2.clone())
+        .expect("migrated DeployExtension must deserialize as v2 DescribeJson");
 }

@@ -321,7 +321,7 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
         .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
 
     if cfg.verify_only {
-        return verify_only(&backend, &describe, cfg.force);
+        return verify_only(&backend, &describe, cfg.force).await;
     }
 
     // 4. Resolve the component wasm: an externally-built artifact (`--wasm`,
@@ -388,7 +388,16 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
         force: cfg.force,
     };
 
-    let receipt = backend.publish(req).await.map_err(map_registry_err)?;
+    let receipt = match backend.publish(req).await {
+        Ok(r) => r,
+        Err(e) => {
+            // Don't leave the transient staging pack behind on a failed publish
+            // (auth/network/conflict); it could be mistaken for a real artifact
+            // and accumulates across retries (audit cycle-2 P3).
+            let _ = std::fs::remove_file(&staging_pack);
+            return Err(map_registry_err(e));
+        }
+    };
 
     // 8. Also copy into local ./dist/ with the canonical name, and drop the
     //    transient staging pack so it doesn't linger.
@@ -448,47 +457,53 @@ fn map_registry_err(e: RegistryError) -> PublishError {
     }
 }
 
-fn verify_only(
+async fn verify_only(
     backend: &Backend,
     describe: &DescribeJson,
     force: bool,
 ) -> Result<PublishOutcome, PublishError> {
+    let id = describe.metadata.id.clone();
+    let version = describe.metadata.version.clone();
     match backend {
         Backend::Local(r) => {
-            let ver_dir = r
-                .root_path()
-                .join(&describe.metadata.id)
-                .join(&describe.metadata.version);
+            let ver_dir = r.root_path().join(&id).join(&version);
             if ver_dir.exists() && !force {
                 return Err(PublishError::VersionExists(format!(
-                    "version {} already exists at {}",
-                    describe.metadata.version,
+                    "version {version} already exists at {}",
                     ver_dir.display()
                 )));
             }
             Ok(PublishOutcome::VerifyOnly {
-                ext_id: describe.metadata.id.clone(),
-                version: describe.metadata.version.clone(),
+                ext_id: id,
+                version,
                 registry: r.root_path().display().to_string(),
             })
         }
         Backend::Store(r) => {
-            // Server-side conflict check lands here in a future iteration;
-            // for now, verify_only on a remote registry is a no-op success.
+            // Real server-side conflict probe: list the published versions and
+            // fail if this one already exists (audit N3 — previously a no-op
+            // success that printed "slot free" without contacting the server).
+            let existing = r.list_versions(&id).await.map_err(map_registry_err)?;
+            if existing.contains(&version) && !force {
+                return Err(PublishError::VersionExists(format!(
+                    "version {version} already exists in {}",
+                    r.base_url()
+                )));
+            }
             Ok(PublishOutcome::VerifyOnly {
-                ext_id: describe.metadata.id.clone(),
-                version: describe.metadata.version.clone(),
+                ext_id: id,
+                version,
                 registry: r.base_url().to_string(),
             })
         }
         Backend::Oci(_) => {
-            // Server-side HEAD probe against the OCI manifest endpoint lands
-            // in a later iteration; for now verify-only is a pass-through.
-            Ok(PublishOutcome::VerifyOnly {
-                ext_id: describe.metadata.id.clone(),
-                version: describe.metadata.version.clone(),
-                registry: "oci-registry".into(),
-            })
+            // OCI has no real conflict probe here — `list_versions` is an
+            // empty-list stub, so reusing it would report every slot as free.
+            // Returning a success would be a false "slot free"; surface
+            // NotImplemented (distinct exit code) instead (audit N3).
+            Err(PublishError::NotImplemented(
+                "verify-only conflict probe is not implemented for OCI registries".into(),
+            ))
         }
     }
 }
@@ -646,6 +661,37 @@ mod tests {
             .to_pkcs8_pem(LineEnding::LF)
             .unwrap();
         std::fs::write(path, pem.as_bytes()).unwrap();
+    }
+
+    fn minimal_describe() -> DescribeJson {
+        serde_json::from_str(
+            r#"{
+  "apiVersion": "greentic.ai/v2",
+  "kind": "DesignExtension",
+  "compat": {"min_designer_version": ">=1.0.0", "min_runner_version": "^0.12.0", "contract_version": "1.2.0"},
+  "metadata": {"id": "com.example.demo", "name": "demo", "version": "0.1.0", "summary": "x", "author": {"name": "a"}, "license": "MIT"},
+  "engine": {"greenticDesigner": "^0.1.0", "extRuntime": "^0.1.0"},
+  "capabilities": {"offered": [], "required": []},
+  "runtime": {"components": {"stub": {"oci_ref": "oci://ghcr.io/example/stub:latest", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "world": "greentic:component/stub@0.1.0"}}, "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}},
+  "contributions": {}
+}"#,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn verify_only_oci_does_not_report_false_slot_free() {
+        // verify-only against OCI must NOT return a success that prints
+        // "slot free" without probing the server — that gives CI a false green.
+        // Until a real conflict probe exists, it returns NotImplemented (audit N3).
+        let backend = Backend::Oci(OciRegistry::new("oci", "ghcr.io", "greenticai/ext", None));
+        let err = verify_only(&backend, &minimal_describe(), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, PublishError::NotImplemented(_)),
+            "OCI verify-only must be NotImplemented, not a false success; got: {err:?}"
+        );
     }
 
     #[test]

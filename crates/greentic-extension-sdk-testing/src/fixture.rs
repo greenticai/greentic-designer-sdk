@@ -61,24 +61,8 @@ impl ExtensionFixtureBuilder {
     pub fn build(self) -> Result<ExtensionFixture> {
         let dir = TempDir::new()?;
 
-        let offered: Vec<CapabilityRef> = self
-            .offered
-            .into_iter()
-            .map(|(id, v)| CapabilityRef {
-                id: id.parse().expect("valid cap id"),
-                version: v,
-                deprecated: None,
-            })
-            .collect();
-        let required: Vec<CapabilityRef> = self
-            .required
-            .into_iter()
-            .map(|(id, v)| CapabilityRef {
-                id: id.parse().expect("valid cap id"),
-                version: v,
-                deprecated: None,
-            })
-            .collect();
+        let offered = parse_capability_refs(self.offered)?;
+        let required = parse_capability_refs(self.required)?;
 
         let mut describe = DescribeJson {
             schema_ref: None,
@@ -164,5 +148,60 @@ impl ExtensionFixtureBuilder {
             &manifest_json,
         )?;
         Ok(ExtensionFixture { dir, describe_path })
+    }
+}
+
+/// Convert caller-supplied `(id, version)` pairs into `CapabilityRef`s,
+/// surfacing a malformed capability id as `Err` (with the offending id named)
+/// rather than panicking — `testing` is a published crate and `build()` is
+/// fallible (audit cycle-2 N2).
+fn parse_capability_refs(pairs: Vec<(String, String)>) -> Result<Vec<CapabilityRef>> {
+    pairs
+        .into_iter()
+        .map(|(id, version)| {
+            let id = id
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid capability id {id:?}: {e}"))?;
+            Ok(CapabilityRef {
+                id,
+                version,
+                deprecated: None,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `build()` returns `Result`, so a caller-supplied invalid capability id
+    /// must surface as `Err`, never an internal panic. `testing` is a published
+    /// crate; an `.expect()` here would crash external users' test suites with
+    /// an opaque message (audit cycle-2 N2).
+    #[test]
+    fn build_returns_err_on_invalid_offered_capability_id() {
+        let result = ExtensionFixtureBuilder::new(ExtensionKind::Design, "greentic.x", "1.0.0")
+            // No `namespace:name` colon → MalformedCapabilityId.
+            .offer("not-a-valid-cap-id", "1.0.0")
+            .build();
+        let Err(err) = result else {
+            panic!("invalid capability id must be an Err, not a panic")
+        };
+        assert!(
+            err.to_string().contains("not-a-valid-cap-id"),
+            "error should name the offending id; got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_returns_err_on_invalid_required_capability_id() {
+        let result = ExtensionFixtureBuilder::new(ExtensionKind::Design, "greentic.x", "1.0.0")
+            .require("also-invalid", "1.0.0")
+            .build();
+        assert!(
+            result.is_err(),
+            "invalid required capability id must be an Err, not a panic"
+        );
     }
 }

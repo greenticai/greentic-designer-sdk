@@ -104,6 +104,30 @@ fn round_trips() {
 }
 
 #[test]
+fn memory_limit_out_of_range_rejected() {
+    // The JSON Schema bounds memoryLimitMB to [1, 1024]. The type must enforce
+    // the same range so a doc that skips schema validation can't carry 0 or a
+    // 4-billion value (audit cycle-2 N8).
+    for bad in ["\"memoryLimitMB\": 0", "\"memoryLimitMB\": 2000"] {
+        let doc = AC_V2.replace("\"memoryLimitMB\": 64", bad);
+        let r: Result<DescribeJson, _> = serde_json::from_str(&doc);
+        assert!(
+            r.is_err(),
+            "memoryLimitMB out of [1,1024] must be rejected: {bad}"
+        );
+    }
+}
+
+#[test]
+fn memory_limit_at_bounds_accepted() {
+    for ok in ["\"memoryLimitMB\": 1", "\"memoryLimitMB\": 1024"] {
+        let doc = AC_V2.replace("\"memoryLimitMB\": 64", ok);
+        let r: Result<DescribeJson, _> = serde_json::from_str(&doc);
+        assert!(r.is_ok(), "memoryLimitMB at bound must be accepted: {ok}");
+    }
+}
+
+#[test]
 fn unknown_runtime_ref_in_node_type_rejected() {
     let bad = AC_V2.replace(
         "\"runtime_ref\": \"adaptive-card\"\n      }\n    ],\n    \"tools\"",

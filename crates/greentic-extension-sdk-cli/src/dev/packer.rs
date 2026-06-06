@@ -222,6 +222,13 @@ pub fn build_pack_with_key(
     // Pass 2: final pack with the bound/signed describe.json.
     let zip_bytes = build_gtxpack_with_manifest(entries)
         .map_err(|e| anyhow::anyhow!("build_gtxpack_with_manifest: {e}"))?;
+
+    // Re-verify the produced pack with exactly the checks the registry runs at
+    // install time, *before* writing it to disk or uploading. A signing-key,
+    // JCS-canonicalization, or serialization defect is caught here rather than
+    // surfacing only at a consumer's failed install (audit N4).
+    verify_produced_pack(&zip_bytes, &describe_typed, signing_key)?;
+
     std::fs::write(output_pack, &zip_bytes)?;
 
     let size = u64::try_from(zip_bytes.len()).unwrap_or(u64::MAX);
@@ -242,6 +249,27 @@ pub fn build_pack_with_key(
         ext_kind,
         describe_bytes: final_describe_bytes,
     })
+}
+
+/// Re-verify a freshly produced pack with exactly the checks the registry runs
+/// at install time (archive↔manifest integrity, describe↔manifest binding, and
+/// — when signed — anchored signature). Catches a producer-side defect before
+/// the artifact is written or uploaded (audit N4).
+fn verify_produced_pack(
+    zip_bytes: &[u8],
+    describe: &DescribeJson,
+    signing_key: Option<&ed25519_dalek::SigningKey>,
+) -> anyhow::Result<()> {
+    let manifest_bytes = read_manifest_from_zip(zip_bytes)?;
+    greentic_extension_sdk_contract::verify_archive_against_manifest(zip_bytes)
+        .map_err(|e| anyhow::anyhow!("self-verify (archive vs manifest): {e}"))?;
+    greentic_extension_sdk_contract::verify_manifest_binding(describe, &manifest_bytes)
+        .map_err(|e| anyhow::anyhow!("self-verify (manifest binding): {e}"))?;
+    if let Some(key) = signing_key {
+        greentic_extension_sdk_contract::verify_describe_with_key(describe, &key.verifying_key())
+            .map_err(|e| anyhow::anyhow!("self-verify (signature): {e}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -307,6 +335,24 @@ mod tests {
             .unwrap();
         greentic_extension_sdk_contract::verify_describe_with_key(&describe, &sk.verifying_key())
             .unwrap();
+    }
+
+    #[test]
+    fn verify_produced_pack_accepts_good_and_rejects_tampered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wasm = make_project(tmp.path());
+        let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let info = build_pack_with_key(tmp.path(), &wasm, &out, Some(&sk)).unwrap();
+        let zip_bytes = std::fs::read(&out).unwrap();
+        let describe: DescribeJson = serde_json::from_slice(&info.describe_bytes).unwrap();
+
+        // The real output passes the install-time self-check.
+        verify_produced_pack(&zip_bytes, &describe, Some(&sk)).unwrap();
+
+        // A signature checked against the wrong key is rejected.
+        let other = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        assert!(verify_produced_pack(&zip_bytes, &describe, Some(&other)).is_err());
     }
 
     #[test]

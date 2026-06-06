@@ -244,6 +244,29 @@ mod tests {
         }
     }
 
+    /// The `wasm-component` scaffold is a standalone cargo-component project
+    /// with no parent workspace, so its Cargo.toml must use concrete
+    /// `[package]` fields, not `edition.workspace = true` / `*.workspace`
+    /// inherits — which would make `cargo build` fail on a fresh scaffold
+    /// (audit cycle-2 N12).
+    #[test]
+    fn wasm_component_cargo_toml_has_no_workspace_inherits() {
+        let entries = load_templates_kind("wasm-component");
+        let cargo_toml = entries
+            .iter()
+            .find(|e| e.dst_rel.ends_with("Cargo.toml"))
+            .expect("wasm-component must ship a Cargo.toml template");
+        let content = std::str::from_utf8(cargo_toml.src_bytes).expect("utf8");
+        assert!(
+            !content.contains(".workspace = true") && !content.contains(".workspace=true"),
+            "wasm-component Cargo.toml must not inherit from a (non-existent) workspace:\n{content}",
+        );
+        assert!(
+            content.contains("edition = \"2024\""),
+            "wasm-component Cargo.toml must pin edition concretely:\n{content}",
+        );
+    }
+
     /// Every kind's `describe.json` template must emit v2 shape — after
     /// the v1->v2 ecosystem migration (PR-series ending in greentic-biz/
     /// greentic-designer-extensions#58), scaffolded extensions that still

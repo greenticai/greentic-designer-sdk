@@ -80,7 +80,9 @@ pub(crate) fn post_install_provider(
             gtpack.sha256
         ))
     })?;
-    if actual_digest.as_slice() != expected_bytes.as_slice() {
+    // Constant-time compare for consistency with the other digest checks
+    // (audit cycle-2 P3); not a remote-timing surface, but keep it uniform.
+    if !constant_time_eq::constant_time_eq(actual_digest.as_slice(), expected_bytes.as_slice()) {
         return Err(RegistryError::ProviderInstall(format!(
             "sha256 mismatch: describe={}, actual={}",
             gtpack.sha256,

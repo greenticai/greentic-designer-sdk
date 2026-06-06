@@ -9,6 +9,16 @@ pub enum RegistryError {
     SignatureInvalid(String),
 
     #[error(
+        "describe mismatch: the describe.json inside the artifact does not match the authenticated \
+         describe served by the registry (a tampered registry may be trying to install broader \
+         permissions than were consented to)"
+    )]
+    DescribeMismatch,
+
+    #[error("artifact has no describe.json — cannot verify it matches the authenticated describe")]
+    DescribeMissing,
+
+    #[error(
         "artifact sha256 mismatch: registry advertised {expected}, downloaded bytes hash to {computed}"
     )]
     ArtifactHashMismatch { expected: String, computed: String },

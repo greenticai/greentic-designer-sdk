@@ -29,10 +29,7 @@ impl GreenticStoreRegistry {
             name: name.into(),
             base_url: base_url.into(),
             token,
-            client: Client::builder()
-                .user_agent(concat!("gtdx/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .expect("reqwest client"),
+            client: build_secure_client(),
             max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
             insecure_allowed: false,
         }
@@ -131,6 +128,28 @@ struct PublishResponseDto {
 /// tests working. Callers that have out-of-band assurance the path is trusted
 /// (private VPC, SSH tunnel, the migration window before a Store gets TLS)
 /// can pass `allow_insecure = true` to opt back into cleartext.
+/// Build the HTTP client without panicking, while preserving the security
+/// invariant that we never auto-follow redirects: an HTTPS endpoint that 3xx's
+/// to `http://` would otherwise pull the artifact/body over cleartext, bypassing
+/// the scheme check on the configured URL (audit N5). The degraded fallback
+/// keeps `Policy::none()`; only a total TLS-backend failure (where no request
+/// could succeed anyway) drops to the bare default, and that is logged.
+fn build_secure_client() -> Client {
+    let no_redirect = || reqwest::redirect::Policy::none();
+    Client::builder()
+        .user_agent(concat!("gtdx/", env!("CARGO_PKG_VERSION")))
+        .redirect(no_redirect())
+        .build()
+        .or_else(|_| Client::builder().redirect(no_redirect()).build())
+        .unwrap_or_else(|e| {
+            tracing::error!(
+                "failed to build a redirect-restricted HTTP client ({e}); \
+                 falling back to the default client (redirects may be followed)"
+            );
+            Client::new()
+        })
+}
+
 fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), RegistryError> {
     if let Some(rest) = url.strip_prefix("https://") {
         if rest.is_empty() {
@@ -149,6 +168,14 @@ fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), Registry
             return Ok(());
         }
         if allow_insecure {
+            // The opt-in escape hatch is downgrading a non-loopback request to
+            // cleartext — the bearer token and signed describe cross the wire
+            // unencrypted. Make that auditable rather than silent (audit N6).
+            tracing::warn!(
+                host,
+                "GTDX_ALLOW_INSECURE_REGISTRY: talking to remote registry over plaintext HTTP; \
+                 credentials and artifacts are NOT encrypted in transit"
+            );
             return Ok(());
         }
         return Err(RegistryError::InsecureRegistryUrl(url.into()));

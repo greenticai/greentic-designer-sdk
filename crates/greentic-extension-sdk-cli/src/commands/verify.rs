@@ -52,22 +52,26 @@ pub fn run(args: &Args, _home: &Path) -> Result<()> {
         );
     }
 
-    let sig = describe
-        .signature
-        .as_ref()
-        .expect("verify passed → signature present");
-    let anchored = if args.trusted_key.is_some() {
-        " (anchored)"
-    } else {
-        ""
-    };
-    println!(
-        "OK  {} v{} signed by {}{}",
-        describe.metadata.id,
-        describe.metadata.version,
-        &sig.public_key[..16.min(sig.public_key.len())],
-        anchored,
+    // verify passed, so a signature is present; avoid an `expect` panic on the
+    // off-chance it isn't, and be explicit about what was actually proven:
+    // anchored authenticity (with --trusted-key) vs integrity-only
+    // self-consistency, which any re-signer could also satisfy (audit N11).
+    let key_fp = describe.signature.as_ref().map_or_else(
+        || "?".to_string(),
+        |s| s.public_key[..16.min(s.public_key.len())].to_string(),
     );
+    if args.trusted_key.is_some() {
+        println!(
+            "OK  {} v{} — AUTHENTICITY VERIFIED (anchored to trusted key {key_fp})",
+            describe.metadata.id, describe.metadata.version,
+        );
+    } else {
+        println!(
+            "OK  {} v{} — INTEGRITY ONLY (self-consistent, signed by {key_fp}; NOT authenticated \
+             — pass --trusted-key to verify the publisher)",
+            describe.metadata.id, describe.metadata.version,
+        );
+    }
     Ok(())
 }
 
