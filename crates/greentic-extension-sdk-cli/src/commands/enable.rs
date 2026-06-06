@@ -31,7 +31,11 @@ pub(crate) fn parse_target(target: &str, home: &Path) -> Result<(String, String)
     let versions = installed_versions(home, target)?;
     match versions.len() {
         0 => Err(anyhow!("extension not installed: {target}")),
-        1 => Ok((target.to_string(), versions.into_iter().next().unwrap())),
+        1 => versions
+            .into_iter()
+            .next()
+            .map(|v| (target.to_string(), v))
+            .ok_or_else(|| anyhow!("internal: single-version list was empty for {target}")),
         _ => Err(anyhow!(
             "ambiguous version for {target}: installed = [{}]. Specify with @<version>.",
             versions.join(", ")
