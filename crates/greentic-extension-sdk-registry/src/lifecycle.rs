@@ -269,6 +269,26 @@ fn read_manifest_bytes(zip_bytes: &[u8]) -> Result<Option<Vec<u8>>, RegistryErro
     }
 }
 
+/// Read and parse the `describe.json` actually contained in a `.gtxpack` zip —
+/// the document that `extract_to_staging` writes to disk and the runtime reads
+/// to grant permissions/capabilities. Distinct from the describe the registry
+/// advertises via its metadata endpoint (see `verify_integrity`).
+fn read_archive_describe(
+    zip_bytes: &[u8],
+) -> Result<greentic_extension_sdk_contract::DescribeJson, RegistryError> {
+    use std::io::Read as _;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
+        .map_err(|e| RegistryError::Storage(format!("zip open: {e}")))?;
+    let mut entry = archive
+        .by_name(greentic_extension_sdk_contract::DESCRIBE_ENTRY_NAME)
+        .map_err(|_| RegistryError::DescribeMissing)?;
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf)?;
+    let value: serde_json::Value = serde_json::from_slice(&buf)?;
+    greentic_extension_sdk_contract::schema::validate_describe_json(&value)?;
+    Ok(serde_json::from_value(value)?)
+}
+
 /// Enforce whole-archive integrity for every install: every file must match
 /// the `manifest.json` ledger, and the describe must commit to that manifest
 /// via `manifestSha256`.
@@ -302,6 +322,24 @@ fn verify_integrity(
     // The describe (covered by its signature) commits to exactly this manifest.
     greentic_extension_sdk_contract::verify_manifest_binding(&artifact.describe, &manifest_bytes)
         .map_err(|e| RegistryError::SignatureInvalid(e.to_string()))?;
+
+    // Bind the describe we authenticated + consented to (served by the registry
+    // metadata endpoint) to the describe.json actually inside the archive — the
+    // one extracted to disk and read by the runtime to grant permissions and
+    // capabilities. describe.json is deliberately excluded from the manifest
+    // ledger, so none of the checks above tie these two together. Without this,
+    // a tampered registry could serve a benign signed describe via /metadata
+    // (passing authenticity + the consent prompt) while shipping an archive
+    // whose describe.json declares broader permissions (audit cycle-2 H1).
+    // Compare the canonical signing payloads so cosmetic JSON differences don't
+    // matter but any semantic field (permissions, capabilities, runtime) does.
+    let archive_describe = read_archive_describe(&artifact.bytes)?;
+    let authenticated =
+        greentic_extension_sdk_contract::canonical_signing_payload(&artifact.describe)?;
+    let on_disk = greentic_extension_sdk_contract::canonical_signing_payload(&archive_describe)?;
+    if authenticated != on_disk {
+        return Err(RegistryError::DescribeMismatch);
+    }
     Ok(())
 }
 
@@ -356,7 +394,12 @@ mod tests {
         let manifest_json = serde_json::to_vec(&manifest).unwrap();
         let mut describe = base_describe();
         greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
-        let bytes = zip_bytes(&[("extension.wasm", WASM), ("manifest.json", &manifest_json)]);
+        let describe_bytes = serde_json::to_vec(&describe).unwrap();
+        let bytes = zip_bytes(&[
+            ("extension.wasm", WASM),
+            ("manifest.json", &manifest_json),
+            ("describe.json", &describe_bytes),
+        ]);
         verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal).unwrap();
     }
 
@@ -393,6 +436,73 @@ mod tests {
         assert!(verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal).is_err());
     }
 
+    fn describe_json_bytes(describe: &greentic_extension_sdk_contract::DescribeJson) -> Vec<u8> {
+        serde_json::to_vec(describe).unwrap()
+    }
+
+    #[test]
+    fn integrity_rejects_archive_with_no_describe_json() {
+        // An archive that ships a valid, bound manifest but no describe.json at
+        // all must fail closed — there is nothing to confirm against the
+        // authenticated describe (audit cycle-2 H1).
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe = base_describe();
+        greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
+        let bytes = zip_bytes(&[("extension.wasm", WASM), ("manifest.json", &manifest_json)]);
+        let err = verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal)
+            .expect_err("archive without describe.json must be rejected");
+        assert!(
+            matches!(err, RegistryError::DescribeMissing),
+            "expected DescribeMissing, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn integrity_rejects_archive_describe_that_differs_from_authenticated_describe() {
+        // describe.json is deliberately excluded from the manifest ledger, so a
+        // tampered registry can serve a benign signed describe via /metadata
+        // while shipping an archive whose describe.json declares broader
+        // permissions. verify_integrity must catch that the archive's describe
+        // does not match the authenticated one (audit cycle-2 H1).
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+
+        let mut authenticated = base_describe();
+        greentic_extension_sdk_contract::bind_manifest(&mut authenticated, &manifest_json);
+
+        // Same archive bytes + manifest binding, but the on-disk describe.json
+        // asks for a secret the authenticated describe never declared.
+        let mut tampered = authenticated.clone();
+        tampered.runtime.permissions.secrets = vec!["greentic:secret/prod-db".into()];
+
+        let bytes = zip_bytes(&[
+            ("extension.wasm", WASM),
+            ("manifest.json", &manifest_json),
+            ("describe.json", &describe_json_bytes(&tampered)),
+        ]);
+        let err = verify_integrity(&artifact(authenticated, bytes), TrustPolicy::Normal)
+            .expect_err("substituted describe must be rejected");
+        assert!(
+            matches!(err, RegistryError::DescribeMismatch),
+            "expected DescribeMismatch, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn integrity_accepts_archive_describe_matching_authenticated_describe() {
+        let manifest = build_manifest(vec![("extension.wasm", WASM)]);
+        let manifest_json = serde_json::to_vec(&manifest).unwrap();
+        let mut describe = base_describe();
+        greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
+        let bytes = zip_bytes(&[
+            ("extension.wasm", WASM),
+            ("manifest.json", &manifest_json),
+            ("describe.json", &describe_json_bytes(&describe)),
+        ]);
+        verify_integrity(&artifact(describe, bytes), TrustPolicy::Normal).unwrap();
+    }
+
     #[test]
     fn integrity_enforced_even_under_loose_rejects_missing_manifest() {
         // Loose waives *authenticity* (signature), not *integrity*. An archive
@@ -411,7 +521,12 @@ mod tests {
         let manifest_json = serde_json::to_vec(&manifest).unwrap();
         let mut describe = base_describe();
         greentic_extension_sdk_contract::bind_manifest(&mut describe, &manifest_json);
-        let bytes = zip_bytes(&[("extension.wasm", WASM), ("manifest.json", &manifest_json)]);
+        let describe_bytes = serde_json::to_vec(&describe).unwrap();
+        let bytes = zip_bytes(&[
+            ("extension.wasm", WASM),
+            ("manifest.json", &manifest_json),
+            ("describe.json", &describe_bytes),
+        ]);
         verify_integrity(&artifact(describe, bytes), TrustPolicy::Loose).unwrap();
     }
 
