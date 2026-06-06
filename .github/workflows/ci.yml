@@ -26,14 +26,19 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
       - name: cargo test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --all-features --locked
 
       - name: cargo build (release)
         run: cargo build --workspace --locked --release
 
+      # Only contract+state can be dry-run pre-release: testing/registry/cli
+      # depend on them via path+version, and cargo publish resolves those deps
+      # against crates.io where the unreleased -research versions don't exist.
+      # Their publishability is verified at release time by release.yml's ordered
+      # publish (audit cycle-2 N13).
       - name: cargo publish dry-run (leaf crates)
         run: |
           cargo publish --dry-run --allow-dirty -p greentic-extension-sdk-contract
