@@ -40,8 +40,10 @@ pub fn verify_ed25519(
     let public_key_bytes = B64
         .decode(strip_prefix(public_key_b64))
         .map_err(|e| ContractError::SignatureInvalid(format!("pubkey b64: {e}")))?;
+    // Strip an optional `ed25519:` prefix from the signature too, symmetric with
+    // the public-key handling above (audit N — was asymmetric) (cycle-2 P3).
     let sig_bytes = B64
-        .decode(signature_b64)
+        .decode(strip_prefix(signature_b64))
         .map_err(|e| ContractError::SignatureInvalid(format!("sig b64: {e}")))?;
     let public_key_array: [u8; 32] = public_key_bytes
         .as_slice()
@@ -185,4 +187,27 @@ pub fn verify_manifest_binding(
 
 fn strip_prefix(s: &str) -> &str {
     s.strip_prefix("ed25519:").unwrap_or(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_accepts_ed25519_prefix_on_both_key_and_signature() {
+        // Prefix handling must be symmetric: an external signer that prefixes
+        // both the public key and the signature with `ed25519:` should verify,
+        // not just one of them (audit cycle-2 P3).
+        let key = SigningKey::from_bytes(&[3u8; 32]);
+        let payload = b"hello-payload";
+        let pubkey_b64 = B64.encode(key.verifying_key().to_bytes());
+        let sig_b64 = sign_ed25519(&key, payload);
+
+        verify_ed25519(
+            &format!("ed25519:{pubkey_b64}"),
+            &format!("ed25519:{sig_b64}"),
+            payload,
+        )
+        .expect("prefixed key + prefixed signature must verify");
+    }
 }

@@ -33,6 +33,11 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
         .ok_or_else(|| ContractError::SchemaInvalid("describe must be object".into()))?;
 
     let api = obj.get("apiVersion").and_then(Value::as_str).unwrap_or("");
+    // Idempotent: an already-v2 document migrates to itself, so running
+    // `gtdx migrate` twice is a no-op rather than an error (audit cycle-2 P3).
+    if api == "greentic.ai/v2" {
+        return Ok((raw.clone(), MigrationReport::default()));
+    }
     if api != "greentic.ai/v1" {
         return Err(ContractError::UnsupportedApiVersion(api.into()));
     }

@@ -54,6 +54,17 @@ fn migration_strips_stale_signature_and_warns() {
 }
 
 #[test]
+fn migrating_an_already_v2_doc_is_idempotent() {
+    // Running `gtdx migrate` twice must not error on the already-migrated doc;
+    // a v2 input migrates to itself with no warnings (audit cycle-2 P3).
+    let raw: serde_json::Value = serde_json::from_str(V1_AC).unwrap();
+    let (v2, _) = migrate_v0_4_x_value(&raw).unwrap();
+    let (again, report) = migrate_v0_4_x_value(&v2).expect("v2 input must pass through");
+    assert_eq!(again, v2, "already-v2 doc must migrate to itself unchanged");
+    assert!(report.warnings.is_empty() && report.dropped_keys.is_empty());
+}
+
+#[test]
 fn ac_v1_migrates_to_parseable_v2() {
     let raw: serde_json::Value = serde_json::from_str(V1_AC).unwrap();
     let (v2, report) = migrate_v0_4_x_value(&raw).unwrap();
