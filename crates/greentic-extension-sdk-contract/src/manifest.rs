@@ -26,6 +26,7 @@ pub const MAX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// Schema discriminator. Hard-coded `"greentic.gtxpack.manifest/v1"`.
     pub schema: String,
@@ -34,6 +35,7 @@ pub struct Manifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ManifestEntry {
     pub path: String,
     pub sha256: String,
@@ -278,6 +280,27 @@ mod tests {
             w.finish().unwrap();
         }
         buf
+    }
+
+    #[test]
+    fn manifest_rejects_unknown_fields() {
+        // The manifest is parsed from untrusted archive bytes; an unknown field
+        // must be rejected rather than silently ignored (audit cycle-2 N9).
+        let json = r#"{
+            "schema": "greentic.gtxpack.manifest/v1",
+            "entries": [],
+            "evil": true
+        }"#;
+        assert!(serde_json::from_str::<Manifest>(json).is_err());
+    }
+
+    #[test]
+    fn manifest_entry_rejects_unknown_fields() {
+        let json = r#"{
+            "schema": "greentic.gtxpack.manifest/v1",
+            "entries": [{ "path": "a", "sha256": "0", "size": 1, "evil": true }]
+        }"#;
+        assert!(serde_json::from_str::<Manifest>(json).is_err());
     }
 
     #[test]
