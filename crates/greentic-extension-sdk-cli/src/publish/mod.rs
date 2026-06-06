@@ -364,7 +364,16 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
         force: cfg.force,
     };
 
-    let receipt = backend.publish(req).await.map_err(map_registry_err)?;
+    let receipt = match backend.publish(req).await {
+        Ok(r) => r,
+        Err(e) => {
+            // Don't leave the transient staging pack behind on a failed publish
+            // (auth/network/conflict); it could be mistaken for a real artifact
+            // and accumulates across retries (audit cycle-2 P3).
+            let _ = std::fs::remove_file(&staging_pack);
+            return Err(map_registry_err(e));
+        }
+    };
 
     // 8. Also copy into local ./dist/ with the canonical name, and drop the
     //    transient staging pack so it doesn't linger.

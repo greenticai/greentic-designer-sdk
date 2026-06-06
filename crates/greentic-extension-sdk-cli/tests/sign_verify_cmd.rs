@@ -411,8 +411,8 @@ fn verify_runs_full_chain_on_manifest_bound_pack() {
     );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(
-        stdout.contains("(anchored)"),
-        "anchored verify should note it, got: {stdout}"
+        stdout.contains("AUTHENTICITY VERIFIED") && stdout.contains("anchored"),
+        "anchored verify should report authenticity, got: {stdout}"
     );
 }
 
