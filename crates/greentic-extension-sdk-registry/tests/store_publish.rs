@@ -141,3 +141,21 @@ async fn publish_409_maps_to_version_exists() {
         other => panic!("expected VersionExists, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn publish_2xx_with_garbage_body_errors_not_fabricated() {
+    // A 2xx response whose body isn't the expected JSON receipt must surface an
+    // error, not be silently turned into a fabricated success receipt built from
+    // client-side fallbacks (audit cycle-1 P1-5).
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/extensions"))
+        .respond_with(ResponseTemplate::new(201).set_body_string("<<not json>>"))
+        .mount(&server)
+        .await;
+    let reg = GreenticStoreRegistry::new("store", server.uri(), Some("tok".into()));
+    assert!(
+        reg.publish(sample_req()).await.is_err(),
+        "a 2xx with a non-JSON body must not fabricate a success receipt"
+    );
+}

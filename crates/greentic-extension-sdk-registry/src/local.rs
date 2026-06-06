@@ -35,7 +35,11 @@ impl LocalFilesystemRegistry {
         }
     }
 
-    fn resolve_pack_path(&self, name: &str, version: &str) -> Option<PathBuf> {
+    fn resolve_pack_path(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<Option<PathBuf>, RegistryError> {
         // Hierarchical preferred (Track C publish): <root>/<key>/<version>/<name>-<version>.gtxpack
         // where `key` may be either id or name.
         let hierarchical = self
@@ -44,45 +48,69 @@ impl LocalFilesystemRegistry {
             .join(version)
             .join(format!("{name}-{version}.gtxpack"));
         if hierarchical.is_file() {
-            return Some(hierarchical);
+            return Ok(Some(hierarchical));
         }
-        for entry in std::fs::read_dir(&self.root).ok()?.flatten() {
-            if !entry.file_type().ok()?.is_dir() {
-                continue;
-            }
-            let ext_dir = entry.path();
-            let ver_dir = ext_dir.join(version);
-            if !ver_dir.is_dir() {
-                continue;
-            }
-            for pack in std::fs::read_dir(&ver_dir).ok()?.flatten() {
-                let path = pack.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("gtxpack") {
-                    let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    if let Some((n, v)) = Self::parse_pack_filename(filename)
-                        && v == version
-                        && (n == name
-                            || ext_dir
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .is_some_and(|id| id == name))
-                    {
-                        return Some(path);
+        // Propagate real IO/permission errors instead of collapsing them to
+        // "not found" (audit cycle-2 P3); only a missing root means "no packs".
+        match std::fs::read_dir(&self.root) {
+            Ok(rd) => {
+                for entry in rd {
+                    let entry = entry?;
+                    if !entry.file_type()?.is_dir() {
+                        continue;
+                    }
+                    let ext_dir = entry.path();
+                    let ver_dir = ext_dir.join(version);
+                    if !ver_dir.is_dir() {
+                        continue;
+                    }
+                    for pack in std::fs::read_dir(&ver_dir)? {
+                        let path = pack?.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("gtxpack") {
+                            let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            if let Some((n, v)) = Self::parse_pack_filename(filename)
+                                && v == version
+                                && (n == name
+                                    || ext_dir
+                                        .file_name()
+                                        .and_then(|s| s.to_str())
+                                        .is_some_and(|id| id == name))
+                            {
+                                return Ok(Some(path));
+                            }
+                        }
                     }
                 }
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
         // Fallback: flat layout (dev-local scratch dir).
         let flat = self.root.join(format!("{name}-{version}.gtxpack"));
         if flat.is_file() {
-            return Some(flat);
+            return Ok(Some(flat));
         }
-        None
+        Ok(None)
     }
 
-    fn pack_path(&self, name: &str, version: &str) -> PathBuf {
-        self.resolve_pack_path(name, version)
-            .unwrap_or_else(|| self.root.join(format!("{name}-{version}.gtxpack")))
+    fn pack_path(&self, name: &str, version: &str) -> Result<PathBuf, RegistryError> {
+        Ok(self
+            .resolve_pack_path(name, version)?
+            .unwrap_or_else(|| self.root.join(format!("{name}-{version}.gtxpack"))))
+    }
+
+    /// Read describe + artifact bytes off a blocking thread — both are sync
+    /// fs/zip work that would otherwise stall the async worker (audit P3).
+    async fn read_pack(path: PathBuf) -> Result<(DescribeJson, ArtifactBytes), RegistryError> {
+        tokio::task::spawn_blocking(
+            move || -> Result<(DescribeJson, ArtifactBytes), RegistryError> {
+                let describe = Self::read_describe_from_pack(&path)?;
+                let bytes = Self::read_artifact_bytes(&path)?;
+                Ok((describe, bytes))
+            },
+        )
+        .await
+        .map_err(|e| RegistryError::Storage(format!("read pack task failed: {e}")))?
     }
 
     /// Return the on-disk root path of this registry.
@@ -191,15 +219,14 @@ impl ExtensionRegistry for LocalFilesystemRegistry {
         name: &str,
         version: &str,
     ) -> Result<ExtensionMetadata, RegistryError> {
-        let path = self.pack_path(name, version);
+        let path = self.pack_path(name, version)?;
         if !path.exists() {
             return Err(RegistryError::NotFound {
                 name: name.into(),
                 version: version.into(),
             });
         }
-        let describe = Self::read_describe_from_pack(&path)?;
-        let bytes = Self::read_artifact_bytes(&path)?;
+        let (describe, bytes) = Self::read_pack(path).await?;
         let sha = greentic_extension_sdk_contract::artifact_sha256(&bytes);
         Ok(ExtensionMetadata {
             name: describe.metadata.id.clone(),
@@ -212,15 +239,14 @@ impl ExtensionRegistry for LocalFilesystemRegistry {
     }
 
     async fn fetch(&self, name: &str, version: &str) -> Result<ExtensionArtifact, RegistryError> {
-        let path = self.pack_path(name, version);
+        let path = self.pack_path(name, version)?;
         if !path.exists() {
             return Err(RegistryError::NotFound {
                 name: name.into(),
                 version: version.into(),
             });
         }
-        let describe = Self::read_describe_from_pack(&path)?;
-        let bytes = Self::read_artifact_bytes(&path)?;
+        let (describe, bytes) = Self::read_pack(path).await?;
         Ok(ExtensionArtifact {
             name: describe.metadata.id.clone(),
             version: describe.metadata.version.clone(),
