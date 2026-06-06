@@ -61,37 +61,52 @@ fn wit_files_declare_consistent_package_version() {
         eprintln!("workspace wit/ not present (likely packaged tarball) — skipping");
         return;
     }
-    let mut versions: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for entry in std::fs::read_dir(&wit_root).expect("read wit/").flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("wit") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).expect("read wit file");
+    // Per-file expected @version. CONTRACT_VERSION is the contract generation
+    // (the shared base all worlds import); extension-design carries an internal
+    // increment for its `roles` interface, so it is one minor ahead.
+    let expected: &[(&str, &str)] = &[
+        ("extension-base.wit", "0.2.0"),
+        ("extension-design.wit", "0.3.0"),
+        ("extension-bundle.wit", "0.2.0"),
+        ("extension-deploy.wit", "0.2.0"),
+        ("extension-provider.wit", "0.2.0"),
+        ("extension-host.wit", "0.1.0"),
+        ("extension-dw-composer.wit", "0.2.0"),
+        ("runtime-side.wit", "0.2.0"),
+    ];
+    for (name, want) in expected {
+        let path = wit_root.join(name);
+        let text =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read wit/{name}: {e}"));
         let first_line = text.lines().next().unwrap_or_default();
-        // `package greentic:extension-base@0.1.0;` -> capture `0.1.0`.
-        if let Some(at) = first_line.find('@') {
-            let after = &first_line[at + 1..];
-            let semi = after.find(';').unwrap_or(after.len());
-            let version = after[..semi].trim().to_string();
-            versions.insert(version);
-        } else {
-            panic!(
-                "wit/{} declares no @version on first line: {first_line:?}",
-                path.file_name().unwrap().to_string_lossy()
-            );
-        }
+        let at = first_line
+            .find('@')
+            .unwrap_or_else(|| panic!("wit/{name} declares no @version: {first_line:?}"));
+        let after = &first_line[at + 1..];
+        let semi = after.find(';').unwrap_or(after.len());
+        let got = after[..semi].trim();
+        assert_eq!(got, *want, "wit/{name} declares @{got}, expected @{want}");
     }
-    assert_eq!(
-        versions.len(),
-        1,
-        "all wit/*.wit files must declare the same @version; got {versions:?}",
-    );
-    let wit_version = versions.into_iter().next().unwrap();
     let constant_version = greentic_extension_sdk_cli_for_tests::contract_version();
     assert_eq!(
-        wit_version, constant_version,
-        "CONTRACT_VERSION constant ({constant_version}) does not match the @version declared in wit/*.wit ({wit_version}). Bump one, bump the other.",
+        constant_version, "0.2.0",
+        "CONTRACT_VERSION ({constant_version}) must equal the base contract generation 0.2.0",
+    );
+    // Every wit file on disk must be covered by the expected map, so a newly
+    // added contract file can't silently skip version assertion.
+    let on_disk: std::collections::BTreeSet<String> = std::fs::read_dir(&wit_root)
+        .expect("read wit/")
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("wit"))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let covered: std::collections::BTreeSet<String> =
+        expected.iter().map(|(n, _)| (*n).to_string()).collect();
+    assert_eq!(
+        on_disk,
+        covered,
+        "wit/ files not covered by expected-version map: {:?}",
+        on_disk.difference(&covered).collect::<Vec<_>>()
     );
 }
 

@@ -2,13 +2,18 @@
 
 use include_dir::{Dir, include_dir};
 
-/// Version of the embedded WIT contract (the `@X.Y.Z` in each WIT
-/// `package greentic:extension-*@X.Y.Z;` declaration). Decoupled from the
-/// crate `CARGO_PKG_VERSION` because the tooling bumps faster than the WIT
-/// contract — scaffolded extensions import the contract at this version.
-/// Bump this constant when the vendored `wit/*.wit` files declare a new
-/// `@version`.
-pub const CONTRACT_VERSION: &str = "0.1.0";
+/// Version of the embedded WIT contract *generation* — the shared base
+/// version (`extension-base@X.Y.Z`) that every world imports. Decoupled from
+/// the crate `CARGO_PKG_VERSION` because the tooling bumps faster than the WIT
+/// contract — scaffolded extensions import the contract at this generation.
+///
+/// This is NOT a uniform per-file version: within a generation, individual
+/// worlds may carry an internal increment. As of generation `0.2.0`,
+/// `extension-design` is one minor ahead (`@0.3.0`) for its `roles` interface,
+/// while `extension-host` is still `@0.1.0`. The per-file `@version` values are
+/// asserted explicitly in `tests/contract_version_consistency.rs`.
+/// Bump this constant when the shared base contract advances a generation.
+pub const CONTRACT_VERSION: &str = "0.2.0";
 
 static EMBEDDED: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/embedded-wit/$CARGO_PKG_VERSION");
 
