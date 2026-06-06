@@ -34,3 +34,11 @@ fn permissions_llm_roles_multiple_roles() {
     assert_eq!(p.llm_roles[0], "sorla_composer");
     assert_eq!(p.llm_roles[1], "sorla_reviewer");
 }
+
+#[test]
+fn snake_case_llm_roles_key_is_rejected() {
+    // Wire key is camelCase `llmRoles`; deny_unknown_fields makes the snake
+    // form a hard error so producers can't drift back.
+    let v = serde_json::json!({ "llm_roles": ["sorla_composer"] });
+    assert!(serde_json::from_value::<Permissions>(v).is_err());
+}
