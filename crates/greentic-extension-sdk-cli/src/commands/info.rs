@@ -96,10 +96,13 @@ fn find_installed(
         return Ok(None);
     }
 
-    // Pick the highest semver among all candidates.
+    // Pick the highest semver among all candidates. `candidates` is non-empty
+    // (checked above); handle None defensively instead of unwrapping (P3).
     candidates.sort_by(|a, b| a.1.cmp(&b.1));
-    let (kind, _ver, describe) = candidates.into_iter().next_back().unwrap();
-    Ok(Some((kind, describe)))
+    match candidates.into_iter().next_back() {
+        Some((kind, _ver, describe)) => Ok(Some((kind, describe))),
+        None => Ok(None),
+    }
 }
 
 fn format_kind_display(kind: ExtensionKind) -> &'static str {

@@ -149,17 +149,28 @@ impl ExtensionRegistry for OciRegistry {
 
         let bytes = first_layer.data.clone();
 
-        let describe = {
-            let cursor = std::io::Cursor::new(&bytes);
-            let mut archive = zip::ZipArchive::new(cursor)
-                .map_err(|e| RegistryError::Storage(format!("zip open: {e}")))?;
-            let mut describe_entry = archive
-                .by_name("describe.json")
-                .map_err(|e| RegistryError::Storage(format!("describe missing: {e}")))?;
-            let value: serde_json::Value = serde_json::from_reader(&mut describe_entry)?;
-            greentic_extension_sdk_contract::schema::validate_describe_json(&value)?;
-            serde_json::from_value::<greentic_extension_sdk_contract::DescribeJson>(value)?
-        };
+        // Parse the describe out of the zip on a blocking thread (zip indexing +
+        // decompression is sync CPU/IO that would otherwise stall the async
+        // worker). Move the bytes in and hand them back to avoid a copy
+        // (audit cycle-2 P3).
+        let (bytes, describe) = tokio::task::spawn_blocking(
+            move || -> Result<(Vec<u8>, greentic_extension_sdk_contract::DescribeJson), RegistryError> {
+                let describe = {
+                    let cursor = std::io::Cursor::new(&bytes);
+                    let mut archive = zip::ZipArchive::new(cursor)
+                        .map_err(|e| RegistryError::Storage(format!("zip open: {e}")))?;
+                    let mut describe_entry = archive
+                        .by_name("describe.json")
+                        .map_err(|e| RegistryError::Storage(format!("describe missing: {e}")))?;
+                    let value: serde_json::Value = serde_json::from_reader(&mut describe_entry)?;
+                    greentic_extension_sdk_contract::schema::validate_describe_json(&value)?;
+                    serde_json::from_value::<greentic_extension_sdk_contract::DescribeJson>(value)?
+                };
+                Ok((bytes, describe))
+            },
+        )
+        .await
+        .map_err(|e| RegistryError::Storage(format!("zip task failed: {e}")))??;
 
         Ok(ExtensionArtifact {
             name: describe.metadata.id.clone(),

@@ -268,6 +268,16 @@ fn verify_authenticity(
         TrustPolicy::Normal => store.pin_or_verify(&describe.metadata.id, &key_b64),
         TrustPolicy::Strict => {
             if store.is_trusted(&describe.metadata.id, &key_b64)? {
+                // The production root key is not yet provisioned, so Strict is
+                // anchored only by a prior TOFU pin (or an out-of-band entry) —
+                // NOT a cert chain to a Greentic root. Make that explicit so a
+                // user choosing Strict isn't misled into assuming root-anchored
+                // authenticity (audit cycle-2; root provisioning = D.5).
+                tracing::warn!(
+                    name = %describe.metadata.id,
+                    "TrustPolicy::Strict: publisher key is trust-on-first-use pinned, \
+                     not anchored to a provisioned Greentic root key"
+                );
                 Ok(())
             } else {
                 Err(RegistryError::UntrustedPublisher {

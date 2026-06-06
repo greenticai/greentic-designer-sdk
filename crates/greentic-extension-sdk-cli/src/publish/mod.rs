@@ -298,6 +298,16 @@ fn resolve_publish_wasm(cfg: &PublishConfig) -> Result<PathBuf, PublishError> {
 
 #[allow(clippy::too_many_lines)]
 pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishError> {
+    // 0. `--trust strict` asserts a signed artifact; refuse to publish one
+    //    unsigned so the flag actually gates behavior instead of only labeling
+    //    the receipt (audit cycle-1 P2). Checked first so it fails fast before
+    //    any build/pack work.
+    if cfg.trust_policy == "strict" && !cfg.sign {
+        return Err(PublishError::Other(anyhow::anyhow!(
+            "--trust strict requires a signature; pass --sign with --key / --key-id / --key-env"
+        )));
+    }
+
     // 1. Load + schema-validate describe.json via ext-contract.
     let describe_path = cfg.project_dir.join("describe.json");
     let describe_bytes = std::fs::read(&describe_path).map_err(io_err)?;
@@ -677,6 +687,20 @@ mod tests {
 }"#,
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn run_publish_strict_without_sign_is_rejected() {
+        // `--trust strict` must refuse an unsigned publish (audit cycle-1 P2).
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = signing_cfg(tmp.path(), None, None);
+        cfg.trust_policy = "strict".into();
+        cfg.sign = false;
+        let err = run_publish(&cfg).await.unwrap_err();
+        assert!(
+            err.to_string().contains("strict requires"),
+            "strict without --sign should be rejected, got: {err}"
+        );
     }
 
     #[tokio::test]

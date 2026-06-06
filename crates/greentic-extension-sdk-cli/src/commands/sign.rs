@@ -36,11 +36,15 @@ pub fn run(args: &Args, _home: &Path) -> Result<()> {
     std::fs::write(&args.describe_path, out)
         .with_context(|| format!("write {}", args.describe_path.display()))?;
 
-    let pub_b64 = &describe.signature.as_ref().unwrap().public_key;
-    eprintln!(
-        "signed {} with key {}",
-        args.describe_path.display(),
-        &pub_b64[..16.min(pub_b64.len())],
-    );
+    // sign_describe just populated the signature; report the key fingerprint
+    // without an unwrap panic on the (now-present) signature (audit P3).
+    if let Some(sig) = describe.signature.as_ref() {
+        let pub_b64 = &sig.public_key;
+        eprintln!(
+            "signed {} with key {}",
+            args.describe_path.display(),
+            &pub_b64[..16.min(pub_b64.len())],
+        );
+    }
     Ok(())
 }

@@ -64,6 +64,38 @@ impl ExtensionFixtureBuilder {
         let offered = parse_capability_refs(self.offered)?;
         let required = parse_capability_refs(self.required)?;
 
+        // The single `stub` component references the on-disk `extension.wasm`
+        // via a gtpack with its real sha256, so the describe and the payload are
+        // coherent: a source-dir loader can find the wasm, and the default
+        // (no `.with_wasm`) path is just as valid as the explicit one — the
+        // previous oci_ref-only stub left `extension.wasm` unreferenced and made
+        // the default path internally inconsistent (audit P1-10 / upstream #8).
+        let wasm_sha = greentic_extension_sdk_contract::artifact_sha256(&self.wasm_bytes);
+        let stub_components = {
+            let id = "stub"
+                .parse::<greentic_extension_sdk_contract::ComponentId>()
+                .map_err(|e| anyhow::anyhow!("stub component id: {e}"))?;
+            let sha256 = wasm_sha
+                .parse::<greentic_extension_sdk_contract::Sha256>()
+                .map_err(|e| anyhow::anyhow!("stub sha256: {e}"))?;
+            let mut m = std::collections::BTreeMap::new();
+            m.insert(
+                id,
+                greentic_extension_sdk_contract::RuntimeComponent {
+                    oci_ref: None,
+                    gtpack: Some(greentic_extension_sdk_contract::RuntimeGtpack {
+                        file: "extension.wasm".into(),
+                        sha256: wasm_sha.clone(),
+                        pack_id: "stub".into(),
+                        component_version: "0.0.0".into(),
+                    }),
+                    sha256,
+                    world: "greentic:component/stub@0.1.0".into(),
+                },
+            );
+            m
+        };
+
         let mut describe = DescribeJson {
             schema_ref: None,
             api_version: "greentic.ai/v2".into(),
@@ -102,24 +134,7 @@ impl ExtensionFixtureBuilder {
             runtime: greentic_extension_sdk_contract::describe::Runtime {
                 memory_limit_mb: 64,
                 permissions: greentic_extension_sdk_contract::describe::Permissions::default(),
-                components: {
-                    let mut m = std::collections::BTreeMap::new();
-                    m.insert(
-                        "stub"
-                            .parse::<greentic_extension_sdk_contract::ComponentId>()
-                            .expect("valid component id"),
-                        greentic_extension_sdk_contract::RuntimeComponent {
-                            oci_ref: Some("oci://ghcr.io/example/stub:latest".into()),
-                            gtpack: None,
-                            sha256:
-                                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                                    .parse()
-                                    .expect("valid sha256"),
-                            world: "greentic:component/stub@0.1.0".into(),
-                        },
-                    );
-                    m
-                },
+                components: stub_components,
             },
             execution: None,
             contributions: greentic_extension_sdk_contract::describe::Contributions::default(),
@@ -202,6 +217,30 @@ mod tests {
         assert!(
             result.is_err(),
             "invalid required capability id must be an Err, not a panic"
+        );
+    }
+
+    #[test]
+    fn default_build_is_coherent_component_references_on_disk_wasm() {
+        // Even without `.with_wasm`, the describe's component must reference the
+        // on-disk extension.wasm via gtpack with its real sha256 (audit P1-10).
+        let fx = ExtensionFixtureBuilder::new(ExtensionKind::Design, "greentic.x", "1.0.0")
+            .build()
+            .expect("default build should succeed");
+        let bytes = std::fs::read(&fx.describe_path).unwrap();
+        let describe: greentic_extension_sdk_contract::DescribeJson =
+            serde_json::from_slice(&bytes).expect("describe.json must deserialize");
+        let comp = describe.runtime.components.values().next().unwrap();
+        let gtpack = comp
+            .gtpack
+            .as_ref()
+            .expect("stub must reference a gtpack, not a bare oci_ref");
+        assert_eq!(gtpack.file, "extension.wasm");
+        let on_disk = std::fs::read(fx.root().join("extension.wasm")).unwrap();
+        assert_eq!(
+            gtpack.sha256,
+            greentic_extension_sdk_contract::artifact_sha256(&on_disk),
+            "declared gtpack sha256 must match the on-disk extension.wasm"
         );
     }
 }

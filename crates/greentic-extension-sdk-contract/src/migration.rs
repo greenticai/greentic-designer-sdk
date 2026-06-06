@@ -55,13 +55,30 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
         }
     }
 
+    // v1 has no `compat` block, so it is synthesized with conservative defaults.
+    // Carry the v1 `engine.greenticDesigner` constraint into `min_designer_version`
+    // when present (the other axes have no v1 equivalent), and warn that the
+    // block was fabricated so the author reviews it before publishing (audit P3).
+    // Only carry the v1 constraint forward if it is a valid `VersionReq`; a junk
+    // value falls back to the default rather than introducing a new migration
+    // parse-failure that the old hardcoded constant never had.
+    let min_designer = obj
+        .get("engine")
+        .and_then(|e| e.get("greenticDesigner"))
+        .and_then(Value::as_str)
+        .filter(|s| s.parse::<semver::VersionReq>().is_ok())
+        .unwrap_or(">=1.2.0");
     out.insert(
         "compat".into(),
         json!({
-            "min_designer_version": ">=1.2.0",
+            "min_designer_version": min_designer,
             "min_runner_version": "^0.12.0",
             "contract_version": "1.2.0"
         }),
+    );
+    report.warn(
+        "synthesized a `compat` block (v1 has none); review min_designer/min_runner/contract_version \
+         before publishing",
     );
 
     let (runtime_val, contributions_val) = migrate_runtime_and_contributions(obj, &mut report);

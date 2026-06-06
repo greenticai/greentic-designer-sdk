@@ -285,7 +285,17 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         // publisher trust — that is the trust-root work tracked under D.5.
         // Constant-time compare so a forged digest can't be probed byte-by-byte
         // via response timing (audit P0-3).
-        let computed = greentic_extension_sdk_contract::artifact_sha256(&bytes);
+        //
+        // Hash on a blocking thread: this runs over up to `max_artifact_bytes`
+        // (256 MiB by default), which would otherwise stall the async runtime
+        // worker (audit cycle-2 P3). Move the bytes in and hand them back to
+        // avoid a copy.
+        let (bytes, computed) = tokio::task::spawn_blocking(move || {
+            let computed = greentic_extension_sdk_contract::artifact_sha256(&bytes);
+            (bytes, computed)
+        })
+        .await
+        .map_err(|e| RegistryError::Storage(format!("hash task failed: {e}")))?;
         crate::digest::verify_digest(&metadata.artifact_sha256, &computed)?;
 
         Ok(ExtensionArtifact {
@@ -360,7 +370,10 @@ impl ExtensionRegistry for GreenticStoreRegistry {
                 "store publish failed: {status} {body}"
             )));
         }
-        let dto: PublishResponseDto = resp.json().await.unwrap_or_default();
+        // Propagate a decode error rather than `unwrap_or_default()`: a 2xx with
+        // a malformed/empty body must not fabricate a success receipt from
+        // client-side fallbacks (audit cycle-1 P1-5).
+        let dto: PublishResponseDto = resp.json().await?;
         Ok(crate::publish::PublishReceipt {
             url: dto.url.unwrap_or_else(|| {
                 format!(
