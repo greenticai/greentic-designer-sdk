@@ -149,6 +149,14 @@ fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), Registry
             return Ok(());
         }
         if allow_insecure {
+            // The opt-in escape hatch is downgrading a non-loopback request to
+            // cleartext — the bearer token and signed describe cross the wire
+            // unencrypted. Make that auditable rather than silent (audit N6).
+            tracing::warn!(
+                host,
+                "GTDX_ALLOW_INSECURE_REGISTRY: talking to remote registry over plaintext HTTP; \
+                 credentials and artifacts are NOT encrypted in transit"
+            );
             return Ok(());
         }
         return Err(RegistryError::InsecureRegistryUrl(url.into()));

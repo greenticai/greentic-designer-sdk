@@ -4,10 +4,27 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::RegistryError;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct Credentials {
     #[serde(default)]
     pub tokens: std::collections::BTreeMap<String, String>,
+}
+
+// Hand-written so token values never leak via `{:?}`/tracing; the registry keys
+// are kept for diagnostics (audit N10).
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credentials")
+            .field(
+                "tokens",
+                &self
+                    .tokens
+                    .keys()
+                    .map(|k| (k.as_str(), "***"))
+                    .collect::<std::collections::BTreeMap<_, _>>(),
+            )
+            .finish()
+    }
 }
 
 impl Credentials {
@@ -68,6 +85,28 @@ impl Credentials {
 
     pub fn remove(&mut self, registry: &str) -> Option<String> {
         self.tokens.remove(registry)
+    }
+}
+
+#[cfg(test)]
+mod debug_redaction_tests {
+    use super::Credentials;
+
+    #[test]
+    fn debug_redacts_token_values() {
+        // Credentials are sometimes captured in `{:?}`/tracing contexts; the
+        // token values must never appear in the rendered output (audit N10).
+        let mut creds = Credentials::default();
+        creds.set("default", "super-secret-token");
+        let rendered = format!("{creds:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "token value leaked into Debug: {rendered}"
+        );
+        assert!(
+            rendered.contains("default"),
+            "registry key should still be visible for diagnostics: {rendered}"
+        );
     }
 }
 
