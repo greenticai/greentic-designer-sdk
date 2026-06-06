@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://store.greentic.ai/schemas/describe-v2.json",
+  "$id": "https://store.greentic.cloud/schemas/describe-v2.json",
   "title": "Greentic Designer Extension describe.json v2",
   "type": "object",
   "required": [

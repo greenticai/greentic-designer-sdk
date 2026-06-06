@@ -49,7 +49,7 @@ fn rejects_missing_api_version() {
 }
 
 const BASE_V2_OK: &str = r#"{
-  "$schema": "https://store.greentic.ai/schemas/describe-v2.json",
+  "$schema": "https://store.greentic.cloud/schemas/describe-v2.json",
   "apiVersion": "greentic.ai/v2",
   "kind": "DesignExtension",
   "compat": {
