@@ -259,7 +259,7 @@
                 "type": "string"
               }
             },
-            "llm_roles": {
+            "llmRoles": {
               "type": "array",
               "items": {
                 "type": "string"

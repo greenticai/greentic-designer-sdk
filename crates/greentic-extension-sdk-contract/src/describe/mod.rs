@@ -232,7 +232,7 @@ pub struct Permissions {
     /// to request from the host `greentic:extension-host/llm` import. The host
     /// resolves each role to a tenant-configured provider; an empty list means
     /// the extension may not call the LLM host import at all.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "llmRoles", default, skip_serializing_if = "Vec::is_empty")]
     pub llm_roles: Vec<String>,
 }
 
