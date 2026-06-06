@@ -228,6 +228,12 @@ pub struct Permissions {
     pub secrets: Vec<String>,
     #[serde(rename = "callExtensionKinds", default)]
     pub call_extension_kinds: Vec<String>,
+    /// LLM roles (wire names, e.g. `"sorla_composer"`) this extension is allowed
+    /// to request from the host `greentic:extension-host/llm` import. The host
+    /// resolves each role to a tenant-configured provider; an empty list means
+    /// the extension may not call the LLM host import at all.
+    #[serde(rename = "llmRoles", default, skip_serializing_if = "Vec::is_empty")]
+    pub llm_roles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
