@@ -1,4 +1,4 @@
-package greentic:extension-base@0.1.0;
+package greentic:extension-base@0.2.0;
 
 interface types {
   record extension-identity {
@@ -37,6 +37,8 @@ interface types {
     invalid-input(string),
     missing-capability(string),
     permission-denied(string),
+    not-found(string),
+    schema-invalid(string),
     internal(string),
   }
 }

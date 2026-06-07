@@ -1,7 +1,7 @@
-package greentic:extension-bundle@0.1.0;
+package greentic:extension-bundle@0.2.0;
 
 interface recipes {
-  use greentic:extension-base/types@0.1.0.{extension-error};
+  use greentic:extension-base/types@0.2.0.{extension-error};
   record recipe-summary {
     id: string,
     display-name: string,
@@ -14,7 +14,7 @@ interface recipes {
 }
 
 interface bundling {
-  use greentic:extension-base/types@0.1.0.{diagnostic, extension-error};
+  use greentic:extension-base/types@0.2.0.{diagnostic, extension-error};
   record designer-session {
     flows-json: string,
     contents-json: string,
@@ -32,13 +32,13 @@ interface bundling {
 }
 
 world bundle-extension {
-  import greentic:extension-base/types@0.1.0;
+  import greentic:extension-base/types@0.2.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
   import greentic:extension-host/broker@0.1.0;
 
-  export greentic:extension-base/manifest@0.1.0;
-  export greentic:extension-base/lifecycle@0.1.0;
+  export greentic:extension-base/manifest@0.2.0;
+  export greentic:extension-base/lifecycle@0.2.0;
   export recipes;
   export bundling;
 }
