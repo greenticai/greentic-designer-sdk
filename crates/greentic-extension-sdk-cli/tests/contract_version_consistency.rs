@@ -45,10 +45,11 @@ fn no_legacy_embedded_wit_directories() {
 
 #[test]
 fn wit_files_declare_consistent_package_version() {
-    // Every wit/extension-*.wit file must declare the same `@X.Y.Z` package
-    // version. This is the surface scaffolded extensions import against; if
-    // they drift, scaffolded `wit/deps/greentic/<pkg>/world.wit` files would
-    // import incompatible versions.
+    // Each wit/extension-*.wit file must declare its pinned `@X.Y.Z` package
+    // version (see the per-file map below). This is the surface scaffolded
+    // extensions import against; if a file drifts from its pin, scaffolded
+    // `wit/deps/greentic/<pkg>/world.wit` files would import an incompatible
+    // contract.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let wit_root = std::path::Path::new(manifest_dir)
         .parent()
