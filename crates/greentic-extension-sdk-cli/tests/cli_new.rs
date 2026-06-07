@@ -243,6 +243,64 @@ fn scaffolds_mcp_extension_as_multi_tool_design_extension() {
 }
 
 #[test]
+fn scaffolds_llm_extension_as_design_extension_with_tool() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("greentic.llm-demo");
+    let (ok, _o, e) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("greentic.llm-demo")
+        .arg("--kind")
+        .arg("llm")
+        .arg("--id")
+        .arg("greentic.llm-demo")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new llm failed: {e}");
+
+    for rel in [
+        "Cargo.toml",
+        "describe.json",
+        "src/lib.rs",
+        "prompts/system.md",
+        "wit/world.wit",
+        // llm reuses the design WIT package set.
+        "wit/deps/greentic/extension-base/world.wit",
+        "wit/deps/greentic/extension-host/world.wit",
+        "wit/deps/greentic/extension-design/world.wit",
+    ] {
+        assert!(proj.join(rel).exists(), "missing expected file: {rel}");
+    }
+    // No bundle/provider WIT bleed-through.
+    assert!(
+        !proj
+            .join("wit/deps/greentic/extension-bundle/world.wit")
+            .exists()
+    );
+
+    let describe = std::fs::read_to_string(proj.join("describe.json")).unwrap();
+    let describe_json: serde_json::Value =
+        serde_json::from_str(&describe).expect("describe.json parses");
+    assert_eq!(
+        describe_json.get("kind").and_then(|v| v.as_str()),
+        Some("DesignExtension")
+    );
+    // The starter advertises a completion tool and the REST/secret skeleton.
+    assert!(describe.contains("complete"));
+    assert!(describe.contains("api_key"));
+
+    // No leftover unrendered placeholders.
+    for rel in ["Cargo.toml", "describe.json", "src/lib.rs", "wit/world.wit"] {
+        let body = std::fs::read_to_string(proj.join(rel)).unwrap();
+        assert!(
+            !body.contains("{{"),
+            "unrendered placeholder left in {rel}:\n{body}"
+        );
+    }
+}
+
+#[test]
 fn target_dir_conflict_without_force_fails() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("demo");

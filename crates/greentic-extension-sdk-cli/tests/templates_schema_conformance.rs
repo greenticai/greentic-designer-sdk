@@ -1,0 +1,105 @@
+//! Every `gtdx new` describe.json template must validate against the
+//! describe-v2 JSON Schema the contract crate ships (and the store server
+//! mirrors). This is the regression guard for the SDK→store conformance
+//! audit: a template that drifts from the schema — a renamed key, a new
+//! field the schema rejects, a wrong `apiVersion` — fails here at `cargo
+//! test` instead of at `gtdx publish` against a live store.
+//!
+//! The templates are rendered with placeholder values mirroring
+//! `commands::new`'s substitution map; an unknown `{{placeholder}}` fails
+//! the test loudly so a newly-introduced template variable can't slip
+//! through unvalidated.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use greentic_extension_sdk_contract::schema::validate_describe_v2;
+
+fn templates_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("templates")
+}
+
+/// Placeholder → value, mirroring the substitution `commands::new` performs.
+/// Values are chosen to be schema-valid (semver versions, reverse-DNS id).
+fn substitutions() -> BTreeMap<&'static str, &'static str> {
+    BTreeMap::from([
+        ("name", "my-ext"),
+        ("name_cargo", "my-ext"),
+        ("kind", "design"),
+        ("id", "com.example.my-ext"),
+        ("id_wit", "com-example:my-ext"),
+        ("version", "0.1.0"),
+        ("author", "Jane Doe"),
+        ("license", "Apache-2.0"),
+        ("sdk_version", "1.2.7-research"),
+        ("runtime_ref_key", "my-ext"),
+        ("node_type_id", "my-ext"),
+        ("label", "My Ext"),
+        ("contract_version", "0.1.0"),
+    ])
+}
+
+/// Replace every `{{key}}` with its mapped value. Panics on an unmapped
+/// placeholder so the test fails the moment a template adds a new variable
+/// the harness doesn't know how to fill (rather than emitting invalid JSON).
+fn render(template: &str, subs: &BTreeMap<&'static str, &'static str>) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let end = after
+            .find("}}")
+            .unwrap_or_else(|| panic!("unterminated placeholder in template"));
+        let key = after[..end].trim();
+        let value = subs
+            .get(key)
+            .unwrap_or_else(|| panic!("template uses unmapped placeholder {{{{{key}}}}}"));
+        out.push_str(value);
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn template_files() -> Vec<PathBuf> {
+    let dir = templates_dir();
+    let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read templates dir {}: {e}", dir.display()))
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let describe = path.join("describe.json.tmpl");
+            describe.is_file().then_some(describe)
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn every_new_template_describe_validates_against_describe_v2() {
+    let subs = substitutions();
+    let files = template_files();
+    assert!(
+        !files.is_empty(),
+        "no describe.json.tmpl found under {}",
+        templates_dir().display()
+    );
+
+    for file in &files {
+        let kind_dir = file
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|s| s.to_str())
+            .unwrap_or("<unknown>");
+        let raw = std::fs::read_to_string(file)
+            .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+        let rendered = render(&raw, &subs);
+        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap_or_else(|e| {
+            panic!("template '{kind_dir}' rendered invalid JSON: {e}\n{rendered}")
+        });
+        validate_describe_v2(&value).unwrap_or_else(|e| {
+            panic!("template '{kind_dir}' describe.json fails describe-v2 schema: {e}")
+        });
+    }
+}
