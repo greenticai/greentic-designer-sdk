@@ -6,6 +6,7 @@ pub mod config;
 pub mod credentials;
 pub mod digest;
 pub mod error;
+mod extract;
 pub mod hex;
 pub mod lifecycle;
 pub mod local;
@@ -19,6 +20,7 @@ pub mod storage;
 pub mod store;
 pub mod trust_store;
 pub mod types;
+mod verify;
 
 pub use self::error::RegistryError;
 pub use self::publish::{PublishReceipt, PublishRequest, SignatureBlob};
