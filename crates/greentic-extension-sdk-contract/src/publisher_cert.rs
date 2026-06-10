@@ -56,4 +56,75 @@ impl PublisherCert {
             .map_err(|e| ContractError::CertInvalid(format!("root signature: {e}")))?;
         Ok(publisher_key)
     }
+
+    /// Whether this cert is expired at `now` per its `notAfter` field.
+    ///
+    /// Callers enforcing expiry should reject when this returns `Ok(true)`.
+    /// A cert without `notAfter` never expires (`Ok(false)`).
+    ///
+    /// # Errors
+    /// `CertInvalid` if `notAfter` is present but not valid RFC3339 — a
+    /// malformed expiry must fail closed, not be treated as "no expiry".
+    pub fn is_expired(&self, now: chrono::DateTime<chrono::Utc>) -> Result<bool, ContractError> {
+        let Some(not_after) = self.not_after.as_deref() else {
+            return Ok(false);
+        };
+        let expiry = chrono::DateTime::parse_from_rfc3339(not_after)
+            .map_err(|e| ContractError::CertInvalid(format!("notAfter: {e}")))?;
+        Ok(now > expiry)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cert_with_not_after(not_after: Option<&str>) -> PublisherCert {
+        PublisherCert {
+            publisher_public_key: String::new(),
+            root_signature: String::new(),
+            key_id: None,
+            not_after: not_after.map(str::to_string),
+        }
+    }
+
+    fn at(rfc3339: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(rfc3339)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn cert_without_not_after_never_expires() {
+        let cert = cert_with_not_after(None);
+        assert!(!cert.is_expired(at("2099-01-01T00:00:00Z")).unwrap());
+    }
+
+    #[test]
+    fn cert_is_not_expired_before_not_after() {
+        let cert = cert_with_not_after(Some("2030-01-01T00:00:00Z"));
+        assert!(!cert.is_expired(at("2026-06-10T00:00:00Z")).unwrap());
+    }
+
+    #[test]
+    fn cert_is_expired_after_not_after() {
+        let cert = cert_with_not_after(Some("2020-01-01T00:00:00Z"));
+        assert!(cert.is_expired(at("2026-06-10T00:00:00Z")).unwrap());
+    }
+
+    #[test]
+    fn cert_expiry_boundary_is_inclusive() {
+        // Exactly at notAfter the cert is still valid (`now > expiry` only).
+        let cert = cert_with_not_after(Some("2026-06-10T00:00:00Z"));
+        assert!(!cert.is_expired(at("2026-06-10T00:00:00Z")).unwrap());
+    }
+
+    #[test]
+    fn malformed_not_after_fails_closed() {
+        let cert = cert_with_not_after(Some("not-a-date"));
+        assert!(matches!(
+            cert.is_expired(at("2026-06-10T00:00:00Z")),
+            Err(ContractError::CertInvalid(_))
+        ));
+    }
 }

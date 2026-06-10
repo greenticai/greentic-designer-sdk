@@ -54,7 +54,23 @@ fn copy_atomic(src: &Path, dst: &Path) -> std::io::Result<()> {
         std::fs::remove_file(dst)?;
     }
     std::fs::rename(&tmp, dst)?;
+    sync_parent_dir(dst);
     Ok(())
+}
+
+/// Best-effort fsync of `path`'s parent directory so the rename above is
+/// durable across a crash (same pattern as `greentic-extension-sdk-state`'s
+/// atomic writer). A failure here never fails the install — the file content
+/// itself is already safely copied.
+fn sync_parent_dir(path: &Path) {
+    #[cfg(unix)]
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 #[cfg(test)]
