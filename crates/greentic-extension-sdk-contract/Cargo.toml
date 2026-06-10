@@ -15,6 +15,7 @@ testing = []
 [dependencies]
 anyhow = { workspace = true }
 base64 = { workspace = true }
+chrono = { workspace = true }
 ed25519-dalek = { workspace = true }
 jsonschema = { workspace = true }
 semver = { workspace = true }

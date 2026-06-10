@@ -46,7 +46,7 @@ impl TrustStore {
 
     /// Return the pinned key for `id`, if any.
     pub fn pinned(&self, id: &str) -> Result<Option<String>, RegistryError> {
-        Ok(self.load()?.publishers.remove(id))
+        Ok(self.load()?.publishers.get(id).cloned())
     }
 
     /// Read-only check (used by `Strict`): is `key` the trusted key for `id`?

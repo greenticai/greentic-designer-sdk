@@ -977,6 +977,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "cargo-husky",
+ "chrono",
  "ed25519-dalek",
  "jsonschema",
  "rand 0.8.6",
