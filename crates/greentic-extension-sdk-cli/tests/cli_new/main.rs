@@ -1,0 +1,7 @@
+//! Integration tests for `gtdx new`, split into focused modules to keep test
+//! files under the 500-line limit.
+
+mod fixtures;
+mod scaffold_kinds;
+mod scaffold_validation;
+mod wasm_component;
