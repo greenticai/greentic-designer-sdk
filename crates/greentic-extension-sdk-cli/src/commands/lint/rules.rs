@@ -241,3 +241,196 @@ pub(super) fn check_describe_diff_breaking(
         ),
     )]
 }
+
+// ---------------------------------------------------------------------------
+// Governance rules (2026-06) — see docs/superpowers/specs governance design.
+// ---------------------------------------------------------------------------
+
+/// The single canonical `$schema` / `$id` URL every describe.json must use.
+pub(super) const CANONICAL_SCHEMA_URL: &str =
+    "https://store.greentic.cloud/schemas/describe-v2.json";
+
+/// The single canonical `export` string for a contributed tool.
+pub(super) const CANONICAL_TOOL_EXPORT: &str = "greentic:extension-design/tools.invoke-tool";
+
+/// `E_SCHEMA_HOST` — `$schema` must equal the canonical URL exactly.
+pub(super) fn check_schema_host(describe: &serde_json::Value) -> Vec<Violation> {
+    let Some(schema) = describe.get("$schema").and_then(|v| v.as_str()) else {
+        return vec![Violation::error(
+            "E_SCHEMA_HOST",
+            format!("$schema is missing; must be {CANONICAL_SCHEMA_URL}"),
+        )];
+    };
+    if schema != CANONICAL_SCHEMA_URL {
+        return vec![Violation::error(
+            "E_SCHEMA_HOST",
+            format!("$schema must be {CANONICAL_SCHEMA_URL} (found {schema:?})"),
+        )];
+    }
+    Vec::new()
+}
+
+/// `E_EXPORT_FORM` — every tool's `export` must use the canonical long form.
+pub(super) fn check_export_form(describe: &serde_json::Value) -> Vec<Violation> {
+    let Some(tools) = describe
+        .pointer("/contributions/tools")
+        .and_then(|v| v.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (idx, tool) in tools.iter().enumerate() {
+        let Some(export) = tool.get("export").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if export != CANONICAL_TOOL_EXPORT {
+            out.push(Violation::error(
+                "E_EXPORT_FORM",
+                format!("tools[{idx}].export must be {CANONICAL_TOOL_EXPORT:?} (found {export:?})"),
+            ));
+        }
+    }
+    out
+}
+
+/// `E_ENGINE_DEPRECATED` — the `engine` block is forbidden; compat is the sole
+/// source of version constraints.
+pub(super) fn check_engine_deprecated(describe: &serde_json::Value) -> Vec<Violation> {
+    if describe.get("engine").is_some() {
+        return vec![Violation::error(
+            "E_ENGINE_DEPRECATED",
+            "engine block is deprecated; move all version constraints into compat \
+             (min_designer_version / min_runner_version) and delete engine"
+                .to_string(),
+        )];
+    }
+    Vec::new()
+}
+
+/// True when a hex string is present and entirely zeros (the placeholder).
+fn is_zero_hash(value: &serde_json::Value) -> bool {
+    value
+        .as_str()
+        .is_some_and(|s| !s.is_empty() && s.chars().all(|c| c == '0'))
+}
+
+/// `E_SHA256_ZERO` — (publish only) no `sha256` under `runtime.components` may
+/// be a placeholder of all zeros.
+pub(super) fn check_sha256_zero(describe: &serde_json::Value, publish: bool) -> Vec<Violation> {
+    if !publish {
+        return Vec::new();
+    }
+    let Some(components) = describe
+        .pointer("/runtime/components")
+        .and_then(|v| v.as_object())
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (name, component) in components {
+        if let Some(sha) = component.get("sha256")
+            && is_zero_hash(sha)
+        {
+            out.push(Violation::error(
+                "E_SHA256_ZERO",
+                format!("runtime.components.{name}.sha256 is a placeholder (all zeros)"),
+            ));
+        }
+        if let Some(sha) = component.pointer("/gtpack/sha256")
+            && is_zero_hash(sha)
+        {
+            out.push(Violation::error(
+                "E_SHA256_ZERO",
+                format!("runtime.components.{name}.gtpack.sha256 is a placeholder (all zeros)"),
+            ));
+        }
+    }
+    out
+}
+
+/// Matches `^greentic\.[a-z0-9][a-z0-9-]*$`.
+fn is_valid_extension_id(id: &str) -> bool {
+    let Some(slug) = id.strip_prefix("greentic.") else {
+        return false;
+    };
+    let mut chars = slug.chars();
+    let Some(first) = chars.next() else {
+        return false; // empty slug
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// `E_ID_PATTERN` — `metadata.id` must be `greentic.<lowercase-kebab-slug>`.
+pub(super) fn check_id_pattern(describe: &serde_json::Value) -> Vec<Violation> {
+    let Some(id) = describe.pointer("/metadata/id").and_then(|v| v.as_str()) else {
+        return Vec::new();
+    };
+    if is_valid_extension_id(id) {
+        return Vec::new();
+    }
+    vec![Violation::error(
+        "E_ID_PATTERN",
+        format!("metadata.id {id:?} must match ^greentic\\.[a-z0-9][a-z0-9-]*$"),
+    )]
+}
+
+/// `snake_case`: starts with a lowercase letter, then lowercase / digits / `_`.
+fn is_snake_case(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// True when `short` is a prefix of `long` ending on a `_` boundary, e.g.
+/// `generate_gtpack` vs `generate_gtpack_from_sorla_yaml`.
+fn is_prefix_on_boundary(short: &str, long: &str) -> bool {
+    long.len() > short.len() && long.starts_with(short) && long.as_bytes()[short.len()] == b'_'
+}
+
+/// `E_TOOL_NAMING` — tool names must be `snake_case` and free of near-duplicate
+/// prefix pairs.
+pub(super) fn check_tool_naming(describe: &serde_json::Value) -> Vec<Violation> {
+    let Some(tools) = describe
+        .pointer("/contributions/tools")
+        .and_then(|v| v.as_array())
+    else {
+        return Vec::new();
+    };
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
+        .collect();
+
+    let mut out = Vec::new();
+    for name in &names {
+        if !is_snake_case(name) {
+            out.push(Violation::error(
+                "E_TOOL_NAMING",
+                format!("tool name {name:?} is not snake_case"),
+            ));
+        }
+    }
+    for (i, a) in names.iter().enumerate() {
+        for b in names.iter().skip(i + 1) {
+            let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+            if is_prefix_on_boundary(short, long) {
+                out.push(Violation::error(
+                    "E_TOOL_NAMING",
+                    format!(
+                        "tool names {short:?} and {long:?} are near-duplicates (prefix overlap)"
+                    ),
+                ));
+            }
+        }
+    }
+    out
+}

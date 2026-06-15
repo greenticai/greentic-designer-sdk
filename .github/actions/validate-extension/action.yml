@@ -1,0 +1,27 @@
+name: "Validate Greentic Extension"
+description: "Run gtdx lint (governance rules) against an extension's describe.json"
+inputs:
+  dir:
+    description: "Extension directory containing describe.json"
+    required: false
+    default: "."
+  gtdx-git:
+    description: "Git URL of the SDK CLI to install gtdx from"
+    required: false
+    default: "https://github.com/greentic-biz/greentic-designer-sdk"
+  gtdx-ref:
+    description: "Git ref (tag/branch) to install gtdx from"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Install gtdx
+      shell: bash
+      run: |
+        cargo install --locked \
+          --git "${{ inputs.gtdx-git }}" \
+          --tag "${{ inputs.gtdx-ref }}" \
+          greentic-extension-sdk-cli
+    - name: Lint extension
+      shell: bash
+      run: gtdx lint --publish --dir "${{ inputs.dir }}"

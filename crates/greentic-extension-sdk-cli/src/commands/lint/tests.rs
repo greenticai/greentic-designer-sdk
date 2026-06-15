@@ -223,3 +223,160 @@ fn describe_diff_warns_when_capability_offered_removed_without_bump() {
         v[0].message
     );
 }
+
+// --- Governance rules (2026-06) ---
+
+#[test]
+fn schema_host_rejects_wrong_host() {
+    let d = json!({ "$schema": "https://store.greentic.ai/schemas/describe-v2.json" });
+    let v = check_schema_host(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "E_SCHEMA_HOST");
+}
+
+#[test]
+fn schema_host_accepts_canonical() {
+    let d = json!({ "$schema": "https://store.greentic.cloud/schemas/describe-v2.json" });
+    assert!(check_schema_host(&d).is_empty());
+}
+
+#[test]
+fn export_form_rejects_short_form() {
+    let d = json!({
+        "contributions": { "tools": [
+            { "name": "parse_yaml", "export": "invoke-tool", "runtime_ref": "main" }
+        ]}
+    });
+    let v = check_export_form(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "E_EXPORT_FORM");
+}
+
+#[test]
+fn export_form_accepts_canonical() {
+    let d = json!({
+        "contributions": { "tools": [
+            { "name": "parse_yaml",
+              "export": "greentic:extension-design/tools.invoke-tool",
+              "runtime_ref": "main" }
+        ]}
+    });
+    assert!(check_export_form(&d).is_empty());
+}
+
+#[test]
+fn engine_deprecated_rejects_present_engine() {
+    let d = json!({ "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" } });
+    let v = check_engine_deprecated(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "E_ENGINE_DEPRECATED");
+}
+
+#[test]
+fn engine_deprecated_accepts_absent_engine() {
+    let d = json!({ "compat": { "min_runner_version": "^1.2.0" } });
+    assert!(check_engine_deprecated(&d).is_empty());
+}
+
+#[test]
+fn sha256_zero_rejects_placeholder_under_publish() {
+    let d = json!({
+        "runtime": { "components": {
+            "main": {
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                "world": "greentic:x/y"
+            }
+        }}
+    });
+    let v = check_sha256_zero(&d, true);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "E_SHA256_ZERO");
+}
+
+#[test]
+fn sha256_zero_skipped_without_publish() {
+    let d = json!({
+        "runtime": { "components": {
+            "main": {
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                "world": "greentic:x/y"
+            }
+        }}
+    });
+    assert!(check_sha256_zero(&d, false).is_empty());
+}
+
+#[test]
+fn sha256_zero_accepts_real_hash_under_publish() {
+    let d = json!({
+        "runtime": { "components": {
+            "main": {
+                "sha256": "abc1230000000000000000000000000000000000000000000000000000000000",
+                "gtpack": { "sha256": "def4560000000000000000000000000000000000000000000000000000000000" },
+                "world": "greentic:x/y"
+            }
+        }}
+    });
+    assert!(check_sha256_zero(&d, true).is_empty());
+}
+
+#[test]
+fn id_pattern_rejects_bad_id() {
+    for bad in [
+        "sorla",
+        "greentic.",
+        "greentic.Sorla",
+        "greentic.-x",
+        "com.example.x",
+    ] {
+        let d = json!({ "metadata": { "id": bad } });
+        let v = check_id_pattern(&d);
+        assert_eq!(v.len(), 1, "expected violation for {bad:?}");
+        assert_eq!(v[0].code, "E_ID_PATTERN");
+    }
+}
+
+#[test]
+fn id_pattern_accepts_good_id() {
+    for good in [
+        "greentic.sorla",
+        "greentic.telco-x-tools",
+        "greentic.operala",
+    ] {
+        let d = json!({ "metadata": { "id": good } });
+        assert!(
+            check_id_pattern(&d).is_empty(),
+            "expected no violation for {good:?}"
+        );
+    }
+}
+
+#[test]
+fn tool_naming_rejects_non_snake_case() {
+    let d = json!({ "contributions": { "tools": [ { "name": "parseSorlaYaml" } ] } });
+    let v = check_tool_naming(&d);
+    assert!(v.iter().any(|x| x.code == "E_TOOL_NAMING"));
+}
+
+#[test]
+fn tool_naming_rejects_near_duplicate_pair() {
+    let d = json!({
+        "contributions": { "tools": [
+            { "name": "generate_gtpack" },
+            { "name": "generate_gtpack_from_sorla_yaml" }
+        ]}
+    });
+    let v = check_tool_naming(&d);
+    assert!(v.iter().any(|x| x.code == "E_TOOL_NAMING"));
+}
+
+#[test]
+fn tool_naming_accepts_clean_names() {
+    let d = json!({
+        "contributions": { "tools": [
+            { "name": "tx_resolve_prefix" },
+            { "name": "tx_analyse_top_peers" }
+        ]}
+    });
+    assert!(check_tool_naming(&d).is_empty());
+}

@@ -87,8 +87,23 @@ gtdx lint --dir .
 Catches cross-field invariants the JSON Schema can't (dangling
 `runtime_ref`, capability self-cycles, invalid semver, breaking changes
 without a version bump). Each rule has a stable code; see
-`crates/greentic-extension-sdk-cli/src/commands/lint.rs` for the
+`crates/greentic-extension-sdk-cli/src/commands/lint/rules.rs` for the
 catalogue.
+
+#### Governance rules (2026-06)
+
+These enforce cross-extension consistency. Run `gtdx lint --dir <ext>`
+locally, or `gtdx lint --publish --dir <ext>` to also enforce
+`E_SHA256_ZERO`.
+
+| Code | Rule | Fix |
+|------|------|-----|
+| `E_SCHEMA_HOST` | `$schema` must be `https://store.greentic.cloud/schemas/describe-v2.json` | Replace any `store.greentic.ai` (or missing) `$schema` with the canonical URL. |
+| `E_EXPORT_FORM` | `tools[].export` must be `greentic:extension-design/tools.invoke-tool` | Replace the short `"invoke-tool"` form with the canonical export string. |
+| `E_ENGINE_DEPRECATED` | the `engine` block is forbidden | Move version constraints into `compat.min_designer_version` / `compat.min_runner_version` and delete `engine`. |
+| `E_SHA256_ZERO` | (`--publish` only) no placeholder `0000…` hashes | Let the build/publish step fill real `sha256` values before publishing. |
+| `E_ID_PATTERN` | `metadata.id` must match `^greentic\.[a-z0-9][a-z0-9-]*$` | Use a lowercase-kebab id under the `greentic.` namespace. |
+| `E_TOOL_NAMING` | tool names must be `snake_case` with no near-duplicate prefixes | Rename camelCase tools; disambiguate pairs like `generate_gtpack` / `generate_gtpack_from_sorla_yaml`. |
 
 ### Quick dev-loop install
 

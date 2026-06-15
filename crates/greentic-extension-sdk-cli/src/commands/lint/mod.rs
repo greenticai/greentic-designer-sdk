@@ -28,7 +28,9 @@ mod rules;
 mod tests;
 
 use rules::{
-    check_capability_cycle, check_describe_diff_breaking, check_runtime_refs, check_version_semver,
+    check_capability_cycle, check_describe_diff_breaking, check_engine_deprecated,
+    check_export_form, check_id_pattern, check_runtime_refs, check_schema_host, check_sha256_zero,
+    check_tool_naming, check_version_semver,
 };
 
 #[derive(ClapArgs, Debug)]
@@ -36,6 +38,10 @@ pub struct Args {
     /// Path to an extension source directory containing describe.json.
     #[arg(long, default_value = ".")]
     pub dir: PathBuf,
+
+    /// Enable publish-only rules (e.g. `E_SHA256_ZERO` rejects placeholder hashes).
+    #[arg(long, default_value_t = false)]
+    pub publish: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +92,7 @@ pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("parse describe.json: {e}"))?;
 
-    let violations = collect_violations(&value, home);
+    let violations = collect_violations(&value, home, args.publish);
     for v in &violations {
         eprintln!("{v}");
     }
@@ -103,11 +109,17 @@ pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
     anyhow::bail!("{error_count} error(s)");
 }
 
-fn collect_violations(describe: &serde_json::Value, home: &Path) -> Vec<Violation> {
+fn collect_violations(describe: &serde_json::Value, home: &Path, publish: bool) -> Vec<Violation> {
     let mut out = Vec::new();
     out.extend(check_version_semver(describe));
     out.extend(check_runtime_refs(describe));
     out.extend(check_capability_cycle(describe));
     out.extend(check_describe_diff_breaking(describe, home));
+    out.extend(check_schema_host(describe));
+    out.extend(check_export_form(describe));
+    out.extend(check_engine_deprecated(describe));
+    out.extend(check_id_pattern(describe));
+    out.extend(check_tool_naming(describe));
+    out.extend(check_sha256_zero(describe, publish));
     out
 }
