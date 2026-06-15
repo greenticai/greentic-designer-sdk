@@ -99,7 +99,7 @@ locally, or `gtdx lint --publish --dir <ext>` to also enforce
 | Code | Rule | Fix |
 |------|------|-----|
 | `E_SCHEMA_HOST` | `$schema` must be `https://store.greentic.cloud/schemas/describe-v2.json` | Replace any `store.greentic.ai` (or missing) `$schema` with the canonical URL. |
-| `E_EXPORT_FORM` | `tools[].export` must be `greentic:extension-design/tools.invoke-tool` | Replace the short `"invoke-tool"` form with the canonical export string. |
+| `E_EXPORT_FORM` | `tools[].export` must be a fully-qualified `greentic:extension-design/<interface>.<member>` reference (e.g. `tools.invoke-tool`, `validation.validate-content`, `knowledge.get-entry`) | Replace bare names like `"invoke-tool"` with the fully-qualified form. |
 | `E_ENGINE_DEPRECATED` | the `engine` block is forbidden | Move version constraints into `compat.min_designer_version` / `compat.min_runner_version` and delete `engine`. |
 | `E_SHA256_ZERO` | (`--publish` only) no placeholder `0000…` hashes | Let the build/publish step fill real `sha256` values before publishing. |
 | `E_ID_PATTERN` | `metadata.id` must match `^greentic\.[a-z0-9][a-z0-9-]*$` | Use a lowercase-kebab id under the `greentic.` namespace. |

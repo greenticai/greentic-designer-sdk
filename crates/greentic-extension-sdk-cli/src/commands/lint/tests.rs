@@ -265,6 +265,30 @@ fn export_form_accepts_canonical() {
 }
 
 #[test]
+fn export_form_accepts_non_tool_interfaces() {
+    // A tool may be backed by validation/knowledge interfaces, not just tools.
+    let d = json!({
+        "contributions": { "tools": [
+            { "name": "validate_card", "export": "greentic:extension-design/validation.validate-content" },
+            { "name": "get_example", "export": "greentic:extension-design/knowledge.get-entry" }
+        ]}
+    });
+    assert!(check_export_form(&d).is_empty());
+}
+
+#[test]
+fn export_form_rejects_qualified_without_member() {
+    let d = json!({
+        "contributions": { "tools": [
+            { "name": "x", "export": "greentic:extension-design/tools" }
+        ]}
+    });
+    let v = check_export_form(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "E_EXPORT_FORM");
+}
+
+#[test]
 fn engine_deprecated_rejects_present_engine() {
     let d = json!({ "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" } });
     let v = check_engine_deprecated(&d);

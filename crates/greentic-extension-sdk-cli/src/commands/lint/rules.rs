@@ -250,8 +250,11 @@ pub(super) fn check_describe_diff_breaking(
 pub(super) const CANONICAL_SCHEMA_URL: &str =
     "https://store.greentic.cloud/schemas/describe-v2.json";
 
-/// The single canonical `export` string for a contributed tool.
-pub(super) const CANONICAL_TOOL_EXPORT: &str = "greentic:extension-design/tools.invoke-tool";
+/// Canonical namespace prefix for a fully-qualified design-extension export.
+/// A tool's `export` must be `greentic:extension-design/<interface>.<member>`
+/// (e.g. `tools.invoke-tool`, `validation.validate-content`,
+/// `knowledge.get-entry`) — never a bare member name like `invoke-tool`.
+pub(super) const EXPORT_NAMESPACE: &str = "greentic:extension-design/";
 
 /// `E_SCHEMA_HOST` — `$schema` must equal the canonical URL exactly.
 pub(super) fn check_schema_host(describe: &serde_json::Value) -> Vec<Violation> {
@@ -270,7 +273,10 @@ pub(super) fn check_schema_host(describe: &serde_json::Value) -> Vec<Violation> 
     Vec::new()
 }
 
-/// `E_EXPORT_FORM` — every tool's `export` must use the canonical long form.
+/// `E_EXPORT_FORM` — every tool's `export` must be a fully-qualified
+/// `greentic:extension-design/<interface>.<member>` reference, not a bare
+/// member name (e.g. `invoke-tool`). Different interfaces are allowed
+/// (`tools`, `validation`, `knowledge`, …) — only the namespace form is fixed.
 pub(super) fn check_export_form(describe: &serde_json::Value) -> Vec<Violation> {
     let Some(tools) = describe
         .pointer("/contributions/tools")
@@ -283,10 +289,16 @@ pub(super) fn check_export_form(describe: &serde_json::Value) -> Vec<Violation> 
         let Some(export) = tool.get("export").and_then(|v| v.as_str()) else {
             continue;
         };
-        if export != CANONICAL_TOOL_EXPORT {
+        let qualified = export
+            .strip_prefix(EXPORT_NAMESPACE)
+            .is_some_and(|member| member.contains('.'));
+        if !qualified {
             out.push(Violation::error(
                 "E_EXPORT_FORM",
-                format!("tools[{idx}].export must be {CANONICAL_TOOL_EXPORT:?} (found {export:?})"),
+                format!(
+                    "tools[{idx}].export must be a fully-qualified \
+                     {EXPORT_NAMESPACE}<interface>.<member> reference (found {export:?})"
+                ),
             ));
         }
     }
