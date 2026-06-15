@@ -123,10 +123,10 @@ impl ExtensionFixtureBuilder {
                 icon: None,
                 screenshots: vec![],
             },
-            engine: greentic_extension_sdk_contract::describe::Engine {
+            engine: Some(greentic_extension_sdk_contract::describe::Engine {
                 greentic_designer: "*".into(),
                 ext_runtime: "*".into(),
-            },
+            }),
             capabilities: greentic_extension_sdk_contract::describe::Capabilities {
                 offered,
                 required,

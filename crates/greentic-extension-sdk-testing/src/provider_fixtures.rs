@@ -89,10 +89,10 @@ pub fn build_provider_fixture_gtxpack(
             icon: None,
             screenshots: vec![],
         },
-        engine: Engine {
+        engine: Some(Engine {
             greentic_designer: "*".into(),
             ext_runtime: "^0.1.0".into(),
-        },
+        }),
         capabilities: Capabilities {
             offered: vec![],
             required: vec![],

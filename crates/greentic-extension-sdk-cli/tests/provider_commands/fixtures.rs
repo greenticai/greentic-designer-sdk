@@ -57,10 +57,10 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
             icon: None,
             screenshots: vec![],
         },
-        engine: Engine {
+        engine: Some(Engine {
             greentic_designer: "*".into(),
             ext_runtime: "*".into(),
-        },
+        }),
         capabilities: Capabilities {
             offered: vec![],
             required: vec![],
@@ -133,10 +133,10 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
             icon: None,
             screenshots: vec![],
         },
-        engine: Engine {
+        engine: Some(Engine {
             greentic_designer: "*".into(),
             ext_runtime: "^0.1.0".into(),
-        },
+        }),
         capabilities: Capabilities {
             offered: vec![],
             required: vec![],

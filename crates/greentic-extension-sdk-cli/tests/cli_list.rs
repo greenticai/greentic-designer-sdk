@@ -54,10 +54,10 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
             icon: None,
             screenshots: vec![],
         },
-        engine: Engine {
+        engine: Some(Engine {
             greentic_designer: "*".into(),
             ext_runtime: "*".into(),
-        },
+        }),
         capabilities: Capabilities {
             offered: vec![],
             required: vec![],

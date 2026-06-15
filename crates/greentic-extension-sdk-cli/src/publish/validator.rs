@@ -226,10 +226,10 @@ mod tests {
                 icon: None,
                 screenshots: vec![],
             },
-            engine: Engine {
+            engine: Some(Engine {
                 greentic_designer: "^0.1".into(),
                 ext_runtime: "^0.1".into(),
-            },
+            }),
             capabilities: Capabilities {
                 offered: vec![],
                 required: vec![],

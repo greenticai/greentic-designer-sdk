@@ -64,10 +64,10 @@ fn write_provider_fixture_with_capabilities(
             icon: None,
             screenshots: vec![],
         },
-        engine: Engine {
+        engine: Some(Engine {
             greentic_designer: "*".into(),
             ext_runtime: "^0.1.0".into(),
-        },
+        }),
         capabilities: Capabilities {
             offered,
             required: vec![],

@@ -29,7 +29,8 @@ pub struct DescribeJson {
     pub kind: ExtensionKind,
     pub compat: crate::compat::Compat,
     pub metadata: Metadata,
-    pub engine: Engine,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<Engine>,
     pub capabilities: Capabilities,
     pub runtime: Runtime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -62,7 +63,8 @@ struct DescribeJsonRaw {
     kind: ExtensionKind,
     compat: crate::compat::Compat,
     metadata: Metadata,
-    engine: Engine,
+    #[serde(default)]
+    engine: Option<Engine>,
     capabilities: Capabilities,
     runtime: Runtime,
     #[serde(default)]
@@ -257,5 +259,64 @@ impl DescribeJson {
     #[must_use]
     pub fn identity_key(&self) -> String {
         format!("{}@{}", self.metadata.id, self.metadata.version)
+    }
+}
+
+#[cfg(test)]
+mod engine_optional_tests {
+    use super::*;
+
+    fn minimal_describe_json(with_engine: bool) -> serde_json::Value {
+        let mut doc = serde_json::json!({
+            "apiVersion": "greentic.ai/v2",
+            "kind": "DesignExtension",
+            "compat": {
+                "min_designer_version": ">=1.2.0",
+                "min_runner_version": "^1.2.0",
+                "contract_version": "1.2.0"
+            },
+            "metadata": {
+                "id": "greentic.engine-test",
+                "name": "Engine Test",
+                "version": "0.1.0",
+                "summary": "x",
+                "author": { "name": "Greentic" },
+                "license": "MIT"
+            },
+            "capabilities": { "offered": [], "required": [] },
+            "runtime": {
+                "memoryLimitMB": 32,
+                "permissions": {},
+                "components": {
+                    "main": {
+                        "oci_ref": "ghcr.io/greentic/engine-test:0.1.0",
+                        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "world": "greentic:x/design-extension"
+                    }
+                }
+            },
+            "contributions": {}
+        });
+        if with_engine {
+            doc["engine"] = serde_json::json!({
+                "greenticDesigner": ">=1.2.0",
+                "extRuntime": "^1.2.0"
+            });
+        }
+        doc
+    }
+
+    #[test]
+    fn describe_without_engine_parses() {
+        let doc = minimal_describe_json(false);
+        let parsed: DescribeJson = serde_json::from_value(doc).expect("must parse without engine");
+        assert!(parsed.engine.is_none());
+    }
+
+    #[test]
+    fn describe_with_engine_still_parses() {
+        let doc = minimal_describe_json(true);
+        let parsed: DescribeJson = serde_json::from_value(doc).expect("must parse with engine");
+        assert!(parsed.engine.is_some());
     }
 }
