@@ -8,14 +8,13 @@
     "contract_version": "1.2.0"
   },
   "metadata": {
-    "id": "com.example.dangle",
+    "id": "greentic.dangle",
     "name": "dangle",
     "version": "0.1.0",
     "summary": "Dangling runtime_ref fixture.",
     "author": { "name": "Test" },
     "license": "MIT"
   },
-  "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
   "capabilities": { "offered": [], "required": [] },
   "runtime": {
     "components": {
@@ -23,7 +22,7 @@
         "gtpack": {
           "file": "extension.wasm",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "pack_id": "com.example.dangle",
+          "pack_id": "greentic.dangle",
           "component_version": "0.1.0"
         },
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",

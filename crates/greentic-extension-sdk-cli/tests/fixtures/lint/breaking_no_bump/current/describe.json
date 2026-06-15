@@ -8,14 +8,13 @@
     "contract_version": "1.2.0"
   },
   "metadata": {
-    "id": "com.example.breaks",
+    "id": "greentic.breaks",
     "name": "breaks",
     "version": "0.1.0",
     "summary": "Current dir: removed tool_b but kept version 0.1.0.",
     "author": { "name": "Test" },
     "license": "MIT"
   },
-  "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
   "capabilities": { "offered": [], "required": [] },
   "runtime": {
     "components": {
@@ -23,7 +22,7 @@
         "gtpack": {
           "file": "extension.wasm",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "pack_id": "com.example.breaks",
+          "pack_id": "greentic.breaks",
           "component_version": "0.1.0"
         },
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",

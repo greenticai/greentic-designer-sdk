@@ -111,7 +111,7 @@ fn breaking_change_without_bump_warns_and_exits_zero() {
         .join("tests/fixtures/lint/breaking_no_bump");
 
     let home_tmp = tempfile::tempdir().expect("tempdir");
-    let installed_target = home_tmp.path().join("extensions/design/com.example.breaks");
+    let installed_target = home_tmp.path().join("extensions/design/greentic.breaks");
     std::fs::create_dir_all(&installed_target).expect("mkdir installed target");
     std::fs::copy(
         fixture_root.join("installed/describe.json"),

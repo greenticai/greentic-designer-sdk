@@ -8,14 +8,13 @@
     "contract_version": "1.2.0"
   },
   "metadata": {
-    "id": "com.example.cycle",
+    "id": "greentic.cycle",
     "name": "cycle",
     "version": "0.1.0",
     "summary": "Capability self-cycle fixture.",
     "author": { "name": "Test" },
     "license": "MIT"
   },
-  "engine": { "greenticDesigner": ">=1.2.0", "extRuntime": "^1.2.0" },
   "capabilities": {
     "offered": [{ "id": "greentic:test/ping", "version": "1.0.0" }],
     "required": [{ "id": "greentic:test/ping", "version": "1.0.0" }]
@@ -26,7 +25,7 @@
         "gtpack": {
           "file": "extension.wasm",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "pack_id": "com.example.cycle",
+          "pack_id": "greentic.cycle",
           "component_version": "0.1.0"
         },
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
