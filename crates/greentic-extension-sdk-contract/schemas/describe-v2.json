@@ -55,6 +55,10 @@
           "type": "array",
           "items": {}
         },
+        "dwProviders": {
+          "type": "array",
+          "items": {}
+        },
         "tools": {
           "type": "array",
           "items": {}
@@ -83,7 +87,10 @@
     "signature": {
       "$ref": "#/$defs/signature"
     },
-    "manifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    "manifestSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
   },
   "$defs": {
     "compat": {
