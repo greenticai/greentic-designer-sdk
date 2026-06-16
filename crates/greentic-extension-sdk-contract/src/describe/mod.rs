@@ -8,7 +8,7 @@ pub mod localization_block;
 pub mod provider;
 
 pub use contributions::{
-    Contributions, Knowledge, NodeType, OutputPort, Prompt, Recipe, Schema, Tool,
+    Contributions, DwProvider, Knowledge, NodeType, OutputPort, Prompt, Recipe, Schema, Tool,
 };
 pub use localization_block::Localization;
 
