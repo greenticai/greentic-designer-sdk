@@ -3,9 +3,9 @@
 *.pdb
 .DS_Store
 .idea/
-.vscode/
 .env
 .env.*
+temp_auto_push.bat
 !.env.example
 *.pem
 *.key
@@ -13,3 +13,5 @@ credentials.toml
 # Local git worktrees / agent scratch — never commit (audit cycle-2)
 /.worktrees/
 /.claude/
+.gitignore
+branch_structure.json
