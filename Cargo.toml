@@ -16,7 +16,7 @@ repository = "https://github.com/greenticai/greentic-designer-sdk"
 rust-version = "1.95"
 
 [workspace.dependencies]
-greentic-types = { version = "1.2.0-research", default-features = false, features = ["std", "serde"] }
+greentic-types = { version = ">=0.5, <0.6", default-features = false, features = ["std", "serde"] }
 anstyle = "1"
 anyhow = "1"
 async-trait = "0.1"
