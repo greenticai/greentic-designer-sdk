@@ -225,12 +225,17 @@ mod tests {
         }
     }
 
-    /// Audit P1 (E.3.b): all four "real" extension kinds must scaffold
-    /// `wit-bindgen-rt = "0.41"` (the current pinned version). 0.35 emits
-    /// older intrinsics that newer cargo-component rejects.
+    /// Audit P1 (E.3.b): extension kinds that use cargo-component's generated
+    /// bindings must scaffold `wit-bindgen-rt = "0.41"` (the current pinned
+    /// version for those kinds). 0.35 emits older intrinsics that newer
+    /// cargo-component rejects.
+    ///
+    /// The `mcp` kind is exempt: it uses inline `wit_bindgen::generate!` via
+    /// `wit-bindgen` (macros feature) so the crate compiles on the host as
+    /// well as wasm32. It must not use `wit-bindgen-rt` directly.
     #[test]
     fn every_kind_template_ships_wit_bindgen_rt_0_41() {
-        for kind in ["design", "bundle", "deploy", "provider", "llm", "mcp"] {
+        for kind in ["design", "bundle", "deploy", "provider", "llm"] {
             let entries = load_templates_kind(kind);
             let cargo_toml = entries
                 .iter()
@@ -242,6 +247,27 @@ mod tests {
                 "kind {kind} Cargo.toml does not pin wit-bindgen-rt 0.41:\n{content}",
             );
         }
+    }
+
+    /// The `mcp` kind uses inline `wit_bindgen::generate!` (host-compatible
+    /// bindings) and must depend on `wit-bindgen` with the `macros` feature,
+    /// not the older `wit-bindgen-rt` shim.
+    #[test]
+    fn mcp_kind_template_ships_wit_bindgen_macros() {
+        let entries = load_templates_kind("mcp");
+        let cargo_toml = entries
+            .iter()
+            .find(|e| e.dst_rel == "Cargo.toml")
+            .unwrap_or_else(|| panic!("mcp kind missing Cargo.toml template"));
+        let content = std::str::from_utf8(cargo_toml.src_bytes).expect("utf8");
+        assert!(
+            content.contains("wit-bindgen") && content.contains("macros"),
+            "mcp Cargo.toml must depend on wit-bindgen with macros feature:\n{content}",
+        );
+        assert!(
+            !content.contains("wit-bindgen-rt"),
+            "mcp Cargo.toml must NOT use wit-bindgen-rt (use wit-bindgen + macros instead):\n{content}",
+        );
     }
 
     /// The `wasm-component` scaffold is a standalone cargo-component project
@@ -338,8 +364,9 @@ mod tests {
     }
 
     /// The `mcp` template tree resolves through `load_templates_kind` and ships
-    /// the full multi-tool REST MCP server skeleton (5 design-extension files
-    /// plus the split `input`/`output`/`tool_meta` modules).
+    /// the single-file `wasix:mcp/router` skeleton plus the bundled `wasix-mcp`
+    /// WIT dep so `cargo component build` resolves the exported router
+    /// interface.
     #[test]
     fn load_kind_mcp_returns_full_template_set() {
         let entries = load_templates_kind("mcp");
@@ -348,10 +375,8 @@ mod tests {
             "Cargo.toml",
             "describe.json",
             "src/lib.rs",
-            "src/input.rs",
-            "src/output.rs",
-            "src/tool_meta.rs",
             "wit/world.wit",
+            "wit/deps/wasix-mcp/package.wit",
             "rust-toolchain.toml",
         ] {
             assert!(names.contains(&expected), "missing {expected}: {names:?}");

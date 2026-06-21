@@ -36,6 +36,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         Some("design") => Some(greentic_extension_sdk_contract::ExtensionKind::Design),
         Some("bundle") => Some(greentic_extension_sdk_contract::ExtensionKind::Bundle),
         Some("deploy") => Some(greentic_extension_sdk_contract::ExtensionKind::Deploy),
+        Some("mcp") => Some(greentic_extension_sdk_contract::ExtensionKind::WasixMcpRouter),
         Some(x) => return Err(anyhow::anyhow!("unknown kind: {x}")),
         None => None,
     };

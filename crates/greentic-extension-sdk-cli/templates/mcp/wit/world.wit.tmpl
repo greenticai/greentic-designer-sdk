@@ -1,20 +1,14 @@
 package {{id_wit}};
 
-// Multi-tool REST MCP server world.
+// wasix:mcp router world.
 //
-// Mirrors the shipped `component-*-ext` design extensions (e.g. Tavily):
-// the server is a `DesignExtension` that exports `extension-design/tools`
-// only. `list-tools` advertises N tools and `invoke-tool` dispatches by
-// name, proxying each call to an upstream REST API. The host injects the
-// API key via `extension-host/secrets` and performs the request via
-// `extension-host/http`.
-world design-extension {
-  import greentic:extension-base/types@{{contract_version}};
-  import greentic:extension-host/logging@{{contract_version}};
-  import greentic:extension-host/secrets@{{contract_version}};
-  import greentic:extension-host/http@{{contract_version}};
-
-  export greentic:extension-base/manifest@{{contract_version}};
-  export greentic:extension-base/lifecycle@{{contract_version}};
-  export greentic:extension-design/tools@{{contract_version}};
+// A local-WASM MCP server: the component exports the `wasix:mcp/router`
+// interface so the runtime's MCP executor (greentic-mcp-exec `WasixExecutor`,
+// the `router_echo` reference) can list and call its tools directly. This is
+// NOT a greentic design extension — it imports no greentic WIT and exports the
+// `router` interface only.
+//
+// The `wasix:mcp@25.6.18` package is bundled under `wit/deps/wasix-mcp/`.
+world mcp-router {
+  export wasix:mcp/router@25.6.18;
 }

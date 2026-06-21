@@ -43,6 +43,7 @@ fn find_installed(
         ExtensionKind::Bundle,
         ExtensionKind::Deploy,
         ExtensionKind::Provider,
+        ExtensionKind::WasixMcpRouter,
     ];
 
     let mut candidates: Vec<(ExtensionKind, semver::Version, DescribeJson)> = Vec::new();
@@ -111,6 +112,7 @@ fn format_kind_display(kind: ExtensionKind) -> &'static str {
         ExtensionKind::Bundle => "BundleExtension",
         ExtensionKind::Deploy => "DeployExtension",
         ExtensionKind::Provider => "ProviderExtension",
+        ExtensionKind::WasixMcpRouter => "wasix:mcp/router",
     }
 }
 
