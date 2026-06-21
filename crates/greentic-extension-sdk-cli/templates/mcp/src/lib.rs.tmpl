@@ -1,199 +1,142 @@
-//! Multi-tool REST MCP server guest for {{id}}.
+//! `wasix:mcp/router` guest for {{id}}.
 //!
-//! Mirrors the shipped `component-*-ext` design extensions: this is a
-//! `DesignExtension` that exports two agentic-worker tools (`example_search`,
-//! `example_fetch`) via `greentic:extension-design/tools`. `list_tools`
-//! advertises both; `invoke_tool` dispatches by name and proxies each call to
-//! an upstream REST API.
+//! A local-WASM MCP server modeled on the `router_echo` reference fixture in
+//! `greentic-mcp`. The component exports the `wasix:mcp/router` interface so the
+//! runtime's MCP executor can `list-tools` / `call-tool` directly — no greentic
+//! design-extension host imports are involved.
 //!
-//! All request/response shaping lives in the pure [`input`], [`output`], and
-//! [`tool_meta`] modules — they carry no WIT imports, so `cargo test` exercises
-//! them on the host. The WIT export layer below is gated behind
-//! `#[cfg(target_family = "wasm")]`: the generated `bindings` module only exists
-//! under `cargo component build`, and the `export!` macro emits cabi symbols
-//! with colons that a host linker rejects.
+//! The starter advertises a single `{{name}}_echo` tool that echoes its
+//! `message` argument back as text. Replace it with the tools your server
+//! exposes: add entries to [`Router::list_tools`] and handle them in
+//! [`Router::call_tool`].
 //!
-//! The WASM glue is intentionally thin: deserialize input -> resolve the API key
-//! via host `secrets::get` -> call api.example.com via host `http::fetch` -> map
-//! the response. Replace the placeholder tools, the `https://api.example.com`
-//! base URL, and the secret reference with the real upstream API before
-//! shipping.
+//! `cargo component build --target wasm32-wasip2` generates the `bindings`
+//! module from `wit/world.wit` and emits the component. The `export!` macro is
+//! gated to `wasm32` because it emits cabi symbols a host linker rejects.
 
-pub mod input;
-pub mod output;
-pub mod tool_meta;
-
-#[cfg(target_family = "wasm")]
 #[allow(warnings)]
 mod bindings;
 
-#[cfg(target_family = "wasm")]
-mod guest {
-    use super::{input, output, tool_meta};
-    use crate::bindings;
-    use crate::input::{FetchInput, SearchInput};
+use bindings::exports::wasix::mcp::router::{
+    CompletionError, CompletionRequest, CompletionResponse, ContentBlock, GetPromptResult, Guest,
+    McpResource, MetaEntry, Prompt, PromptError, ReadResourceResult, ResourceError, Response,
+    ServerCapabilities, ServerDescription, TextContent, Tool, ToolAnnotations, ToolError,
+    ToolResult, ToolsCapability,
+};
 
-    use bindings::exports::greentic::extension_base::{lifecycle, manifest};
-    use bindings::exports::greentic::extension_design::tools;
-    use bindings::greentic::extension_base::types;
-    use bindings::greentic::extension_host::{http, secrets};
+/// The single example tool this server advertises. Rename it (and the matching
+/// arm in [`Router::call_tool`]) when you add your own tools.
+const ECHO_TOOL: &str = "{{name}}_echo";
 
-    pub struct Component;
+/// JSON Schema for the `{{name}}_echo` tool input: one required `message`
+/// string.
+const ECHO_INPUT_SCHEMA: &str =
+    r#"{"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}"#;
 
-    /// Base URL of the upstream REST API. Must match a
-    /// `runtime.permissions.network` allowlist entry in describe.json.
-    const API_BASE: &str = "https://api.example.com";
+struct Router;
 
-    /// Secret URI for the upstream API key. The host resolves this via the
-    /// configured secrets backend; the value never leaves this component.
-    /// Permission is granted by the `secret://{{runtime_ref_key}}/` prefix entry
-    /// in describe.json.
-    const API_KEY_REF: &str = "secret://{{runtime_ref_key}}/api_key";
+impl Guest for Router {
+    fn name() -> String {
+        "{{id}}".into()
+    }
 
-    // ===== extension-base/manifest =====
-    impl manifest::Guest for Component {
-        fn get_identity() -> types::ExtensionIdentity {
-            types::ExtensionIdentity {
-                id: "{{id}}".to_string(),
-                version: "{{version}}".to_string(),
-                kind: types::Kind::Design,
-            }
-        }
+    fn title() -> Option<String> {
+        Some("{{label}}".into())
+    }
 
-        fn get_offered() -> Vec<types::CapabilityRef> {
-            vec![types::CapabilityRef {
-                id: "greentic:{{runtime_ref_key}}/search".to_string(),
-                version: "1.0.0".to_string(),
-            }]
-        }
+    fn instructions() -> String {
+        "Example wasix:mcp router scaffolded by gtdx. Echoes the `message` argument.".into()
+    }
 
-        fn get_required() -> Vec<types::CapabilityRef> {
-            Vec::new()
+    fn describe_server() -> ServerDescription {
+        ServerDescription {
+            name: "{{id}}".into(),
+            title: Some("{{label}}".into()),
+            capabilities: ServerCapabilities {
+                prompts: None,
+                resources: None,
+                tools: Some(ToolsCapability {
+                    list_changed: Some(false),
+                }),
+                completions: None,
+            },
+            resources: None,
+            resource_metadata: None,
+            meta: None,
         }
     }
 
-    // ===== extension-base/lifecycle =====
-    impl lifecycle::Guest for Component {
-        fn init(_config_json: String) -> Result<(), types::ExtensionError> {
-            Ok(())
-        }
-
-        fn shutdown() {}
+    fn list_tools() -> Vec<Tool> {
+        vec![Tool {
+            name: ECHO_TOOL.into(),
+            title: Some("Echo".into()),
+            description: "Echo the `message` argument back as text.".into(),
+            input_schema: ECHO_INPUT_SCHEMA.into(),
+            output_schema: None,
+            annotations: Some(ToolAnnotations {
+                read_only: Some(true),
+                destructive: Some(false),
+                streaming: Some(false),
+                experimental: None,
+            }),
+            meta: None,
+        }]
     }
 
-    // ===== extension-design/tools =====
-    impl tools::Guest for Component {
-        fn list_tools() -> Vec<tools::ToolDefinition> {
-            [
-                tool_meta::example_search_tool(),
-                tool_meta::example_fetch_tool(),
-            ]
-            .into_iter()
-            .map(|meta| tools::ToolDefinition {
-                name: meta.name.to_string(),
-                description: meta.description.to_string(),
-                input_schema_json: meta.input_schema_json.to_string(),
-                output_schema_json: Some(meta.output_schema_json.to_string()),
+    fn call_tool(tool_name: String, arguments: String) -> Result<Response, ToolError> {
+        if tool_name != ECHO_TOOL {
+            return Err(ToolError::NotFound(tool_name));
+        }
+
+        // Pull the `message` field out of the JSON arguments; fall back to the
+        // raw payload if it is absent so the tool always returns something
+        // useful.
+        let message = serde_json::from_str::<serde_json::Value>(&arguments)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
             })
-            .collect()
-        }
+            .unwrap_or(arguments);
 
-        fn invoke_tool(name: String, args_json: String) -> Result<String, types::ExtensionError> {
-            match name.as_str() {
-                tool_meta::EXAMPLE_SEARCH_TOOL => {
-                    let parsed: SearchInput =
-                        serde_json::from_str(&args_json).map_err(|error| {
-                            types::ExtensionError::InvalidInput(format!(
-                                "decode example_search input: {error}"
-                            ))
-                        })?;
-                    let body = input::build_search_body(&parsed)
-                        .map_err(types::ExtensionError::InvalidInput)?;
-                    let raw = api_request("POST", &format!("{API_BASE}/search"), Some(&body))?;
-                    let mapped = output::map_search_response(&raw)
-                        .map_err(types::ExtensionError::Internal)?;
-                    serde_json::to_string(&mapped).map_err(|error| {
-                        types::ExtensionError::Internal(format!("encode output: {error}"))
-                    })
-                }
-                tool_meta::EXAMPLE_FETCH_TOOL => {
-                    let parsed: FetchInput = serde_json::from_str(&args_json).map_err(|error| {
-                        types::ExtensionError::InvalidInput(format!(
-                            "decode example_fetch input: {error}"
-                        ))
-                    })?;
-                    let id = input::build_fetch_id(&parsed)
-                        .map_err(types::ExtensionError::InvalidInput)?;
-                    let raw = api_request("GET", &format!("{API_BASE}/records/{id}"), None)?;
-                    let mapped = output::map_fetch_response(&raw)
-                        .map_err(types::ExtensionError::Internal)?;
-                    serde_json::to_string(&mapped).map_err(|error| {
-                        types::ExtensionError::Internal(format!("encode output: {error}"))
-                    })
-                }
-                other => Err(types::ExtensionError::InvalidInput(format!(
-                    "unknown tool: {other}"
-                ))),
-            }
-        }
+        let block = ContentBlock::Text(TextContent {
+            text: message,
+            annotations: None,
+        });
+
+        Ok(Response::Completed(ToolResult {
+            content: vec![block],
+            structured_content: None,
+            progress: None,
+            meta: Some(vec![MetaEntry {
+                key: "tool".into(),
+                value: format!("\"{ECHO_TOOL}\""),
+            }]),
+            is_error: None,
+        }))
     }
 
-    /// Resolve the API key, issue an HTTP request to `url`, and return the
-    /// response body bytes for a 2xx status. Non-2xx is mapped to an
-    /// `ExtensionError` with a message the agent can act on (401/429 called out
-    /// explicitly).
-    fn api_request(
-        method: &str,
-        url: &str,
-        body: Option<&serde_json::Value>,
-    ) -> Result<Vec<u8>, types::ExtensionError> {
-        let api_key = secrets::get(API_KEY_REF).map_err(|error| {
-            types::ExtensionError::PermissionDenied(format!(
-                "resolve secret {API_KEY_REF}: {error}"
-            ))
-        })?;
-
-        let body_bytes = match body {
-            Some(value) => Some(serde_json::to_vec(value).map_err(|error| {
-                types::ExtensionError::Internal(format!("encode request body: {error}"))
-            })?),
-            None => None,
-        };
-
-        let request = http::Request {
-            method: method.to_string(),
-            url: url.to_string(),
-            headers: vec![
-                ("content-type".to_string(), "application/json".to_string()),
-                ("authorization".to_string(), format!("Bearer {api_key}")),
-            ],
-            body: body_bytes,
-        };
-
-        let response = http::fetch(&request)
-            .map_err(|error| types::ExtensionError::Internal(format!("http fetch: {error}")))?;
-
-        if (200..300).contains(&response.status) {
-            return Ok(response.body);
-        }
-
-        let detail = String::from_utf8_lossy(&response.body);
-        Err(match response.status {
-            401 => types::ExtensionError::PermissionDenied(format!(
-                "upstream rejected the API key (401): {detail}"
-            )),
-            400 | 422 => types::ExtensionError::InvalidInput(format!(
-                "upstream rejected the request ({}): {detail}",
-                response.status
-            )),
-            429 => types::ExtensionError::Internal(format!(
-                "upstream rate limit exceeded (429): {detail}"
-            )),
-            status => types::ExtensionError::Internal(format!(
-                "upstream request failed ({status}): {detail}"
-            )),
-        })
+    fn list_resources() -> Vec<McpResource> {
+        Vec::new()
     }
 
-    bindings::export!(Component with_types_in bindings);
+    fn read_resource(_uri: String) -> Result<ReadResourceResult, ResourceError> {
+        Err(ResourceError::NotFound("no resources".into()))
+    }
+
+    fn list_prompts() -> Vec<Prompt> {
+        Vec::new()
+    }
+
+    fn get_prompt(_prompt_name: String) -> Result<GetPromptResult, PromptError> {
+        Err(PromptError::NotFound("no prompts".into()))
+    }
+
+    fn complete(_request: CompletionRequest) -> Result<CompletionResponse, CompletionError> {
+        Err(CompletionError::NotFound("completions disabled".into()))
+    }
 }
+
+bindings::export!(Router with_types_in bindings);

@@ -156,7 +156,7 @@ fn scaffolds_provider_extension_with_correct_wit_deps() {
 }
 
 #[test]
-fn scaffolds_mcp_extension_as_multi_tool_design_extension() {
+fn scaffolds_mcp_extension_as_wasix_mcp_router() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("greentic.mcp-demo");
     let (ok, _o, e) = run(Command::new(gtdx_bin())
@@ -172,57 +172,59 @@ fn scaffolds_mcp_extension_as_multi_tool_design_extension() {
         .arg("--no-git"));
     assert!(ok, "gtdx new mcp failed: {e}");
 
-    // The multi-tool REST MCP server skeleton ships the split source modules
-    // that the shipped `component-*-ext` extensions use.
+    // The wasix:mcp/router skeleton ships a single-file router guest plus the
+    // bundled `wasix-mcp` WIT dep so `cargo component build` resolves the
+    // exported router interface.
     for rel in [
         "Cargo.toml",
         "describe.json",
         "src/lib.rs",
-        "src/input.rs",
-        "src/output.rs",
-        "src/tool_meta.rs",
         "wit/world.wit",
-        // mcp reuses the design WIT package set.
-        "wit/deps/greentic/extension-base/world.wit",
-        "wit/deps/greentic/extension-host/world.wit",
-        "wit/deps/greentic/extension-design/world.wit",
+        // The wasix:mcp router contract is bundled as a WIT dep.
+        "wit/deps/wasix-mcp/package.wit",
     ] {
         assert!(proj.join(rel).exists(), "missing expected file: {rel}");
     }
-    // No bundle/deploy/provider WIT bleed-through.
+    // No greentic design-extension WIT bleed-through: a router exports the
+    // wasix:mcp/router interface, not greentic:extension-design/tools.
+    for rel in [
+        "wit/deps/greentic/extension-design/world.wit",
+        "wit/deps/greentic/extension-bundle/world.wit",
+    ] {
+        assert!(
+            !proj.join(rel).exists(),
+            "unexpected greentic WIT dep present: {rel}"
+        );
+    }
+
+    // The generated world declares a `mcp-router` world exporting the
+    // wasix:mcp router interface — NOT a greentic design extension.
+    let world = std::fs::read_to_string(proj.join("wit/world.wit")).unwrap();
     assert!(
-        !proj
-            .join("wit/deps/greentic/extension-bundle/world.wit")
-            .exists()
+        world.contains("world mcp-router"),
+        "world.wit must declare `world mcp-router`:\n{world}"
+    );
+    assert!(
+        world.contains("wasix:mcp/router"),
+        "world.wit must export the wasix:mcp router interface:\n{world}"
+    );
+    assert!(
+        !world.contains("greentic:extension-design/tools"),
+        "world.wit must no longer export the design-extension tools interface:\n{world}"
     );
 
     let describe = std::fs::read_to_string(proj.join("describe.json")).unwrap();
-    assert!(describe.contains("\"kind\": \"DesignExtension\""));
-    // The starter demonstrates the secret + network REST-proxy skeleton.
-    assert!(describe.contains("https://api.example.com/*"));
-    assert!(describe.contains("secret://"));
-    // Two tools are advertised as contributions.
-    assert!(describe.contains("example_search"));
-    assert!(describe.contains("example_fetch"));
 
-    // describe.json parses and reports kind DesignExtension.
+    // describe.json parses and reports kind wasix:mcp/router.
     let describe_json: serde_json::Value =
         serde_json::from_str(&describe).expect("describe.json parses");
     assert_eq!(
         describe_json.get("kind").and_then(|v| v.as_str()),
-        Some("DesignExtension")
+        Some("wasix:mcp/router")
     );
 
     // No leftover unrendered placeholders anywhere in the generated tree.
-    for rel in [
-        "Cargo.toml",
-        "describe.json",
-        "src/lib.rs",
-        "src/input.rs",
-        "src/output.rs",
-        "src/tool_meta.rs",
-        "wit/world.wit",
-    ] {
+    for rel in ["Cargo.toml", "describe.json", "src/lib.rs", "wit/world.wit"] {
         let body = std::fs::read_to_string(proj.join(rel)).unwrap();
         assert!(
             !body.contains("{{"),

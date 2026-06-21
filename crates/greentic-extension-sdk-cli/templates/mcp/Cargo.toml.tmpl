@@ -1,12 +1,12 @@
 [package]
-name = "{{name}}"
+name = "{{name_cargo}}"
 version = "{{version}}"
 edition = "2024"
 license = "{{license}}"
 authors = ["{{author}}"]
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -18,8 +18,7 @@ package = "{{id_wit}}"
 
 [package.metadata.component.target]
 path = "wit"
+world = "mcp-router"
 
 [package.metadata.component.target.dependencies]
-"greentic:extension-base" = { path = "wit/deps/greentic/extension-base" }
-"greentic:extension-host" = { path = "wit/deps/greentic/extension-host" }
-"greentic:extension-design" = { path = "wit/deps/greentic/extension-design" }
+"wasix:mcp" = { path = "wit/deps/wasix-mcp" }

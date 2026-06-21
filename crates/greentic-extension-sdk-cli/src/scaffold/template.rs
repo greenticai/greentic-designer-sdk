@@ -338,8 +338,9 @@ mod tests {
     }
 
     /// The `mcp` template tree resolves through `load_templates_kind` and ships
-    /// the full multi-tool REST MCP server skeleton (5 design-extension files
-    /// plus the split `input`/`output`/`tool_meta` modules).
+    /// the single-file `wasix:mcp/router` skeleton plus the bundled `wasix-mcp`
+    /// WIT dep so `cargo component build` resolves the exported router
+    /// interface.
     #[test]
     fn load_kind_mcp_returns_full_template_set() {
         let entries = load_templates_kind("mcp");
@@ -348,10 +349,8 @@ mod tests {
             "Cargo.toml",
             "describe.json",
             "src/lib.rs",
-            "src/input.rs",
-            "src/output.rs",
-            "src/tool_meta.rs",
             "wit/world.wit",
+            "wit/deps/wasix-mcp/package.wit",
             "rust-toolchain.toml",
         ] {
             assert!(names.contains(&expected), "missing {expected}: {names:?}");

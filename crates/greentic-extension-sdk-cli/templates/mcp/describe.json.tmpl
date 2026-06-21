@@ -1,7 +1,7 @@
 {
   "$schema": "https://store.greentic.cloud/schemas/describe-v2.json",
   "apiVersion": "greentic.ai/v2",
-  "kind": "DesignExtension",
+  "kind": "wasix:mcp/router",
   "compat": {
     "min_designer_version": ">={{sdk_version}}",
     "min_runner_version": "^{{sdk_version}}",
@@ -11,28 +11,20 @@
     "id": "{{id}}",
     "name": "{{name}}",
     "version": "{{version}}",
-    "summary": "A multi-tool REST MCP server exposing two agentic-worker tools.",
-    "description": "Design extension exposing two agentic-worker tools: `example_search` (query an upstream REST API) and `example_fetch` (fetch a record by id). The API key is injected by the host from a secret reference and never returned. Outbound calls are restricted to api.example.com.",
+    "summary": "A local-WASM MCP server exposing a wasix:mcp/router tool.",
+    "description": "A `wasix:mcp/router` component scaffolded by gtdx. It exports the wasix:mcp router interface and advertises one `{{name}}_echo` tool that echoes its `message` argument. Replace the example tool with your own in src/lib.rs.",
     "author": {
       "name": "{{author}}"
     },
     "license": "{{license}}"
   },
-  "engine": {
-    "greenticDesigner": ">={{sdk_version}}",
-    "extRuntime": "^{{sdk_version}}"
-  },
   "capabilities": {
-    "offered": [
-      {
-        "id": "greentic:{{runtime_ref_key}}/search",
-        "version": "1.0.0"
-      }
-    ],
+    "offered": [],
     "required": []
   },
   "runtime": {
     "memoryLimitMB": 64,
+    "world": "{{id_wit}}/mcp-router@1.0.0",
     "components": {
       "{{runtime_ref_key}}": {
         "gtpack": {
@@ -42,31 +34,14 @@
           "component_version": "{{version}}"
         },
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "world": "{{id_wit}}/design-extension@1.0.0"
+        "world": "{{id_wit}}/mcp-router@1.0.0"
       }
     },
     "permissions": {
-      "network": [
-        "https://api.example.com/*"
-      ],
-      "secrets": [
-        "secret://{{runtime_ref_key}}/"
-      ],
+      "network": [],
+      "secrets": [],
       "callExtensionKinds": []
     }
   },
-  "contributions": {
-    "tools": [
-      {
-        "name": "example_search",
-        "export": "greentic:extension-design/tools.invoke-tool",
-        "runtime_ref": "{{runtime_ref_key}}"
-      },
-      {
-        "name": "example_fetch",
-        "export": "greentic:extension-design/tools.invoke-tool",
-        "runtime_ref": "{{runtime_ref_key}}"
-      }
-    ]
-  }
+  "secret_requirements": []
 }

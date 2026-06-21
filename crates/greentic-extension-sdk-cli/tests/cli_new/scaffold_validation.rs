@@ -100,12 +100,16 @@ fn scaffolded_describe_json_validates_against_schema() {
     let schema: serde_json::Value = serde_json::from_slice(&schema_bytes).unwrap();
     let compiled = jsonschema::validator_for(&schema).expect("compile schema");
 
+    // `mcp` is intentionally excluded: it scaffolds a `wasix:mcp/router`
+    // component whose describe.json carries `kind: "wasix:mcp/router"` — that
+    // is a distinct artifact, not a greentic v2 design extension, so it does
+    // not (and must not) validate against the greentic `describe-v2.json`
+    // schema or deserialize into the greentic `DescribeJson` contract type.
     for (kind_flag, scaffold_name) in [
         ("design", "design-demo"),
         ("bundle", "bundle-demo"),
         ("deploy", "deploy-demo"),
         ("provider", "provider-demo"),
-        ("mcp", "mcp-demo"),
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join(scaffold_name);
@@ -150,13 +154,16 @@ fn scaffolded_describe_json_deserializes_into_v2_contract_types() {
     use greentic_extension_sdk_contract::describe::DescribeJson;
     use greentic_extension_sdk_contract::kind::ExtensionKind;
 
+    // `mcp` is intentionally excluded: it scaffolds a `wasix:mcp/router`
+    // component (`kind: "wasix:mcp/router"`), which is not a greentic v2
+    // extension and does not deserialize into the greentic `DescribeJson`
+    // contract type. See `scaffold_kinds::scaffolds_mcp_extension_as_wasix_mcp_router`.
     for (kind_flag, scaffold_name, expected_kind) in [
         ("design", "design-rt", ExtensionKind::Design),
         ("bundle", "bundle-rt", ExtensionKind::Bundle),
         ("deploy", "deploy-rt", ExtensionKind::Deploy),
         ("provider", "provider-rt", ExtensionKind::Provider),
         ("wasm-component", "greentic.wc-rt", ExtensionKind::Design),
-        ("mcp", "greentic.mcp-rt", ExtensionKind::Design),
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join(scaffold_name);

@@ -98,6 +98,21 @@ fn every_new_template_describe_validates_against_describe_v2() {
         let value: serde_json::Value = serde_json::from_str(&rendered).unwrap_or_else(|e| {
             panic!("template '{kind_dir}' rendered invalid JSON: {e}\n{rendered}")
         });
+
+        // `mcp` scaffolds a `wasix:mcp/router` component, not a greentic v2
+        // design extension. Its describe.json carries `kind:
+        // "wasix:mcp/router"`, which is outside the greentic `describe-v2`
+        // schema's `kind` enum by design — so it is validated separately here,
+        // not against the v2 schema.
+        if kind_dir == "mcp" {
+            assert_eq!(
+                value.get("kind").and_then(|v| v.as_str()),
+                Some("wasix:mcp/router"),
+                "mcp template must declare kind wasix:mcp/router"
+            );
+            continue;
+        }
+
         validate_describe_v2(&value).unwrap_or_else(|e| {
             panic!("template '{kind_dir}' describe.json fails describe-v2 schema: {e}")
         });
