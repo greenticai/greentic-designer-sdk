@@ -10,16 +10,23 @@
 //! exposes: add entries to [`Router::list_tools`] and handle them in
 //! [`Router::call_tool`].
 //!
-//! `cargo component build --target wasm32-wasip2` generates the `bindings`
-//! module from `wit/world.wit` and emits the component. The `export!` macro is
-//! gated to `wasm32` because it emits cabi symbols a host linker rejects.
+//! Bindings are generated inline via `wit_bindgen::generate!` so the crate
+//! compiles on the host (`cargo check` / `cargo test`) as well as for the
+//! wasm32-wasip2 target. The `export!` macro is gated to `wasm32` because it
+//! emits cabi symbols a host linker rejects.
 
-#[allow(warnings)]
-mod bindings;
+mod bindings {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "mcp-router",
+        generate_all,
+        generate_unused_types: true,
+    });
+}
 
 use bindings::exports::wasix::mcp::router::{
     CompletionError, CompletionRequest, CompletionResponse, ContentBlock, GetPromptResult, Guest,
-    McpResource, MetaEntry, Prompt, PromptError, ReadResourceResult, ResourceError, Response,
+    McpResource, Prompt, PromptError, ReadResourceResult, ResourceError, Response,
     ServerCapabilities, ServerDescription, TextContent, Tool, ToolAnnotations, ToolError,
     ToolResult, ToolsCapability,
 };
@@ -110,10 +117,7 @@ impl Guest for Router {
             content: vec![block],
             structured_content: None,
             progress: None,
-            meta: Some(vec![MetaEntry {
-                key: "tool".into(),
-                value: format!("\"{ECHO_TOOL}\""),
-            }]),
+            meta: None,
             is_error: None,
         }))
     }
@@ -139,4 +143,5 @@ impl Guest for Router {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 bindings::export!(Router with_types_in bindings);
