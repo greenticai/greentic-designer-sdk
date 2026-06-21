@@ -189,6 +189,7 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
         ExtensionKind::Design,
         ExtensionKind::Bundle,
         ExtensionKind::Deploy,
+        ExtensionKind::WasixMcpRouter,
     ] {
         let dir = storage.kind_dir(kind);
         if !dir.exists() {

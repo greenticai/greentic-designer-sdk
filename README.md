@@ -69,7 +69,7 @@ gtdx --version
 ### Scaffold and build an extension
 
 ```bash
-gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm
+gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm | mcp
 cd my-ext
 gtdx dev --once
 ```
@@ -77,6 +77,26 @@ gtdx dev --once
 This rebuilds, packs, and produces `dist/<name>-<version>.gtxpack`. The
 pack includes a `manifest.json` integrity ledger (sha256 of every entry)
 since 1.2.0-research; runtime install verifies it.
+
+#### MCP kinds: `wasix:mcp/router` vs agent-only design-extension MCPs
+
+`gtdx new --kind mcp` scaffolds a `wasix:mcp/router` WASM component. This is a
+**flow-capable local MCP router**: addressable as a flow node (`dw.mcp.<id>`),
+loaded by the Greentic MCP executor (`greentic-mcp`), and suitable for both
+agentic workers and direct flow usage.
+
+**Migration note for existing design-extension MCPs:** older MCP tool-sets
+scaffolded as `--kind design` (with `kind: DesignExtension` in `describe.json`)
+are agent-only toolsets that run inside the agentic worker loop. They are NOT
+flow-capable local-wasm MCPs. To make a design-extension MCP flow-capable:
+
+1. Re-scaffold with `gtdx new --kind mcp` to get the `wasix:mcp/router` world.
+2. Port your tool handlers into the new scaffold.
+3. Republish — the `kind` field in `describe.json` will be `wasix:mcp/router`
+   and the SDK's `ExtensionKind::WasixMcpRouter` variant will be used throughout.
+
+Old design-extension MCPs continue to work for agentic workers and do not need
+to be migrated unless flow-node addressability is needed.
 
 ### Lint before publish
 

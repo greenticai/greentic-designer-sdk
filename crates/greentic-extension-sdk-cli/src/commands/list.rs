@@ -14,6 +14,8 @@ pub enum KindArg {
     Deploy,
     #[value(name = "provider")]
     Provider,
+    #[value(name = "mcp")]
+    Mcp,
     #[value(name = "all")]
     All,
 }
@@ -25,6 +27,7 @@ impl KindArg {
             KindArg::Bundle => Some(ExtensionKind::Bundle),
             KindArg::Deploy => Some(ExtensionKind::Deploy),
             KindArg::Provider => Some(ExtensionKind::Provider),
+            KindArg::Mcp => Some(ExtensionKind::WasixMcpRouter),
             KindArg::All => None,
         }
     }
@@ -50,6 +53,7 @@ pub fn run(args: Args, home: &Path) -> anyhow::Result<()> {
             ExtensionKind::Bundle,
             ExtensionKind::Deploy,
             ExtensionKind::Provider,
+            ExtensionKind::WasixMcpRouter,
         ]
     };
 
