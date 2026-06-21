@@ -159,3 +159,67 @@ async fn publish_2xx_with_garbage_body_errors_not_fabricated() {
         "a 2xx with a non-JSON body must not fabricate a success receipt"
     );
 }
+
+/// A `wasix:mcp/router` describe.json must deserialize into `ExtensionKind::WasixMcpRouter`
+/// and a `PublishRequest` built from it must carry the correct kind — confirming
+/// the SDK-side enum handles the `:` and `/` in the kind string via serde rename.
+#[test]
+fn wasix_mcp_router_describe_deserializes_and_publish_request_carries_kind() {
+    // Minimal describe.json with kind = "wasix:mcp/router" (as emitted by
+    // `gtdx new --kind mcp` from Task 1). runtime.components must have at least
+    // one entry (invariant enforced by DescribeJson::try_from).
+    let describe_json = r#"{
+      "apiVersion": "greentic.ai/v2",
+      "kind": "wasix:mcp/router",
+      "compat": {"min_designer_version": ">=1.0.0", "min_runner_version": "^0.12.0", "contract_version": "1.2.0"},
+      "metadata": {"id": "com.example.my-mcp", "name": "my-mcp", "version": "0.1.0", "summary": "MCP router", "author": {"name": "a"}, "license": "MIT"},
+      "capabilities": {"offered": [], "required": []},
+      "runtime": {
+        "components": {
+          "router": {
+            "oci_ref": "oci://ghcr.io/example/my-mcp:0.1.0",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "world": "wasix:mcp/router@25.06.18"
+          }
+        },
+        "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}
+      },
+      "contributions": {}
+    }"#;
+
+    let describe: DescribeJson = serde_json::from_str(describe_json)
+        .expect("wasix:mcp/router describe.json must deserialize into DescribeJson");
+
+    assert_eq!(
+        describe.kind,
+        ExtensionKind::WasixMcpRouter,
+        "describe.kind must be WasixMcpRouter after deserialization"
+    );
+
+    // Round-trip: serialize back and confirm the kind string is preserved.
+    let re_serialized = serde_json::to_value(&describe).unwrap();
+    assert_eq!(
+        re_serialized["kind"],
+        serde_json::Value::String("wasix:mcp/router".into()),
+        "re-serialized kind must be the literal string 'wasix:mcp/router'"
+    );
+
+    // A PublishRequest built from this describe carries the correct kind — this
+    // is what `gtdx publish` constructs before sending to the registry backend.
+    let req = PublishRequest {
+        ext_id: describe.metadata.id.clone(),
+        ext_name: describe.metadata.name.clone(),
+        version: describe.metadata.version.clone(),
+        kind: describe.kind,
+        artifact_bytes: b"fake-wasm".to_vec(),
+        artifact_sha256: "abc".into(),
+        describe: describe.clone(),
+        signature: None,
+        force: false,
+    };
+    assert_eq!(
+        req.kind,
+        ExtensionKind::WasixMcpRouter,
+        "PublishRequest.kind must be WasixMcpRouter for a wasix:mcp/router describe"
+    );
+}
