@@ -118,3 +118,26 @@ fn every_new_template_describe_validates_against_describe_v2() {
         });
     }
 }
+
+#[test]
+fn wasm_component_node_uses_canonical_outcome_ports() {
+    // A scaffolded node's output ports must use the canonical runtime outcome
+    // vocabulary (`on_success` / `on_error`), matching greentic-types'
+    // `ComponentDescribe.outcomes` convention and the flow-builder catalog's
+    // event names — not bare `success` / `error`, which would mismatch routing.
+    let subs = substitutions();
+    let file = templates_dir()
+        .join("wasm-component")
+        .join("describe.json.tmpl");
+    let raw =
+        std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+    let value: serde_json::Value = serde_json::from_str(&render(&raw, &subs))
+        .unwrap_or_else(|e| panic!("wasm-component rendered invalid JSON: {e}"));
+    let names: Vec<&str> = value["contributions"]["nodeTypes"][0]["output_ports"]
+        .as_array()
+        .expect("wasm-component node must declare output_ports")
+        .iter()
+        .filter_map(|port| port["name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["on_success", "on_error"]);
+}
