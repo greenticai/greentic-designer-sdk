@@ -406,10 +406,10 @@ fn tool_naming_accepts_clean_names() {
     assert!(check_tool_naming(&d).is_empty());
 }
 
-// --- W_PERMS_SECRETS_PLAIN_KEY (S4) ---
+// --- E_PERMS_SECRETS_PLAIN_KEY (S4) ---
 
 #[test]
-fn perms_secrets_plain_key_warns_on_field_name_entry() {
+fn perms_secrets_plain_key_errors_on_field_name_entry() {
     // A plain env-var-style key like "SLACK_BOT_TOKEN" has no "://" or "*"
     // and does not end with "/" — it belongs in requiredSecrets, not here.
     let d = json!({
@@ -420,9 +420,9 @@ fn perms_secrets_plain_key_warns_on_field_name_entry() {
         }
     });
     let v = check_perms_secrets_plain_key(&d);
-    assert_eq!(v.len(), 1, "expected one warning for plain key");
-    assert_eq!(v[0].code, "W_PERMS_SECRETS_PLAIN_KEY");
-    assert_eq!(v[0].severity, Severity::Warning);
+    assert_eq!(v.len(), 1, "expected one error for plain key");
+    assert_eq!(v[0].code, "E_PERMS_SECRETS_PLAIN_KEY");
+    assert_eq!(v[0].severity, Severity::Error);
     assert!(
         v[0].message.contains("SLACK_BOT_TOKEN"),
         "message should name the offending key: {}",
@@ -447,7 +447,7 @@ fn perms_secrets_plain_key_clean_on_grant_uri() {
     });
     assert!(
         check_perms_secrets_plain_key(&d).is_empty(),
-        "URI-style grants must not produce a warning"
+        "URI-style grants must not produce an error"
     );
 }
 
@@ -463,7 +463,7 @@ fn perms_secrets_plain_key_clean_on_wildcard() {
     });
     assert!(
         check_perms_secrets_plain_key(&d).is_empty(),
-        "wildcard * must not produce a warning"
+        "wildcard * must not produce an error"
     );
 }
 
@@ -479,13 +479,13 @@ fn perms_secrets_plain_key_clean_on_prefix_ending_slash() {
     });
     assert!(
         check_perms_secrets_plain_key(&d).is_empty(),
-        "prefix ending with / must not produce a warning"
+        "prefix ending with / must not produce an error"
     );
 }
 
 #[test]
-fn perms_secrets_plain_key_warns_multiple_bad_keys() {
-    // Multiple plain keys → one warning per key.
+fn perms_secrets_plain_key_errors_multiple_bad_keys() {
+    // Multiple plain keys → one error per key.
     let d = json!({
         "runtime": {
             "permissions": {
@@ -494,12 +494,8 @@ fn perms_secrets_plain_key_warns_multiple_bad_keys() {
         }
     });
     let v = check_perms_secrets_plain_key(&d);
-    assert_eq!(
-        v.len(),
-        2,
-        "expected two warnings for two plain keys: {v:?}"
-    );
-    assert!(v.iter().all(|x| x.code == "W_PERMS_SECRETS_PLAIN_KEY"));
+    assert_eq!(v.len(), 2, "expected two errors for two plain keys: {v:?}");
+    assert!(v.iter().all(|x| x.code == "E_PERMS_SECRETS_PLAIN_KEY"));
 }
 
 #[test]
@@ -521,18 +517,18 @@ fn perms_secrets_plain_key_clean_when_secrets_array_empty() {
     assert!(check_perms_secrets_plain_key(&d).is_empty());
 }
 
-// --- W_SECRET_KEY_NOT_CANONICAL (S3 / D2) ---
+// --- E_SECRET_KEY_NOT_CANONICAL (S3 / D2) ---
 
 #[test]
-fn secret_key_canonical_warns_on_uppercase_required_secret() {
+fn secret_key_canonical_errors_on_uppercase_required_secret() {
     // SLACK_BOT_TOKEN is uppercase — not canonical D2 form.
     let d = json!({
         "requiredSecrets": [{ "key": "SLACK_BOT_TOKEN", "description": "Slack bot token" }]
     });
     let v = check_secret_key_canonical(&d);
-    assert_eq!(v.len(), 1, "expected one warning for uppercase key: {v:?}");
-    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
-    assert_eq!(v[0].severity, Severity::Warning);
+    assert_eq!(v.len(), 1, "expected one error for uppercase key: {v:?}");
+    assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
+    assert_eq!(v[0].severity, Severity::Error);
     assert!(
         v[0].message.contains("SLACK_BOT_TOKEN"),
         "message should name the offending key: {}",
@@ -548,13 +544,13 @@ fn secret_key_canonical_clean_on_canonical_required_secret() {
     });
     assert!(
         check_secret_key_canonical(&d).is_empty(),
-        "canonical key must not produce a warning"
+        "canonical key must not produce an error"
     );
 }
 
 #[test]
-fn secret_key_canonical_warns_on_uppercase_in_tool_secret_requirements() {
-    // Uppercase key under contributions.tools[].secret_requirements also warns.
+fn secret_key_canonical_errors_on_uppercase_in_tool_secret_requirements() {
+    // Uppercase key under contributions.tools[].secret_requirements also errors.
     let d = json!({
         "contributions": {
             "tools": [{
@@ -567,9 +563,9 @@ fn secret_key_canonical_warns_on_uppercase_in_tool_secret_requirements() {
     assert_eq!(
         v.len(),
         1,
-        "expected one warning for tool-level uppercase key: {v:?}"
+        "expected one error for tool-level uppercase key: {v:?}"
     );
-    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+    assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
     assert!(
         v[0].message.contains("OPENAI_API_KEY"),
         "message should name the offending key: {}",
@@ -588,7 +584,7 @@ fn secret_key_canonical_rejects_leading_slash() {
     let d = json!({ "requiredSecrets": [{ "key": "/bad/key" }] });
     let v = check_secret_key_canonical(&d);
     assert_eq!(v.len(), 1);
-    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+    assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
 }
 
 #[test]
@@ -596,7 +592,7 @@ fn secret_key_canonical_rejects_dotdot_segment() {
     let d = json!({ "requiredSecrets": [{ "key": "foo/../bar" }] });
     let v = check_secret_key_canonical(&d);
     assert_eq!(v.len(), 1);
-    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+    assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
 }
 
 #[test]
@@ -605,7 +601,7 @@ fn secret_key_canonical_rejects_uri_scheme() {
     let d = json!({ "requiredSecrets": [{ "key": "secret://tavily/api_key" }] });
     let v = check_secret_key_canonical(&d);
     assert_eq!(v.len(), 1);
-    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+    assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
 }
 
 #[test]
@@ -613,5 +609,5 @@ fn secret_key_canonical_rejects_star_wildcard() {
     let d = json!({ "requiredSecrets": [{ "key": "*" }] });
     let v = check_secret_key_canonical(&d);
     assert_eq!(v.len(), 1);
-    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+    assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
 }

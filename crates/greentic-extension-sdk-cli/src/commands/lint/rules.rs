@@ -465,7 +465,7 @@ fn looks_like_grant(entry: &str) -> bool {
     entry == "*" || entry.contains("://") || entry.ends_with('/')
 }
 
-/// `W_PERMS_SECRETS_PLAIN_KEY` — warns when `runtime.permissions.secrets`
+/// `E_PERMS_SECRETS_PLAIN_KEY` — errors when `runtime.permissions.secrets`
 /// contains a plain field-name key (e.g. `"SLACK_BOT_TOKEN"`, `"api_key"`).
 ///
 /// The `permissions.secrets` array is for **read-permission grants** only
@@ -484,8 +484,8 @@ pub(super) fn check_perms_secrets_plain_key(describe: &serde_json::Value) -> Vec
         .filter_map(|v| v.as_str())
         .filter(|s| !looks_like_grant(s))
         .map(|key| {
-            Violation::warning(
-                "W_PERMS_SECRETS_PLAIN_KEY",
+            Violation::error(
+                "E_PERMS_SECRETS_PLAIN_KEY",
                 format!(
                     "runtime.permissions.secrets contains plain key {key:?}; \
                      credential field names belong in the top-level `requiredSecrets` array, \

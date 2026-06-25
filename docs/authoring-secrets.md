@@ -66,8 +66,8 @@ Valid grant forms:
 
 Do not place plain field-name keys (e.g. `"SLACK_BOT_TOKEN"`, `"api_key"`) in
 `permissions.secrets`. Such entries do not grant access — they are silently
-ignored by the runtime and will trigger the `W_PERMS_SECRETS_PLAIN_KEY` lint
-warning from `gtdx lint`.
+ignored by the runtime and will fail the `E_PERMS_SECRETS_PLAIN_KEY` lint
+check from `gtdx lint`.
 
 Always use `requiredSecrets` for credential field declarations.
 
