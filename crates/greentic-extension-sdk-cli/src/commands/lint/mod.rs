@@ -20,17 +20,17 @@
 //!   summary and exits zero so it's CI-noise rather than CI-breaking.
 //!
 //! S4 hygiene rules (June 2026):
-//! - `W_PERMS_SECRETS_PLAIN_KEY` — `runtime.permissions.secrets` contains a
+//! - `E_PERMS_SECRETS_PLAIN_KEY` — `runtime.permissions.secrets` contains a
 //!   plain field-name key (no `://`, no `*`, no trailing `/`). Such entries
 //!   belong in the top-level `requiredSecrets` array; `permissions.secrets`
 //!   is for read-permission grants only. See `docs/authoring-secrets.md`.
 //!
 //! S3/D2 key-format rules (June 2026):
-//! - `W_SECRET_KEY_NOT_CANONICAL` — a declared secret key (in `requiredSecrets`
+//! - `E_SECRET_KEY_NOT_CANONICAL` — a declared secret key (in `requiredSecrets`
 //!   or `contributions.tools[].secret_requirements`) is not in the canonical
 //!   `namespace/name` lowercase form (`[a-z0-9._-/]`, no leading/trailing `/`,
 //!   no `..` segment, no `://`). Keys that are non-canonical break secret
-//!   resolution and should be renamed by the author.
+//!   resolution and must be renamed by the author.
 
 use std::path::{Path, PathBuf};
 

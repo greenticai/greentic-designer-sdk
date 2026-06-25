@@ -1,4 +1,4 @@
-//! Lint rule: `W_SECRET_KEY_NOT_CANONICAL` (S3 / D2)
+//! Lint rule: `E_SECRET_KEY_NOT_CANONICAL` (S3 / D2)
 //!
 //! The canonical secret-key format (decision D2) is `namespace/name`-style:
 //! lowercase ASCII `[a-z0-9._-/]` only, non-empty, no leading or trailing `/`,
@@ -63,7 +63,7 @@ fn keys_from_array(arr: &[serde_json::Value]) -> impl Iterator<Item = &str> {
 // Rule
 // ---------------------------------------------------------------------------
 
-/// `W_SECRET_KEY_NOT_CANONICAL` — warns for each declared secret key that is
+/// `E_SECRET_KEY_NOT_CANONICAL` — errors for each declared secret key that is
 /// not in the canonical `namespace/name` lowercase D2 form.
 ///
 /// Scanned locations:
@@ -101,8 +101,8 @@ pub(super) fn check_secret_key_canonical(describe: &serde_json::Value) -> Vec<Vi
 }
 
 fn make_violation(key: &str) -> Violation {
-    Violation::warning(
-        "W_SECRET_KEY_NOT_CANONICAL",
+    Violation::error(
+        "E_SECRET_KEY_NOT_CANONICAL",
         format!(
             "secret key {key:?} is not in canonical form; \
              rename to lowercase `namespace/name` style using only [a-z0-9._-/] \
