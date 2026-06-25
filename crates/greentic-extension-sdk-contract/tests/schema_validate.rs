@@ -93,3 +93,30 @@ fn rejects_bad_capability_id() {
     v["capabilities"]["offered"][0]["id"] = serde_json::json!("NO_COLON_HERE");
     assert!(validate_describe_json(&v).is_err());
 }
+
+/// Regression: the publish-path v2 schema must accept the canonical top-level
+/// `requiredSecrets` block. It previously rejected it (`additionalProperties:
+/// false` with no `requiredSecrets` property), so `gtdx publish` failed on
+/// standardized describes even though the typed `DescribeJson` already modeled
+/// the field.
+#[test]
+fn accepts_v2_with_required_secrets() {
+    let mut v: serde_json::Value = serde_json::from_str(BASE_V2_OK).unwrap();
+    v["requiredSecrets"] = serde_json::json!([
+        {
+            "key": "tavily/api_key",
+            "required": true,
+            "format": "text",
+            "description": "Tavily API key."
+        }
+    ]);
+    validate_describe_json(&v).unwrap();
+}
+
+#[test]
+fn rejects_required_secret_without_key() {
+    let mut v: serde_json::Value = serde_json::from_str(BASE_V2_OK).unwrap();
+    // `key` is required on each secretRequirement entry.
+    v["requiredSecrets"] = serde_json::json!([{ "required": true }]);
+    assert!(validate_describe_json(&v).is_err());
+}
