@@ -56,6 +56,7 @@ fn sample_describe(version: &str) -> DescribeJson {
         localization: None,
         signature: None,
         manifest_sha256: None,
+        required_secrets: vec![],
     }
 }
 
