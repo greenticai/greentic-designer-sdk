@@ -34,6 +34,7 @@ ed25519-dalek = { workspace = true, features = ["pkcs8", "pem"] }
 greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "1.2.11-research" }
 greentic-extension-sdk-registry = { path = "../greentic-extension-sdk-registry", version = "1.2.11-research" }
 greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "1.2.11-research" }
+greentic-types = { workspace = true }
 include_dir = { workspace = true }
 notify-debouncer-full = { workspace = true }
 pkcs8 = { workspace = true }

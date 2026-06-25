@@ -437,6 +437,166 @@ fn design_pack_unchanged_without_gtpack() {
     assert!(names.iter().any(|n| n == "manifest.json"));
 }
 
+// ── Secret enrichment from nested .gtpack manifests ──────────────────────
+
+/// Read `runtime.permissions.secrets` from the `describe.json` entry of a
+/// produced `.gtxpack` on disk (the bytes that actually ship, post-round-trip).
+fn read_published_secrets(out: &Path) -> Vec<String> {
+    let mut archive = zip::ZipArchive::new(File::open(out).unwrap()).unwrap();
+    let mut entry = archive.by_name("describe.json").unwrap();
+    let mut buf = Vec::new();
+    std::io::Read::read_to_end(&mut entry, &mut buf).unwrap();
+    let describe: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    describe["runtime"]["permissions"]["secrets"]
+        .as_array()
+        .expect("permissions.secrets must be an array in the published describe")
+        .iter()
+        .map(|v| v.as_str().expect("secret key is a string").to_string())
+        .collect()
+}
+
+/// Build the raw bytes of a `.gtpack` (a ZIP carrying `manifest.cbor`) whose
+/// `PackManifest.secret_requirements` declares `keys`. Used to exercise the
+/// packer's auto-enrichment without depending on the full pack toolchain.
+fn make_gtpack_with_secret_keys(keys: &[&str]) -> Vec<u8> {
+    use greentic_types::{
+        PackId, PackKind, PackManifest, PackSignatures, SecretKey, SecretRequirement,
+    };
+
+    // `SecretRequirement` is `#[non_exhaustive]`, so build from `Default` and
+    // set the one field that matters for enrichment (the key).
+    let secret_requirements = keys
+        .iter()
+        .map(|k| {
+            let mut req = SecretRequirement::default();
+            req.key = SecretKey::new(*k).expect("valid secret key");
+            req
+        })
+        .collect();
+
+    let manifest = PackManifest {
+        schema_version: "1".to_string(),
+        pack_id: PackId::new("com.example.provider.runtime").expect("valid pack id"),
+        name: None,
+        version: semver::Version::new(0, 1, 0),
+        kind: PackKind::Provider,
+        publisher: "tester".to_string(),
+        components: Vec::new(),
+        flows: Vec::new(),
+        dependencies: Vec::new(),
+        capabilities: Vec::new(),
+        secret_requirements,
+        signatures: PackSignatures::default(),
+        bootstrap: None,
+        extensions: None,
+        agents: std::collections::BTreeMap::new(),
+    };
+    let cbor = greentic_types::encode_pack_manifest(&manifest).expect("encode manifest");
+
+    let mut buf = Vec::new();
+    {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+        let opts: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip::write::ZipWriter::start_file(&mut zip, "manifest.cbor", opts).unwrap();
+        std::io::Write::write_all(&mut zip, &cbor).unwrap();
+        zip.finish().unwrap();
+    }
+    buf
+}
+
+/// Build a provider project whose `runtime/provider.gtpack` is a real `.gtpack`
+/// declaring `keys` as secret requirements, optionally with an author-listed
+/// secret already present in `permissions.secrets`.
+fn make_provider_project_with_secret_pack(
+    root: &Path,
+    keys: &[&str],
+    author_secrets: &[&str],
+) -> PathBuf {
+    let gtpack_bytes = make_gtpack_with_secret_keys(keys);
+    let sha = sha256_hex(&gtpack_bytes);
+
+    std::fs::create_dir_all(root.join("runtime")).unwrap();
+    std::fs::write(root.join("runtime/provider.gtpack"), &gtpack_bytes).unwrap();
+
+    write_provider_describe(
+        root,
+        &serde_json::json!({ "file": "runtime/provider.gtpack", "sha256": sha }),
+    );
+
+    // Patch in author-listed secrets when requested.
+    if !author_secrets.is_empty() {
+        let path = root.join("describe.json");
+        let mut describe: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        describe["runtime"]["permissions"]["secrets"] = serde_json::json!(author_secrets.to_vec());
+        std::fs::write(&path, describe.to_string()).unwrap();
+    }
+
+    let wasm_dir = root.join("target/wasm32-wasip2/debug");
+    std::fs::create_dir_all(&wasm_dir).unwrap();
+    let wasm = wasm_dir.join("provider.wasm");
+    std::fs::write(&wasm, b"\0asm\x01\x00\x00\x00").unwrap();
+    wasm
+}
+
+#[test]
+fn provider_pack_enriches_secrets_from_nested_gtpack() {
+    // Nested pack declares B_TOKEN, A_TOKEN (unsorted, no author secrets).
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_provider_project_with_secret_pack(tmp.path(), &["B_TOKEN", "A_TOKEN"], &[]);
+    let out = tmp.path().join("dist/provider-0.1.0.gtxpack");
+
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    // The published describe.json must carry the union, deduped and sorted.
+    assert_eq!(
+        read_published_secrets(&out),
+        vec!["A_TOKEN".to_string(), "B_TOKEN".to_string()],
+        "secrets must be auto-enriched from the nested .gtpack manifest"
+    );
+}
+
+#[test]
+fn provider_pack_merges_author_and_nested_secrets() {
+    // Nested pack declares B_TOKEN, A_TOKEN; author already listed C_TOKEN and
+    // a duplicate A_TOKEN — result must be the deduped, sorted union.
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_provider_project_with_secret_pack(
+        tmp.path(),
+        &["B_TOKEN", "A_TOKEN"],
+        &["C_TOKEN", "A_TOKEN"],
+    );
+    let out = tmp.path().join("dist/provider-0.1.0.gtxpack");
+
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    assert_eq!(
+        read_published_secrets(&out),
+        vec![
+            "A_TOKEN".to_string(),
+            "B_TOKEN".to_string(),
+            "C_TOKEN".to_string()
+        ],
+        "published secrets must be the deduped, sorted union of author + nested keys"
+    );
+}
+
+#[test]
+fn provider_pack_no_secrets_leaves_permissions_empty() {
+    // Nested .gtpack with zero secret_requirements must not invent any.
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_provider_project_with_secret_pack(tmp.path(), &[], &[]);
+    let out = tmp.path().join("dist/provider-0.1.0.gtxpack");
+
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    assert!(
+        read_published_secrets(&out).is_empty(),
+        "empty nested secret_requirements must leave permissions.secrets empty"
+    );
+}
+
 #[test]
 fn provider_pack_handles_absent_gtpack_field() {
     // Component without a gtpack key — should behave like the design case
