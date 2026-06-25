@@ -24,12 +24,20 @@
 //!   plain field-name key (no `://`, no `*`, no trailing `/`). Such entries
 //!   belong in the top-level `requiredSecrets` array; `permissions.secrets`
 //!   is for read-permission grants only. See `docs/authoring-secrets.md`.
+//!
+//! S3/D2 key-format rules (June 2026):
+//! - `W_SECRET_KEY_NOT_CANONICAL` — a declared secret key (in `requiredSecrets`
+//!   or `contributions.tools[].secret_requirements`) is not in the canonical
+//!   `namespace/name` lowercase form (`[a-z0-9._-/]`, no leading/trailing `/`,
+//!   no `..` segment, no `://`). Keys that are non-canonical break secret
+//!   resolution and should be renamed by the author.
 
 use std::path::{Path, PathBuf};
 
 use clap::Args as ClapArgs;
 
 mod rules;
+mod rules_secret_key;
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +46,7 @@ use rules::{
     check_export_form, check_id_pattern, check_perms_secrets_plain_key, check_runtime_refs,
     check_schema_host, check_sha256_zero, check_tool_naming, check_version_semver,
 };
+use rules_secret_key::check_secret_key_canonical;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -128,5 +137,6 @@ fn collect_violations(describe: &serde_json::Value, home: &Path, publish: bool) 
     out.extend(check_tool_naming(describe));
     out.extend(check_sha256_zero(describe, publish));
     out.extend(check_perms_secrets_plain_key(describe));
+    out.extend(check_secret_key_canonical(describe));
     out
 }

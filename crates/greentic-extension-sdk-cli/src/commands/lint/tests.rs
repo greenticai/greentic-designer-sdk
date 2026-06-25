@@ -1,5 +1,6 @@
 use super::*;
 use rules::{check_perms_secrets_plain_key, is_breaking_bump};
+use rules_secret_key::check_secret_key_canonical;
 use serde_json::json;
 
 fn empty_home() -> tempfile::TempDir {
@@ -518,4 +519,99 @@ fn perms_secrets_plain_key_clean_when_secrets_array_empty() {
         }
     });
     assert!(check_perms_secrets_plain_key(&d).is_empty());
+}
+
+// --- W_SECRET_KEY_NOT_CANONICAL (S3 / D2) ---
+
+#[test]
+fn secret_key_canonical_warns_on_uppercase_required_secret() {
+    // SLACK_BOT_TOKEN is uppercase — not canonical D2 form.
+    let d = json!({
+        "requiredSecrets": [{ "key": "SLACK_BOT_TOKEN", "description": "Slack bot token" }]
+    });
+    let v = check_secret_key_canonical(&d);
+    assert_eq!(v.len(), 1, "expected one warning for uppercase key: {v:?}");
+    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+    assert_eq!(v[0].severity, Severity::Warning);
+    assert!(
+        v[0].message.contains("SLACK_BOT_TOKEN"),
+        "message should name the offending key: {}",
+        v[0].message
+    );
+}
+
+#[test]
+fn secret_key_canonical_clean_on_canonical_required_secret() {
+    // tavily/api_key matches [a-z0-9._-/], no leading/trailing /, no .. segment.
+    let d = json!({
+        "requiredSecrets": [{ "key": "tavily/api_key", "description": "Tavily API key" }]
+    });
+    assert!(
+        check_secret_key_canonical(&d).is_empty(),
+        "canonical key must not produce a warning"
+    );
+}
+
+#[test]
+fn secret_key_canonical_warns_on_uppercase_in_tool_secret_requirements() {
+    // Uppercase key under contributions.tools[].secret_requirements also warns.
+    let d = json!({
+        "contributions": {
+            "tools": [{
+                "name": "my_tool",
+                "secret_requirements": [{ "key": "OPENAI_API_KEY", "description": "OpenAI key" }]
+            }]
+        }
+    });
+    let v = check_secret_key_canonical(&d);
+    assert_eq!(
+        v.len(),
+        1,
+        "expected one warning for tool-level uppercase key: {v:?}"
+    );
+    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+    assert!(
+        v[0].message.contains("OPENAI_API_KEY"),
+        "message should name the offending key: {}",
+        v[0].message
+    );
+}
+
+#[test]
+fn secret_key_canonical_clean_when_no_secrets_declared() {
+    let d = json!({ "metadata": { "id": "greentic.x" } });
+    assert!(check_secret_key_canonical(&d).is_empty());
+}
+
+#[test]
+fn secret_key_canonical_rejects_leading_slash() {
+    let d = json!({ "requiredSecrets": [{ "key": "/bad/key" }] });
+    let v = check_secret_key_canonical(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+}
+
+#[test]
+fn secret_key_canonical_rejects_dotdot_segment() {
+    let d = json!({ "requiredSecrets": [{ "key": "foo/../bar" }] });
+    let v = check_secret_key_canonical(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+}
+
+#[test]
+fn secret_key_canonical_rejects_uri_scheme() {
+    // A key with "://" is a URI, not a canonical D2 key.
+    let d = json!({ "requiredSecrets": [{ "key": "secret://tavily/api_key" }] });
+    let v = check_secret_key_canonical(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
+}
+
+#[test]
+fn secret_key_canonical_rejects_star_wildcard() {
+    let d = json!({ "requiredSecrets": [{ "key": "*" }] });
+    let v = check_secret_key_canonical(&d);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "W_SECRET_KEY_NOT_CANONICAL");
 }
