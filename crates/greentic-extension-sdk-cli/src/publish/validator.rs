@@ -244,6 +244,7 @@ mod tests {
             localization: None,
             signature: None,
             manifest_sha256: None,
+            required_secrets: vec![],
         }
     }
 

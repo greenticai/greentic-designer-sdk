@@ -1,3 +1,4 @@
+use greentic_types::secrets::SecretRequirement;
 use serde::{Deserialize, Serialize};
 
 use crate::capability::CapabilityRef;
@@ -49,6 +50,14 @@ pub struct DescribeJson {
         skip_serializing_if = "Option::is_none"
     )]
     pub manifest_sha256: Option<String>,
+    /// Secrets that this extension requires operators to provision before it can
+    /// run. Mirrors the per-tool `secret_requirements` but applies extension-wide.
+    #[serde(
+        rename = "requiredSecrets",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub required_secrets: Vec<SecretRequirement>,
 }
 
 /// Private intermediate for deserialization — identical shape to `DescribeJson`.
@@ -76,6 +85,8 @@ struct DescribeJsonRaw {
     signature: Option<Signature>,
     #[serde(rename = "manifestSha256", default)]
     manifest_sha256: Option<String>,
+    #[serde(rename = "requiredSecrets", default)]
+    required_secrets: Vec<SecretRequirement>,
 }
 
 impl TryFrom<DescribeJsonRaw> for DescribeJson {
@@ -140,6 +151,7 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
             localization: raw.localization,
             signature: raw.signature,
             manifest_sha256: raw.manifest_sha256,
+            required_secrets: raw.required_secrets,
         })
     }
 }

@@ -86,6 +86,7 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
         localization: None,
         signature: None,
         manifest_sha256: None,
+        required_secrets: vec![],
     };
 
     std::fs::write(

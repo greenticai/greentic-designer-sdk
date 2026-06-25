@@ -107,6 +107,7 @@ pub fn build_provider_fixture_gtxpack(
         localization: None,
         signature: None,
         manifest_sha256: None,
+        required_secrets: vec![],
     };
 
     // The install path enforces whole-archive integrity unconditionally (audit

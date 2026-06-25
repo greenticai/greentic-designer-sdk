@@ -89,6 +89,7 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
         localization: None,
         signature: None,
         manifest_sha256: None,
+        required_secrets: vec![],
     };
 
     let describe_path = design_dir.join("describe.json");
@@ -168,6 +169,7 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
         localization: None,
         signature: None,
         manifest_sha256: None,
+        required_secrets: vec![],
     };
 
     let describe_path = provider_dir.join("describe.json");

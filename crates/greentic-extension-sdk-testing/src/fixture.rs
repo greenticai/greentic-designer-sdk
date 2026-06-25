@@ -141,6 +141,7 @@ impl ExtensionFixtureBuilder {
             localization: None,
             signature: None,
             manifest_sha256: None,
+            required_secrets: vec![],
         };
         // Write the WASM component first, then build a whole-archive manifest
         // over the on-disk entries and bind it into the describe BEFORE the
