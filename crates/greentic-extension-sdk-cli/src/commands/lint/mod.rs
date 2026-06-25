@@ -18,6 +18,12 @@
 //!   capabilities that the current describe no longer does, AND
 //!   `metadata.version` was not bumped. Warning, not error: prints the
 //!   summary and exits zero so it's CI-noise rather than CI-breaking.
+//!
+//! S4 hygiene rules (June 2026):
+//! - `W_PERMS_SECRETS_PLAIN_KEY` — `runtime.permissions.secrets` contains a
+//!   plain field-name key (no `://`, no `*`, no trailing `/`). Such entries
+//!   belong in the top-level `requiredSecrets` array; `permissions.secrets`
+//!   is for read-permission grants only. See `docs/authoring-secrets.md`.
 
 use std::path::{Path, PathBuf};
 
@@ -29,8 +35,8 @@ mod tests;
 
 use rules::{
     check_capability_cycle, check_describe_diff_breaking, check_engine_deprecated,
-    check_export_form, check_id_pattern, check_runtime_refs, check_schema_host, check_sha256_zero,
-    check_tool_naming, check_version_semver,
+    check_export_form, check_id_pattern, check_perms_secrets_plain_key, check_runtime_refs,
+    check_schema_host, check_sha256_zero, check_tool_naming, check_version_semver,
 };
 
 #[derive(ClapArgs, Debug)]
@@ -121,5 +127,6 @@ fn collect_violations(describe: &serde_json::Value, home: &Path, publish: bool) 
     out.extend(check_id_pattern(describe));
     out.extend(check_tool_naming(describe));
     out.extend(check_sha256_zero(describe, publish));
+    out.extend(check_perms_secrets_plain_key(describe));
     out
 }

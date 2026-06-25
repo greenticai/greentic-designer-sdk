@@ -446,3 +446,53 @@ pub(super) fn check_tool_naming(describe: &serde_json::Value) -> Vec<Violation> 
     }
     out
 }
+
+// ---------------------------------------------------------------------------
+// Secret-permission hygiene (S4)
+// ---------------------------------------------------------------------------
+
+/// Returns `true` when `entry` looks like a **grant** (a read-permission token)
+/// rather than a plain field-name key.
+///
+/// A grant is one of:
+/// - a URI containing `"://"` (e.g. `"secret://tavily/"`)
+/// - a bare wildcard `"*"`
+/// - a path prefix ending with `"/"` (e.g. `"tavily/"`)
+///
+/// Anything else is treated as a plain field-name key that belongs in
+/// `requiredSecrets`, not in `runtime.permissions.secrets`.
+fn looks_like_grant(entry: &str) -> bool {
+    entry == "*" || entry.contains("://") || entry.ends_with('/')
+}
+
+/// `W_PERMS_SECRETS_PLAIN_KEY` — warns when `runtime.permissions.secrets`
+/// contains a plain field-name key (e.g. `"SLACK_BOT_TOKEN"`, `"api_key"`).
+///
+/// The `permissions.secrets` array is for **read-permission grants** only
+/// (URI prefixes like `"secret://tavily/"`, or `"*"` for wildcard access).
+/// Credential field names that an operator must supply belong in the top-level
+/// `requiredSecrets` array instead. See `docs/authoring-secrets.md`.
+pub(super) fn check_perms_secrets_plain_key(describe: &serde_json::Value) -> Vec<Violation> {
+    let Some(entries) = describe
+        .pointer("/runtime/permissions/secrets")
+        .and_then(|v| v.as_array())
+    else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|v| v.as_str())
+        .filter(|s| !looks_like_grant(s))
+        .map(|key| {
+            Violation::warning(
+                "W_PERMS_SECRETS_PLAIN_KEY",
+                format!(
+                    "runtime.permissions.secrets contains plain key {key:?}; \
+                     credential field names belong in the top-level `requiredSecrets` array, \
+                     not in permissions.secrets (which is for read-permission grants only, \
+                     e.g. \"secret://tavily/\" or \"*\")"
+                ),
+            )
+        })
+        .collect()
+}
