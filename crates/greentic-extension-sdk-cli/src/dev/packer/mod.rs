@@ -107,11 +107,13 @@ fn collect_runtime_component_files(
     Ok(())
 }
 
-/// Read the secret-requirement keys declared in a nested runtime `.gtpack`
+/// Read the full `SecretRequirement`s declared in a nested runtime `.gtpack`
 /// (a ZIP carrying `manifest.cbor`). Returns an error when the file is not a
-/// readable `.gtpack` / the manifest is missing / decode fails so the caller
+/// readable `.gtpack` / the manifest is missing / decode fails, so the caller
 /// can treat it as best-effort and skip the component.
-fn read_gtpack_secret_keys(gtpack_path: &Path) -> anyhow::Result<Vec<String>> {
+fn read_gtpack_secret_requirements(
+    gtpack_path: &Path,
+) -> anyhow::Result<Vec<greentic_types::secrets::SecretRequirement>> {
     use std::io::Read as _;
     let bytes = std::fs::read(gtpack_path)
         .map_err(|e| anyhow::anyhow!("read {}: {e}", gtpack_path.display()))?;
@@ -126,36 +128,42 @@ fn read_gtpack_secret_keys(gtpack_path: &Path) -> anyhow::Result<Vec<String>> {
         .map_err(|e| anyhow::anyhow!("read manifest.cbor in {}: {e}", gtpack_path.display()))?;
     let manifest = greentic_types::decode_pack_manifest(&cbor)
         .map_err(|e| anyhow::anyhow!("decode manifest.cbor in {}: {e}", gtpack_path.display()))?;
-    Ok(manifest
-        .secret_requirements
-        .iter()
-        .map(|r| r.key.as_str().to_string())
-        .collect())
+    Ok(manifest.secret_requirements)
 }
 
-/// Auto-populate `describe.runtime.permissions.secrets` with the union of secret
-/// keys declared by the nested runtime `.gtpack` manifests, merged with any
-/// secrets the author already listed, deduped and sorted.
+/// Populate `describe.required_secrets` with the union of `SecretRequirement`s
+/// from nested runtime `.gtpack` manifests merged with those the author already
+/// declared in `describe.required_secrets`. Results are deduped by `key` (first
+/// occurrence wins) and sorted by key string for stable output.
+///
+/// `describe.runtime.permissions.secrets` is intentionally left untouched —
+/// that field is authored and does not carry the structured requirement objects.
 ///
 /// Best-effort per component: a component whose `gtpack.file` is not a readable
 /// `.gtpack` (e.g. a plain wasm runtime) or whose `manifest.cbor` is absent /
 /// fails to decode is skipped with a `tracing::warn!` — it never fails publish.
 fn enrich_describe_secrets(describe: &mut DescribeJson, project_dir: &Path) {
-    let mut secrets: std::collections::BTreeSet<String> = describe
-        .runtime
-        .permissions
-        .secrets
-        .iter()
-        .cloned()
-        .collect();
+    // Seed with the author's existing requirements (preserves any extra metadata
+    // they provided such as `description`, `format`, `scope`).
+    let mut seen: std::collections::BTreeMap<String, greentic_types::secrets::SecretRequirement> =
+        describe
+            .required_secrets
+            .drain(..)
+            .map(|r| (r.key.as_str().to_string(), r))
+            .collect();
 
     for (comp_key, component) in &describe.runtime.components {
         let Some(gtpack) = component.gtpack.as_ref() else {
             continue;
         };
         let abs = project_dir.join(&gtpack.file);
-        match read_gtpack_secret_keys(&abs) {
-            Ok(keys) => secrets.extend(keys),
+        match read_gtpack_secret_requirements(&abs) {
+            Ok(reqs) => {
+                for req in reqs {
+                    // Author-listed entries take precedence; gtpack entries fill gaps.
+                    seen.entry(req.key.as_str().to_string()).or_insert(req);
+                }
+            }
             Err(err) => {
                 tracing::warn!(
                     component = %comp_key,
@@ -168,8 +176,8 @@ fn enrich_describe_secrets(describe: &mut DescribeJson, project_dir: &Path) {
         }
     }
 
-    // `BTreeSet` gives a deduped, byte-sorted ordering already.
-    describe.runtime.permissions.secrets = secrets.into_iter().collect();
+    // `BTreeMap` is already keyed in byte-sorted order, giving stable output.
+    describe.required_secrets = seen.into_values().collect();
 }
 
 /// Build a `.gtxpack` at `output_pack` from `project_dir` + the already-built
@@ -275,13 +283,13 @@ pub fn build_pack_with_key(
     // re-emit describe.json so the pack carries an authenticated descriptor.
     let mut describe_typed: DescribeJson = serde_json::from_value(describe.clone())
         .map_err(|e| anyhow::anyhow!("parse describe.json as typed: {e}"))?;
-    // Auto-fill `runtime.permissions.secrets` from the nested runtime `.gtpack`
-    // manifests so the designer-admin "Add credential" dialog renders declared
-    // fields for providers without the author hand-listing them. Best-effort:
-    // unreadable/non-gtpack components are skipped (see `enrich_describe_secrets`).
-    // Mutated on `describe_typed` so the change lands in the signed/published
-    // bytes (the `describe` Value is not what ships) — and before `sign_describe`
-    // so the signature covers the enriched secrets.
+    // Populate `requiredSecrets` from nested runtime `.gtpack` manifests,
+    // merged with any the author already listed, so the designer-admin
+    // "Add credential" dialog renders all declared fields for providers
+    // without requiring authors to hand-duplicate them. Best-effort:
+    // unreadable/non-gtpack components are skipped with a warning
+    // (see `enrich_describe_secrets`). Mutated on `describe_typed` before
+    // `sign_describe` so the signature covers the enriched secrets.
     enrich_describe_secrets(&mut describe_typed, project_dir);
     bind_manifest(&mut describe_typed, &manifest_bytes);
     if let Some(key) = signing_key {
