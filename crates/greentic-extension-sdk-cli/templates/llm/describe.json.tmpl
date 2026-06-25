@@ -40,10 +40,18 @@
     },
     "permissions": {
       "network": ["https://api.example.com/"],
-      "secrets": ["api_key"],
+      "secrets": ["secret://example/"],
       "callExtensionKinds": []
     }
   },
+  "requiredSecrets": [
+    {
+      "key": "example/api_key",
+      "required": true,
+      "format": "text",
+      "description": "API key for the upstream LLM provider. Replace the `example` namespace with your provider's, in both this key and the `runtime.permissions.secrets` grant above."
+    }
+  ],
   "contributions": {
     "tools": [
       {
