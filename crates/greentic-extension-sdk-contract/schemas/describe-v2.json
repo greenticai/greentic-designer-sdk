@@ -90,9 +90,61 @@
     "manifestSha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "requiredSecrets": {
+      "type": "array",
+      "description": "Canonical list of credential secrets the operator must supply before this extension can function.",
+      "items": {
+        "$ref": "#/$defs/secretRequirement"
+      }
     }
   },
   "$defs": {
+    "secretRequirement": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Namespaced secret key, e.g. tavily/api_key."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the secret is mandatory for the extension to function."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this secret is used for."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "bytes",
+            "text",
+            "json"
+          ],
+          "description": "Expected encoding of the secret value."
+        },
+        "scope": {
+          "type": "object",
+          "description": "Scope hints: env, tenant, team."
+        },
+        "schema": {
+          "type": "object",
+          "description": "JSON Schema describing the secret value structure (used when format=json)."
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Example values or placeholder strings for operator UX."
+        }
+      }
+    },
     "compat": {
       "type": "object",
       "required": [
