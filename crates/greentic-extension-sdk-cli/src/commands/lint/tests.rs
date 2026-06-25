@@ -1,5 +1,5 @@
 use super::*;
-use rules::is_breaking_bump;
+use rules::{check_perms_secrets_plain_key, is_breaking_bump};
 use serde_json::json;
 
 fn empty_home() -> tempfile::TempDir {
@@ -403,4 +403,119 @@ fn tool_naming_accepts_clean_names() {
         ]}
     });
     assert!(check_tool_naming(&d).is_empty());
+}
+
+// --- W_PERMS_SECRETS_PLAIN_KEY (S4) ---
+
+#[test]
+fn perms_secrets_plain_key_warns_on_field_name_entry() {
+    // A plain env-var-style key like "SLACK_BOT_TOKEN" has no "://" or "*"
+    // and does not end with "/" — it belongs in requiredSecrets, not here.
+    let d = json!({
+        "runtime": {
+            "permissions": {
+                "secrets": ["SLACK_BOT_TOKEN"]
+            }
+        }
+    });
+    let v = check_perms_secrets_plain_key(&d);
+    assert_eq!(v.len(), 1, "expected one warning for plain key");
+    assert_eq!(v[0].code, "W_PERMS_SECRETS_PLAIN_KEY");
+    assert_eq!(v[0].severity, Severity::Warning);
+    assert!(
+        v[0].message.contains("SLACK_BOT_TOKEN"),
+        "message should name the offending key: {}",
+        v[0].message
+    );
+    assert!(
+        v[0].message.contains("requiredSecrets"),
+        "message should point to requiredSecrets: {}",
+        v[0].message
+    );
+}
+
+#[test]
+fn perms_secrets_plain_key_clean_on_grant_uri() {
+    // A proper URI grant — has "://" — must not trigger the warning.
+    let d = json!({
+        "runtime": {
+            "permissions": {
+                "secrets": ["secret://tavily/", "secret://slack/"]
+            }
+        }
+    });
+    assert!(
+        check_perms_secrets_plain_key(&d).is_empty(),
+        "URI-style grants must not produce a warning"
+    );
+}
+
+#[test]
+fn perms_secrets_plain_key_clean_on_wildcard() {
+    // A bare "*" wildcard is a valid grant and must not trigger the warning.
+    let d = json!({
+        "runtime": {
+            "permissions": {
+                "secrets": ["*"]
+            }
+        }
+    });
+    assert!(
+        check_perms_secrets_plain_key(&d).is_empty(),
+        "wildcard * must not produce a warning"
+    );
+}
+
+#[test]
+fn perms_secrets_plain_key_clean_on_prefix_ending_slash() {
+    // A path prefix ending with "/" (not a URI but a valid grant prefix) must not warn.
+    let d = json!({
+        "runtime": {
+            "permissions": {
+                "secrets": ["tavily/"]
+            }
+        }
+    });
+    assert!(
+        check_perms_secrets_plain_key(&d).is_empty(),
+        "prefix ending with / must not produce a warning"
+    );
+}
+
+#[test]
+fn perms_secrets_plain_key_warns_multiple_bad_keys() {
+    // Multiple plain keys → one warning per key.
+    let d = json!({
+        "runtime": {
+            "permissions": {
+                "secrets": ["SLACK_BOT_TOKEN", "secret://valid/", "OPENAI_API_KEY"]
+            }
+        }
+    });
+    let v = check_perms_secrets_plain_key(&d);
+    assert_eq!(
+        v.len(),
+        2,
+        "expected two warnings for two plain keys: {v:?}"
+    );
+    assert!(v.iter().all(|x| x.code == "W_PERMS_SECRETS_PLAIN_KEY"));
+}
+
+#[test]
+fn perms_secrets_plain_key_clean_when_permissions_absent() {
+    // No permissions block at all — must not panic or warn.
+    let d = json!({ "runtime": {} });
+    assert!(check_perms_secrets_plain_key(&d).is_empty());
+}
+
+#[test]
+fn perms_secrets_plain_key_clean_when_secrets_array_empty() {
+    let d = json!({
+        "runtime": {
+            "permissions": {
+                "secrets": []
+            }
+        }
+    });
+    assert!(check_perms_secrets_plain_key(&d).is_empty());
 }
