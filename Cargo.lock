@@ -1060,6 +1060,7 @@ dependencies = [
  "greentic-extension-sdk-registry",
  "greentic-extension-sdk-state",
  "greentic-extension-sdk-testing",
+ "greentic-types",
  "include_dir",
  "jsonschema",
  "notify-debouncer-full",
@@ -1162,9 +1163,9 @@ dependencies = [
 
 [[package]]
 name = "greentic-types"
-version = "0.5.3"
+version = "1.2.0-research.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20d524811eebe7fc0c12078b960771be4aed9a1b10f55f80cd6b3e79549c0260"
+checksum = "7d2a079903dae4d40cff9b2627feea1b19c47343b1066b55d7335ddfb055f7ac"
 dependencies = [
  "anyhow",
  "blake3",
