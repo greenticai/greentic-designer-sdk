@@ -455,6 +455,28 @@ fn read_published_secrets(out: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Read `requiredSecrets[].key` strings from the `describe.json` entry of a
+/// produced `.gtxpack` on disk.
+fn read_published_required_secrets(out: &Path) -> Vec<String> {
+    let mut archive = zip::ZipArchive::new(File::open(out).unwrap()).unwrap();
+    let mut entry = archive.by_name("describe.json").unwrap();
+    let mut buf = Vec::new();
+    std::io::Read::read_to_end(&mut entry, &mut buf).unwrap();
+    let describe: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    match describe["requiredSecrets"].as_array() {
+        None => Vec::new(),
+        Some(arr) => arr
+            .iter()
+            .map(|v| {
+                v["key"]
+                    .as_str()
+                    .expect("requiredSecrets[].key is a string")
+                    .to_string()
+            })
+            .collect(),
+    }
+}
+
 /// Build the raw bytes of a `.gtpack` (a ZIP carrying `manifest.cbor`) whose
 /// `PackManifest.secret_requirements` declares `keys`. Used to exercise the
 /// packer's auto-enrichment without depending on the full pack toolchain.
@@ -525,11 +547,17 @@ fn make_provider_project_with_secret_pack(
     );
 
     // Patch in author-listed secrets when requested.
+    // Author secrets live in `requiredSecrets` (top-level), not in
+    // `permissions.secrets` — the latter is left as authored (empty).
     if !author_secrets.is_empty() {
         let path = root.join("describe.json");
         let mut describe: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        describe["runtime"]["permissions"]["secrets"] = serde_json::json!(author_secrets.to_vec());
+        let reqs: Vec<serde_json::Value> = author_secrets
+            .iter()
+            .map(|k| serde_json::json!({"key": k}))
+            .collect();
+        describe["requiredSecrets"] = serde_json::json!(reqs);
         std::fs::write(&path, describe.to_string()).unwrap();
     }
 
@@ -549,18 +577,24 @@ fn provider_pack_enriches_secrets_from_nested_gtpack() {
 
     build_pack(tmp.path(), &wasm, &out).unwrap();
 
-    // The published describe.json must carry the union, deduped and sorted.
+    // The published describe.json must carry the union in `requiredSecrets`,
+    // deduped and sorted by key — NOT in `permissions.secrets`.
     assert_eq!(
-        read_published_secrets(&out),
+        read_published_required_secrets(&out),
         vec!["A_TOKEN".to_string(), "B_TOKEN".to_string()],
-        "secrets must be auto-enriched from the nested .gtpack manifest"
+        "requiredSecrets must be auto-enriched from the nested .gtpack manifest"
+    );
+    assert!(
+        read_published_secrets(&out).is_empty(),
+        "permissions.secrets must not be populated by the enrichment step"
     );
 }
 
 #[test]
 fn provider_pack_merges_author_and_nested_secrets() {
     // Nested pack declares B_TOKEN, A_TOKEN; author already listed C_TOKEN and
-    // a duplicate A_TOKEN — result must be the deduped, sorted union.
+    // a duplicate A_TOKEN in requiredSecrets — result must be the deduped,
+    // sorted union in requiredSecrets (NOT in permissions.secrets).
     let tmp = tempfile::tempdir().unwrap();
     let wasm = make_provider_project_with_secret_pack(
         tmp.path(),
@@ -572,13 +606,17 @@ fn provider_pack_merges_author_and_nested_secrets() {
     build_pack(tmp.path(), &wasm, &out).unwrap();
 
     assert_eq!(
-        read_published_secrets(&out),
+        read_published_required_secrets(&out),
         vec![
             "A_TOKEN".to_string(),
             "B_TOKEN".to_string(),
             "C_TOKEN".to_string()
         ],
-        "published secrets must be the deduped, sorted union of author + nested keys"
+        "requiredSecrets must be the deduped, sorted union of author + nested keys"
+    );
+    assert!(
+        read_published_secrets(&out).is_empty(),
+        "permissions.secrets must not be populated by the enrichment step"
     );
 }
 
@@ -591,6 +629,10 @@ fn provider_pack_no_secrets_leaves_permissions_empty() {
 
     build_pack(tmp.path(), &wasm, &out).unwrap();
 
+    assert!(
+        read_published_required_secrets(&out).is_empty(),
+        "empty nested secret_requirements must leave requiredSecrets empty"
+    );
     assert!(
         read_published_secrets(&out).is_empty(),
         "empty nested secret_requirements must leave permissions.secrets empty"
