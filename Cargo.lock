@@ -1080,6 +1080,7 @@ dependencies = [
  "tracing-subscriber",
  "walkdir",
  "which",
+ "wiremock",
  "zip",
 ]
 
