@@ -1,3 +1,4 @@
+pub mod component;
 pub mod dev;
 pub mod disable;
 pub mod doctor;

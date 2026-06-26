@@ -24,6 +24,8 @@ struct Cli {
 enum Command {
     /// Validate an extension directory against the describe.json schema
     Validate(commands::validate::Args),
+    /// Register a component-tool by URL against greentic-designer-admin
+    Component(commands::component::Args),
     /// List installed extensions
     List(commands::list::Args),
     /// Install an extension from a registry or local .gtxpack
@@ -75,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Validate(args) => commands::validate::run(&args, &home),
+        Command::Component(args) => commands::component::run(args, &home).await,
         Command::List(args) => commands::list::run(args, &home),
         Command::Install(args) => commands::install::run(args, &home).await,
         Command::Keygen(args) => commands::keygen::run(&args, &home),

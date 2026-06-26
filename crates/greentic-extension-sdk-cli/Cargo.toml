@@ -61,6 +61,7 @@ anyhow = { workspace = true }
 greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "1.2.11-research" }
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
+wiremock = "0.6"
 
 [lints]
 workspace = true
