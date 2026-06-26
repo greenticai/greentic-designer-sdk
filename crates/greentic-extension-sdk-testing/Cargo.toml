@@ -10,7 +10,7 @@ description = "Test utilities for Greentic Designer Extensions"
 [dependencies]
 anyhow = { workspace = true }
 ciborium = { workspace = true }
-greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "1.2.14-research" }
+greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "1.2.15-research" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
