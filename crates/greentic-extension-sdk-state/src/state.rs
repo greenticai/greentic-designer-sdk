@@ -4,9 +4,40 @@ use std::path::{Path, PathBuf};
 
 const STATE_FILENAME: &str = "extensions-state.json";
 
+/// Per-extension update policy, keyed by bare extension `id` (NOT `id@version`).
+/// Additive in schema v1.1; absent in legacy v1.0 files (defaults apply).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtensionPolicy {
+    /// Cargo-like semver requirement: "^2.0", "~2.1", "=2.0.1", "*". `None` => "*".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+    #[serde(default)]
+    pub mode: UpdateMode,
+    /// Set after a failed upgrade to suppress auto-retry of a broken version
+    /// (manual retry still allowed). Honored by the Phase 3 reconciler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failed: Option<FailedUpgrade>,
+}
+
+/// `Manual` today; `Auto` is stored now but only honored from Phase 3.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMode {
+    #[default]
+    Manual,
+    Auto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailedUpgrade {
+    pub version: String,
+    pub reason: String,
+}
+
 /// Persistent enable/disable state for installed extensions.
 ///
 /// Schema v1.0 — keys in `default.enabled` use the format `<id>@<version>`.
+/// Schema v1.1 — adds `default.policies` keyed by bare `id`.
 /// Missing keys default to enabled. The `tenants` map is reserved for the
 /// future designer-admin track and is ignored by current readers.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -23,10 +54,13 @@ pub struct ExtensionState {
 pub struct ScopeState {
     #[serde(default)]
     pub enabled: HashMap<String, bool>,
+    /// Per-extension update policy, keyed by bare `id`. Added in schema v1.1.
+    #[serde(default)]
+    pub policies: HashMap<String, ExtensionPolicy>,
 }
 
 fn default_schema() -> String {
-    "1.0".to_string()
+    "1.1".to_string()
 }
 
 impl ExtensionState {
@@ -57,6 +91,37 @@ impl ExtensionState {
     pub fn set_enabled(&mut self, ext_id: &str, version: &str, enabled: bool) {
         let key = format!("{ext_id}@{version}");
         self.default.enabled.insert(key, enabled);
+    }
+
+    /// The update policy for `ext_id`, if one has been set.
+    #[must_use]
+    pub fn policy(&self, ext_id: &str) -> Option<&ExtensionPolicy> {
+        self.default.policies.get(ext_id)
+    }
+
+    /// The semver constraint for `ext_id`, defaulting to `"*"` (track latest).
+    #[must_use]
+    pub fn constraint_for(&self, ext_id: &str) -> &str {
+        self.default
+            .policies
+            .get(ext_id)
+            .and_then(|p| p.constraint.as_deref())
+            .unwrap_or("*")
+    }
+
+    /// Set (replace) the update policy for `ext_id`.
+    pub fn set_policy(&mut self, ext_id: &str, policy: ExtensionPolicy) {
+        self.default.policies.insert(ext_id.to_string(), policy);
+    }
+
+    /// Record a failed upgrade attempt for `ext_id`, preserving any existing
+    /// constraint/mode.
+    pub fn record_failed(&mut self, ext_id: &str, version: &str, reason: &str) {
+        let entry = self.default.policies.entry(ext_id.to_string()).or_default();
+        entry.last_failed = Some(FailedUpgrade {
+            version: version.to_string(),
+            reason: reason.to_string(),
+        });
     }
 
     /// Persist this state atomically to `<home>/extensions-state.json`.
