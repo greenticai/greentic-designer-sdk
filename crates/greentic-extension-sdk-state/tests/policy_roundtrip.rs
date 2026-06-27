@@ -52,6 +52,40 @@ fn record_failed_sets_marker() {
 }
 
 #[test]
+fn record_failed_preserves_existing_constraint_and_mode() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    ExtensionState::update(home, |s| {
+        s.set_policy(
+            "greentic.foo",
+            ExtensionPolicy {
+                constraint: Some("^2.0".into()),
+                mode: UpdateMode::Auto,
+                last_failed: None,
+            },
+        );
+    })
+    .unwrap();
+    ExtensionState::update(home, |s| {
+        s.record_failed("greentic.foo", "2.5.0", "load failed");
+    })
+    .unwrap();
+    let reloaded = ExtensionState::load(home).unwrap();
+    assert_eq!(reloaded.constraint_for("greentic.foo"), "^2.0");
+    assert_eq!(
+        reloaded.policy("greentic.foo").unwrap().mode,
+        UpdateMode::Auto
+    );
+    let lf = reloaded
+        .policy("greentic.foo")
+        .unwrap()
+        .last_failed
+        .clone()
+        .unwrap();
+    assert_eq!(lf.version, "2.5.0");
+}
+
+#[test]
 fn reads_legacy_schema_1_0_without_policies() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("extensions-state.json");

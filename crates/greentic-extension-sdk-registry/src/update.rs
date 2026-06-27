@@ -31,6 +31,12 @@ fn parse_constraint(constraint: &str) -> Result<VersionReq, String> {
 }
 
 /// Classify the installed version against the registry's offered versions.
+///
+/// Yanked-version exclusion is the responsibility of the registry's `list_versions`
+/// implementation — the Greentic store filters yanked versions server-side, so
+/// `resolve` does not re-filter. If a registry were to return yanked versions,
+/// the installer's yanked-guard in `lifecycle.rs` is the backstop: `gtdx update`
+/// would fail rather than install a yanked artifact.
 #[must_use]
 pub fn resolve(current: &str, available: &[String], constraint: &str) -> UpdateStatus {
     let current = match Version::parse(current) {
@@ -121,6 +127,11 @@ pub struct ExtensionUpdate {
 ///
 /// A registry error for one extension yields `Unknown`; it never panics and
 /// never returns a false `UpToDate`.
+///
+/// Yanked versions are not present in the list returned by `list_versions`
+/// (the Greentic store filters them server-side). If a registry implementation
+/// does return them, `resolve`'s caller chain ultimately hits the yanked-guard
+/// in `lifecycle.rs` before any artifact is written to disk.
 pub async fn check_updates<R: ExtensionRegistry + ?Sized, S: ::std::hash::BuildHasher>(
     registry: &R,
     installed: &[(ExtensionKind, String, String)],
@@ -243,5 +254,19 @@ mod tests {
         // Standard semver: a plain req does not match prereleases.
         let s = resolve("1.0.0", &v(&["1.0.0", "1.1.0-rc.1"]), "*");
         assert_eq!(s, UpdateStatus::UpToDate);
+    }
+
+    // Documents intended precedence: a newer out-of-range version is surfaced even
+    // under an exact pin when that pinned version is no longer in the registry.
+    #[test]
+    fn exact_pin_missing_from_registry_reports_out_of_range() {
+        let s = resolve("2.0.1", &v(&["2.1.0"]), "=2.0.1");
+        assert_eq!(
+            s,
+            UpdateStatus::OutOfRange {
+                latest: "2.1.0".into(),
+                constraint: "=2.0.1".into()
+            }
+        );
     }
 }
