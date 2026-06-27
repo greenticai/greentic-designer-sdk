@@ -7,4 +7,4 @@ mod error;
 mod state;
 
 pub use error::StateError;
-pub use state::ExtensionState;
+pub use state::{ExtensionPolicy, ExtensionState, FailedUpgrade, UpdateMode};
