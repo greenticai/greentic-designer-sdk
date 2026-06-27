@@ -14,12 +14,12 @@ pub struct ExtensionPolicy {
     #[serde(default)]
     pub mode: UpdateMode,
     /// Set after a failed upgrade to suppress auto-retry of a broken version
-    /// (manual retry still allowed). Honored by the Fase 3 reconciler.
+    /// (manual retry still allowed). Honored by the Phase 3 reconciler.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_failed: Option<FailedUpgrade>,
 }
 
-/// `Manual` today; `Auto` is stored now but only honored from Fase 3.
+/// `Manual` today; `Auto` is stored now but only honored from Phase 3.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateMode {
