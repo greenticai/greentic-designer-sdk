@@ -59,8 +59,7 @@ pub fn resolve(current: &str, available: &[String], constraint: &str) -> UpdateS
     // For `OutOfRange` reporting we only consider stable (non-prerelease) versions as
     // "latest", matching the conventional expectation that a prerelease cannot
     // displace a stable current install with an out-of-range signal.
-    let stable: Vec<&Version> = parsed.iter().filter(|v| v.pre.is_empty()).collect();
-    let latest_stable = stable.iter().copied().max().cloned();
+    let latest_stable = parsed.iter().filter(|v| v.pre.is_empty()).max().cloned();
 
     let target = parsed.iter().filter(|v| req.matches(v)).max().cloned();
 
