@@ -64,6 +64,8 @@ enum Command {
     Lint(commands::lint::Args),
     /// Check installed extensions for available updates
     Outdated(commands::outdated::Args),
+    /// Update installed extensions to the latest permitted version
+    Update(commands::update::Args),
     /// Print version
     Version,
 }
@@ -99,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Verify(args) => commands::verify::run(&args, &home),
         Command::Lint(args) => commands::lint::run(&args, &home),
         Command::Outdated(args) => commands::outdated::run(args, &home).await,
+        Command::Update(args) => commands::update::run(args, &home).await,
         Command::Version => {
             println!("gtdx {}", env!("CARGO_PKG_VERSION"));
             Ok(())

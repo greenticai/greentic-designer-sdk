@@ -16,6 +16,7 @@ pub mod registries;
 pub mod search;
 pub mod sign;
 pub mod uninstall;
+pub mod update;
 pub mod validate;
 pub mod verify;
 
