@@ -64,7 +64,10 @@ pub fn resolve(current: &str, available: &[String], constraint: &str) -> UpdateS
     let target = parsed.iter().filter(|v| req.matches(v)).max().cloned();
 
     // Early exit: exact pin where current == pin supersedes any newer out-of-range version.
-    if is_exact_pin(&req) && let Some(ref t) = target && t == &current {
+    if is_exact_pin(&req)
+        && let Some(ref t) = target
+        && t == &current
+    {
         return UpdateStatus::Pinned;
     }
 
@@ -75,7 +78,9 @@ pub fn resolve(current: &str, available: &[String], constraint: &str) -> UpdateS
         },
         // On (or above) the highest permitted version, or constraint excludes everything.
         Some(_) | None => {
-            if let Some(ref ls) = latest_stable && ls > &current {
+            if let Some(ref ls) = latest_stable
+                && ls > &current
+            {
                 return UpdateStatus::OutOfRange {
                     latest: ls.to_string(),
                     constraint: constraint.to_string(),
@@ -88,6 +93,81 @@ pub fn resolve(current: &str, available: &[String], constraint: &str) -> UpdateS
 
 fn is_exact_pin(req: &VersionReq) -> bool {
     req.comparators.len() == 1 && req.comparators[0].op == Op::Exact
+}
+
+// ── Async registry helpers ────────────────────────────────────────────────────
+
+use std::collections::HashMap;
+
+use greentic_extension_sdk_contract::ExtensionKind;
+
+use crate::error::RegistryError;
+use crate::lifecycle::{InstallOptions, Installer};
+use crate::registry::ExtensionRegistry;
+use crate::storage::Storage;
+
+/// One installed extension's update status against the registry.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExtensionUpdate {
+    pub id: String,
+    pub kind: ExtensionKind,
+    pub current: String,
+    #[serde(flatten)]
+    pub status: UpdateStatus,
+}
+
+/// For each installed `(kind, id, current_version)`, look up the registry's
+/// versions and classify against the per-id constraint (default `"*"`).
+///
+/// A registry error for one extension yields `Unknown`; it never panics and
+/// never returns a false `UpToDate`.
+pub async fn check_updates<R: ExtensionRegistry + ?Sized, S: ::std::hash::BuildHasher>(
+    registry: &R,
+    installed: &[(ExtensionKind, String, String)],
+    constraints: &HashMap<String, String, S>,
+) -> Vec<ExtensionUpdate> {
+    let mut out = Vec::with_capacity(installed.len());
+    for (kind, id, current) in installed {
+        let constraint = constraints.get(id).map_or("*", String::as_str);
+        let status = match registry.list_versions(id).await {
+            Ok(versions) => resolve(current, &versions, constraint),
+            Err(e) => UpdateStatus::Unknown {
+                reason: e.to_string(),
+            },
+        };
+        out.push(ExtensionUpdate {
+            id: id.clone(),
+            kind: *kind,
+            current: current.clone(),
+            status,
+        });
+    }
+    out
+}
+
+/// Install `target_version`, then remove the previous version's directory so a
+/// single version per id remains on disk (deterministic restart). No-op when
+/// the installed version already equals the target.
+///
+/// The old directory is removed **only after** the new install is committed, so
+/// a failed install never leaves the extension absent from disk.
+pub async fn upgrade<R: ExtensionRegistry + ?Sized>(
+    storage: &Storage,
+    registry: &R,
+    kind: ExtensionKind,
+    name: &str,
+    current_version: &str,
+    target_version: &str,
+    opts: InstallOptions,
+) -> Result<(), RegistryError> {
+    if current_version == target_version {
+        return Ok(());
+    }
+    let installer = Installer::new(storage.clone_shallow(), registry);
+    installer.install(name, target_version, opts).await?;
+    // Remove the old version only after the new one is committed on disk.
+    storage.remove_extension(kind, name, current_version)?;
+    Ok(())
 }
 
 #[cfg(test)]
