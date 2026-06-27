@@ -22,4 +22,15 @@ pub struct Tool {
     /// (e.g. `tavily/api_key`); the host URI is `secret://<key>`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secret_requirements: Vec<SecretRequirement>,
+    /// Human-readable description shown to the LLM alongside the tool. Absent →
+    /// the runtime surfaces an empty description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// JSON Schema (serialized as a string, mirroring `NodeType.config_schema`)
+    /// describing the tool's input arguments. Surfaced to the LLM as the
+    /// function `parameters` so the model knows what to send. Absent → the
+    /// runtime surfaces an empty schema (the tool is offered, but the model
+    /// cannot infer its arguments). Additive: older describes decode to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<String>,
 }
