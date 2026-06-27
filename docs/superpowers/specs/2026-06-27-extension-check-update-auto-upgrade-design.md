@@ -127,28 +127,52 @@ Rules:
 - A registry/network failure yields `Unknown { reason }` — **never** a false
   `UpToDate`.
 
-### 6.3 Upgrade executor (extend `lifecycle.rs`)
+### 6.3 Runtime constraints (verified in `greentic-ext-runtime`)
+
+The upgrade mechanism is **forced** by how the runtime actually behaves
+(verified, not assumed):
+
+- The runtime's loaded map is keyed by **bare `id`** — only ONE version per id is
+  live; the dir registered **last wins** (overwrite). No semver-highest logic.
+- The runtime **does NOT read `extensions-state.json`**; it only emits
+  `StateFileChanged`. So "flip active via the state file" does NOT switch
+  versions. (Designer enforces enable/disable via a `.disabled` marker file in the
+  extension dir; the CLI uses `extensions-state.json`. The new policy map is read
+  by both surfaces as metadata, independent of either enable mechanism.)
+- There is **no dry-run / load-probe API** and **no failure event**.
+- BUT `handle_added_or_modified` loads via `load_from_dir(dir)?` and only inserts
+  on success — so a new version that fails to compile/parse leaves the **old
+  version still loaded**. This gives automatic runtime-level rollback for load
+  failures.
+
+### 6.4 Upgrade executor (slice 1, design/mcp)
+
+Built from existing primitives only (`install_artifact_bytes` /
+`Installer::install` + polling `runtime.loaded()`); no `&mut` runtime access and
+no new runtime API.
 
 ```
 upgrade(id, kind, target_version):
-  1. resolve target artifact (reuse Installer::install fetch + verify + stage)
-  2. install to NEW versioned dir <name>-<target>/   (old dir untouched)
-  3. load-probe(<target>): instantiate the new component WITHOUT making it active
-        fail  -> delete staged dir; old stays active; return Err   (rollback)
-        ok    -> continue
-  4. commit/swap: flip active in extensions-state.json
-        (enabled[id@target]=true, enabled[id@current]=false)
-        watcher reloads
-  5. post-commit health check:
-        unhealthy -> flip back to old version (still on disk)
-                     + set policy.last_failed{version,reason}
-                     (manual retry allowed; auto-retry suppressed)
+  1. record current_version (from runtime.loaded()[id] / installed scan)
+  2. download + install target into <name>-<target>/   (atomic; old dir present)
+  3. watcher auto-loads the new dir:
+       - load OK  -> map switches to target (ExtensionUpdated emitted)
+       - load ERR -> map keeps old loaded (runtime-level auto-rollback)
+  4. verify: poll runtime.loaded()[id].version for up to T seconds
+       == target  -> SUCCESS: remove the OLD version dir
+                     (one version per id on disk => deterministic restart)
+       == current -> FAILURE: remove the broken <name>-<target>/ dir,
+                     set policy.last_failed{version,reason}; old stays active
 ```
 
-The previous version is never deleted during upgrade, so rollback is always a
-state flip back to an on-disk directory.
+Rationale for removing the old dir on success: because selection is
+last-writer-wins and the runtime ignores the state file, leaving two versioned
+dirs on disk makes the next restart non-deterministic. Slice 1 therefore keeps
+exactly one version per id on disk. Rollback after a *successful* upgrade is a
+fresh downgrade-install, not a dir flip. The FAILED-upgrade path needs no flip —
+the runtime never left the old version.
 
-### 6.4 Surfaces (Fase 1)
+### 6.5 Surfaces (Fase 1)
 
 **Designer backend** (`greentic-designer/src/ui/routes/store.rs`):
 - Extend `list_installed()` to compute and return `updateStatus` + `target` per
@@ -167,7 +191,7 @@ state flip back to an on-disk directory.
 - `gtdx outdated` — table: id, kind, current, target, status.
 - `gtdx update <id>` / `gtdx update --all` — manual upgrade with rollback.
 
-### 6.5 Per-family reload behavior
+### 6.6 Per-family reload behavior
 
 | Kind | Reload | Slice-1 action |
 |---|---|---|
@@ -188,14 +212,15 @@ Designer "Installed" tab / `gtdx outdated`
   -> UpdateStatus per ext            -> UI badge / CLI table
 ```
 
-**Manual upgrade (write, design/mcp):** see §6.3.
+**Manual upgrade (write, design/mcp):** see §6.4.
 
 ## 8. Error handling
 
 - No silent failure (project standard): check-time registry/network errors →
   explicit `Unknown` status, never a false `UpToDate`.
 - Signature/integrity failure → abort upgrade, explicit error, old version intact.
-- Probe/health failure → auto-rollback + `last_failed` marker.
+- New version fails to load → runtime keeps old version active (auto-rollback);
+  executor removes the broken new dir and records `last_failed`.
 - `thiserror`/`anyhow`; English logs/traces; no `unwrap()` / `panic!()` on
   production paths.
 
@@ -204,7 +229,8 @@ Designer "Installed" tab / `gtdx outdated`
 - `VersionResolver`: unit-test matrix (version lists × constraints → expected
   status), including yanked, prerelease, out-of-range, and unknown.
 - Upgrade executor: integration test with a mock registry — **must** cover
-  probe-fail → rollback and commit-then-unhealthy → flip-back.
+  load-fail → old version stays active + broken new dir removed + `last_failed`
+  set, and success → new version active + old dir removed.
 - State schema: serde round-trip + backward-compat read of `"1.0"`.
 - Designer route test (`list_installed` status field + upgrade endpoint).
 - CLI test (`outdated` / `update`).
