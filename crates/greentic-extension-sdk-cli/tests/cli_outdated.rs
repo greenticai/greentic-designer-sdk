@@ -58,4 +58,9 @@ fn outdated_lists_installed_extension_as_unknown_without_registry() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(stdout.contains("greentic.foo"), "stdout was: {stdout}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not configured")
+            || stdout.contains("not configured"),
+        "expected a 'not configured' signal"
+    );
 }

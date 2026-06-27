@@ -41,34 +41,35 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     // the command always exits 0.
     let updates: Vec<ExtensionUpdate> = {
         let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
-        match cfg.registries.iter().find(|r| r.name == reg_name) {
-            Some(entry) => {
-                let token = entry
-                    .token_env
-                    .as_deref()
-                    .and_then(|e| std::env::var(e).ok());
-                let reg = greentic_extension_sdk_registry::store::GreenticStoreRegistry::new(
-                    &entry.name,
-                    &entry.url,
-                    token,
-                )
-                .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
-                check_updates(&reg, &triples, &constraints).await
-            }
-            None => {
-                // No matching registry configured — report every extension as Unknown.
-                triples
-                    .iter()
-                    .map(|(kind, id, current)| ExtensionUpdate {
-                        id: id.clone(),
-                        kind: *kind,
-                        current: current.clone(),
-                        status: UpdateStatus::Unknown {
-                            reason: format!("registry '{reg_name}' not configured"),
-                        },
-                    })
-                    .collect()
-            }
+        if let Some(entry) = cfg.registries.iter().find(|r| r.name == reg_name) {
+            let token = entry
+                .token_env
+                .as_deref()
+                .and_then(|e| std::env::var(e).ok());
+            let reg = greentic_extension_sdk_registry::store::GreenticStoreRegistry::new(
+                &entry.name,
+                &entry.url,
+                token,
+            )
+            .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
+            check_updates(&reg, &triples, &constraints).await
+        } else {
+            // No matching registry configured — report every extension as Unknown.
+            eprintln!(
+                "warning: registry '{reg_name}' not configured; update status is unknown. \
+                 Run `gtdx registries` to configure a store."
+            );
+            triples
+                .iter()
+                .map(|(kind, id, current)| ExtensionUpdate {
+                    id: id.clone(),
+                    kind: *kind,
+                    current: current.clone(),
+                    status: UpdateStatus::Unknown {
+                        reason: format!("registry '{reg_name}' not configured"),
+                    },
+                })
+                .collect()
         }
     };
 
