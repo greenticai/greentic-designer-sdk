@@ -55,6 +55,26 @@ fn unknown_contributions_key_fails_schema() {
 }
 
 #[test]
+fn guardrails_contribution_passes_schema_and_typed_parse() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["guardrails"] = serde_json::json!([
+        { "export": "greentic:extension-design/guardrail.evaluate", "runtime_ref": "x" }
+    ]);
+
+    // JSON-schema layer must allow the guardrails contribution.
+    validate_describe_v2(&v).expect("guardrails contribution should pass describe-v2 schema");
+
+    // Typed (deny_unknown_fields) layer must parse it into the struct.
+    let parsed: DescribeJson =
+        serde_json::from_value(v).expect("guardrails contribution should parse typed");
+    assert_eq!(parsed.contributions.guardrails.len(), 1);
+    assert_eq!(
+        parsed.contributions.guardrails[0].export,
+        "greentic:extension-design/guardrail.evaluate"
+    );
+}
+
+#[test]
 fn manifest_sha256_valid_hex_passes_schema() {
     let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
     let valid_sha256 = "a".repeat(64);

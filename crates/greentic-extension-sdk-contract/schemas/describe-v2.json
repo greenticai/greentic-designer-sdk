@@ -78,6 +78,18 @@
         "schemas": {
           "type": "array",
           "items": {}
+        },
+        "guardrails": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["export"],
+            "properties": {
+              "export": { "type": "string" },
+              "runtime_ref": { "type": "string" }
+            }
+          }
         }
       }
     },
