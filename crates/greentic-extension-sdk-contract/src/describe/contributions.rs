@@ -1,8 +1,9 @@
-//! Typed `contributions` block. Seven children, each its own typed list.
+//! Typed `contributions` block. Eight children, each its own typed list.
 
 use serde::{Deserialize, Serialize};
 
 pub mod dw_provider;
+pub mod guardrail;
 pub mod knowledge;
 pub mod node_type;
 pub mod prompt;
@@ -11,6 +12,7 @@ pub mod schema;
 pub mod tool;
 
 pub use dw_provider::DwProvider;
+pub use guardrail::Guardrail;
 pub use knowledge::Knowledge;
 pub use node_type::{NodeType, OutputPort};
 pub use prompt::Prompt;
@@ -35,6 +37,8 @@ pub struct Contributions {
     pub schemas: Vec<Schema>,
     #[serde(rename = "dwProviders", default, skip_serializing_if = "Vec::is_empty")]
     pub dw_providers: Vec<DwProvider>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guardrails: Vec<Guardrail>,
 }
 
 #[cfg(test)]
