@@ -248,6 +248,16 @@ pub struct Permissions {
     /// the extension may not call the LLM host import at all.
     #[serde(rename = "llmRoles", default, skip_serializing_if = "Vec::is_empty")]
     pub llm_roles: Vec<String>,
+    /// OAuth provider ids (e.g. `"hubspot"`) this extension is allowed to request
+    /// tokens for via the host `greentic:oauth-broker/broker-v1` import. The host
+    /// rejects `get-token` for any provider not listed here; an empty list means
+    /// the extension may not call the OAuth broker import at all.
+    #[serde(
+        rename = "oauthProviders",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub oauth_providers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -330,5 +340,21 @@ mod engine_optional_tests {
         let doc = minimal_describe_json(true);
         let parsed: DescribeJson = serde_json::from_value(doc).expect("must parse with engine");
         assert!(parsed.engine.is_some());
+    }
+
+    #[test]
+    fn permissions_parses_oauth_providers() {
+        let json = r#"{ "network": [], "secrets": [], "oauthProviders": ["hubspot"] }"#;
+        let p: Permissions = serde_json::from_str(json).unwrap();
+        assert_eq!(p.oauth_providers, vec!["hubspot".to_string()]);
+    }
+
+    #[test]
+    fn permissions_oauth_providers_defaults_empty_and_is_skipped_when_empty() {
+        let json = r#"{ "network": [], "secrets": [] }"#;
+        let p: Permissions = serde_json::from_str(json).unwrap();
+        assert!(p.oauth_providers.is_empty());
+        let out = serde_json::to_string(&p).unwrap();
+        assert!(!out.contains("oauthProviders"), "got: {out}");
     }
 }
