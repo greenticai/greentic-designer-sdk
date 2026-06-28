@@ -5,6 +5,8 @@
 mod atomic;
 mod error;
 mod state;
+pub mod update;
 
 pub use error::StateError;
 pub use state::{ExtensionPolicy, ExtensionState, FailedUpgrade, UpdateMode};
+pub use update::{UpdateStatus, resolve};
