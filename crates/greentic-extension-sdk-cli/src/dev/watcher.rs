@@ -56,7 +56,14 @@ pub struct WatchHandle {
 /// of project-relative paths.
 pub fn spawn_watcher(project_dir: &Path, debounce: Duration) -> anyhow::Result<WatchHandle> {
     let (tx, rx) = mpsc::channel();
-    let root = project_dir.to_path_buf();
+    // Canonicalize the root so `strip_prefix` matches notify's canonicalized
+    // event paths. On macOS, `tempfile::tempdir()` returns paths under
+    // /var/folders/... which are symlinks to /private/var/folders/...;
+    // notify emits the resolved path, so the un-canonicalized prefix would
+    // never match and events would be silently dropped.
+    let root = project_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_dir.to_path_buf());
     let debouncer = new_debouncer(debounce, None, move |res: DebounceEventResult| {
         let Ok(events) = res else {
             return;

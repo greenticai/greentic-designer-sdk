@@ -19,12 +19,28 @@ fn rejects_missing_colon() {
 fn capability_ref_version_req_is_semver() {
     let cr: CapabilityRef =
         serde_json::from_str(r#"{"id":"greentic:host/logging","version":"^1.0.0"}"#).unwrap();
-    assert!(cr.version_req().matches(&"1.5.0".parse().unwrap()));
-    assert!(!cr.version_req().matches(&"2.0.0".parse().unwrap()));
+    let req = cr.version_req().unwrap();
+    assert!(req.matches(&"1.5.0".parse().unwrap()));
+    assert!(!req.matches(&"2.0.0".parse().unwrap()));
 }
 
 #[test]
 fn wildcard_all_version_matches_everything() {
     let cr: CapabilityRef = serde_json::from_str(r#"{"id":"x:y/z","version":"*"}"#).unwrap();
-    assert!(cr.version_req().matches(&"999.999.999".parse().unwrap()));
+    assert!(
+        cr.version_req()
+            .unwrap()
+            .matches(&"999.999.999".parse().unwrap())
+    );
+}
+
+#[test]
+fn version_req_rejects_garbage_instead_of_star() {
+    let bad: CapabilityRef =
+        serde_json::from_str(r#"{"id":"greentic:host/logging","version":"not-a-semver-req"}"#)
+            .unwrap();
+    assert!(
+        bad.version_req().is_err(),
+        "malformed version must NOT silently become *"
+    );
 }

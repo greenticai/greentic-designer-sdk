@@ -1,10 +1,41 @@
+use std::fmt;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use clap::Args as ClapArgs;
+use clap::ValueEnum;
+use dialoguer::{Confirm, Input, Select};
 
 use crate::dev::builder::Profile;
 use crate::dev::project_dir_from_manifest;
 use crate::publish::{PublishConfig, PublishOutcome, run_publish};
+
+/// Trust policy recorded on the publish receipt. Validated at parse time so an
+/// unknown value (e.g. `--trust banana`) is rejected by clap with the list of
+/// valid options, instead of being silently passed through as a free string.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+#[value(rename_all = "lower")]
+pub enum TrustArg {
+    Loose,
+    Normal,
+    Strict,
+}
+
+impl TrustArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Loose => "loose",
+            Self::Normal => "normal",
+            Self::Strict => "strict",
+        }
+    }
+}
+
+impl fmt::Display for TrustArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(ClapArgs, Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -23,17 +54,27 @@ pub struct Args {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Sign .gtxpack with local key from ~/.greentic/keys/.
+    /// Sign .gtxpack (requires a key via --key, --key-id, or --key-env).
     #[arg(long)]
     pub sign: bool,
 
-    /// Signing key id (requires --sign).
+    /// Signing key id. Loads the PKCS8 PEM at ~/.greentic/keys/<id>.key and
+    /// labels the signature with <id>. Ignored when --key is given.
     #[arg(long)]
     pub key_id: Option<String>,
 
+    /// Explicit PKCS8 PEM signing-key file (overrides --key-id).
+    #[arg(long)]
+    pub key: Option<PathBuf>,
+
+    /// Read the PKCS8 PEM signing key from this env var when no file/key-id is
+    /// given (CI / headless). Default: `GREENTIC_EXT_SIGNING_KEY_PEM`.
+    #[arg(long, default_value = crate::signing::DEFAULT_KEY_ENV)]
+    pub key_env: String,
+
     /// loose | normal | strict
-    #[arg(long, default_value = "loose")]
-    pub trust: String,
+    #[arg(long, value_enum, default_value_t = TrustArg::Loose)]
+    pub trust: TrustArg,
 
     /// Copy artifact here as well.
     #[arg(long, default_value = "./dist")]
@@ -64,12 +105,34 @@ pub struct Args {
     /// order), then anonymous.
     #[arg(long)]
     pub oci_token: Option<String>,
+
+    /// Pack this pre-built `wasm32-wasip2` component instead of running
+    /// `cargo component build`. For externally produced components (e.g. a
+    /// generated MCP component). The describe.json in --manifest's directory
+    /// still drives the pack; only the build step is bypassed.
+    #[arg(long, value_name = "PATH")]
+    pub wasm: Option<PathBuf>,
+
+    /// Interactive wizard: prompt for registry, mode, signing and trust
+    /// instead of requiring the full flag string. Opt-in (publish keeps its
+    /// scripted defaults unless this is set).
+    #[arg(short = 'w', long)]
+    pub wizard: bool,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
-    if args.sign {
+    let args = if args.wizard {
+        if !std::io::stdin().is_terminal() {
+            anyhow::bail!("--wizard requires an interactive terminal");
+        }
+        run_wizard(args)?
+    } else {
+        args
+    };
+    if args.sign && args.key.is_none() && args.key_id.is_none() {
         eprintln!(
-            "warning: Phase 1 signing reuses Wave 1 JCS sign_describe. Safe to use, but key management + rotation land in Phase 2."
+            "note: --sign with no --key/--key-id; reading PKCS8 PEM from ${}",
+            args.key_env
         );
     }
     let project_dir = project_dir_from_manifest(&args.manifest)?;
@@ -88,10 +151,13 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         force: args.force,
         sign: args.sign,
         key_id: args.key_id,
+        key_path: args.key,
+        key_env: args.key_env,
         version_override: args.version,
-        trust_policy: args.trust,
+        trust_policy: args.trust.as_str().to_string(),
         verify_only: args.verify_only,
         oci_token: args.oci_token,
+        wasm_override: args.wasm,
     };
     match run_publish(&cfg).await {
         Ok(outcome) => {
@@ -103,6 +169,161 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
             std::process::exit(err.exit_code());
         }
     }
+}
+
+/// Interactively fill in publish options, using the supplied `args` as
+/// defaults. Returns an updated `Args` that the normal `run` path consumes, so
+/// the wizard never duplicates publish logic — it only gathers inputs.
+fn run_wizard(mut args: Args) -> anyhow::Result<Args> {
+    println!("gtdx publish — interactive wizard (press Enter to accept defaults)\n");
+
+    args.registry = Input::<String>::new()
+        .with_prompt("Registry (local | file://… | oci://… | named entry)")
+        .default(args.registry.clone())
+        .interact_text()?;
+
+    let modes = [
+        "Publish for real",
+        "Dry-run (build + pack, no upload)",
+        "Verify-only (check version slot, no build)",
+    ];
+    let default_mode = if args.dry_run {
+        1
+    } else if args.verify_only {
+        2
+    } else {
+        0
+    };
+    let mode = Select::new()
+        .with_prompt("Mode")
+        .items(&modes)
+        .default(default_mode)
+        .interact()?;
+    args.dry_run = mode == 1;
+    args.verify_only = mode == 2;
+
+    let version = Input::<String>::new()
+        .with_prompt("Version override (blank = use describe.json)")
+        .allow_empty(true)
+        .default(args.version.clone().unwrap_or_default())
+        .interact_text()?;
+    let version = version.trim();
+    args.version = (!version.is_empty()).then(|| version.to_string());
+
+    // Signing is meaningless when no artifact is produced (verify-only).
+    if !args.verify_only {
+        prompt_signing(&mut args)?;
+    }
+
+    let trusts = [TrustArg::Loose, TrustArg::Normal, TrustArg::Strict];
+    let trust_labels = ["loose", "normal", "strict"];
+    let default_trust = trusts.iter().position(|t| *t == args.trust).unwrap_or(0);
+    let trust = Select::new()
+        .with_prompt("Trust policy")
+        .items(&trust_labels)
+        .default(default_trust)
+        .interact()?;
+    args.trust = trusts[trust];
+
+    args.force = Confirm::new()
+        .with_prompt("Overwrite an existing version if present?")
+        .default(args.force)
+        .interact()?;
+
+    print_publish_summary(&args, modes[mode]);
+    let proceed = Confirm::new()
+        .with_prompt("Proceed?")
+        .default(true)
+        .interact()?;
+    if !proceed {
+        anyhow::bail!("cancelled by user");
+    }
+    Ok(args)
+}
+
+fn prompt_signing(args: &mut Args) -> anyhow::Result<()> {
+    args.sign = Confirm::new()
+        .with_prompt("Sign the .gtxpack?")
+        .default(args.sign)
+        .interact()?;
+    if !args.sign {
+        return Ok(());
+    }
+    let sources = [
+        "Key file (PKCS8 PEM path)".to_string(),
+        "Key id (~/.greentic/keys/<id>.key)".to_string(),
+        format!("Env var (${})", args.key_env),
+    ];
+    let default_source = if args.key.is_some() {
+        0
+    } else if args.key_id.is_some() {
+        1
+    } else {
+        2
+    };
+    let source = Select::new()
+        .with_prompt("Signing key source")
+        .items(&sources)
+        .default(default_source)
+        .interact()?;
+    match source {
+        0 => {
+            let path = Input::<String>::new()
+                .with_prompt("PKCS8 PEM key file path")
+                .default(
+                    args.key
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                )
+                .interact_text()?;
+            args.key = Some(PathBuf::from(path.trim()));
+            args.key_id = None;
+        }
+        1 => {
+            let id = Input::<String>::new()
+                .with_prompt("Key id")
+                .default(args.key_id.clone().unwrap_or_default())
+                .interact_text()?;
+            args.key_id = Some(id.trim().to_string());
+            args.key = None;
+        }
+        _ => {
+            let env = Input::<String>::new()
+                .with_prompt("Env var holding the PKCS8 PEM")
+                .default(args.key_env.clone())
+                .interact_text()?;
+            args.key_env = env.trim().to_string();
+            args.key = None;
+            args.key_id = None;
+        }
+    }
+    Ok(())
+}
+
+fn print_publish_summary(args: &Args, mode_label: &str) {
+    println!("\nAbout to publish:");
+    println!("  registry  {}", args.registry);
+    println!("  mode      {mode_label}");
+    println!(
+        "  version   {}",
+        args.version
+            .clone()
+            .unwrap_or_else(|| "(from describe.json)".to_string())
+    );
+    println!("  sign      {}", args.sign);
+    if args.sign {
+        let key = if let Some(path) = &args.key {
+            format!("file {}", path.display())
+        } else if let Some(id) = &args.key_id {
+            format!("key-id {id}")
+        } else {
+            format!("env ${}", args.key_env)
+        };
+        println!("  key       {key}");
+    }
+    println!("  trust     {}", args.trust);
+    println!("  force     {}", args.force);
 }
 
 fn render_outcome(format: &str, outcome: &PublishOutcome) -> anyhow::Result<()> {

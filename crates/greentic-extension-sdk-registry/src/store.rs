@@ -6,11 +6,17 @@ use crate::error::RegistryError;
 use crate::registry::ExtensionRegistry;
 use crate::types::{ExtensionArtifact, ExtensionMetadata, ExtensionSummary, SearchQuery};
 
+/// Upper bound on a downloaded artifact (256 MiB). Caps memory use so a
+/// malicious or misbehaving registry cannot OOM the client with a huge body.
+const DEFAULT_MAX_ARTIFACT_BYTES: usize = 256 * 1024 * 1024;
+
 pub struct GreenticStoreRegistry {
     name: String,
     base_url: String,
     token: Option<String>,
     client: Client,
+    max_artifact_bytes: usize,
+    insecure_allowed: bool,
 }
 
 impl GreenticStoreRegistry {
@@ -23,11 +29,29 @@ impl GreenticStoreRegistry {
             name: name.into(),
             base_url: base_url.into(),
             token,
-            client: Client::builder()
-                .user_agent(concat!("gtdx/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .expect("reqwest client"),
+            client: build_secure_client(),
+            max_artifact_bytes: DEFAULT_MAX_ARTIFACT_BYTES,
+            insecure_allowed: false,
         }
+    }
+
+    /// Override the maximum downloadable artifact size (bytes).
+    #[must_use]
+    pub fn with_max_artifact_bytes(mut self, limit: usize) -> Self {
+        self.max_artifact_bytes = limit;
+        self
+    }
+
+    /// Opt-in to talk to a non-HTTPS, non-loopback registry URL. Required for
+    /// publishing into a Greentic Store that has not yet been fronted by TLS;
+    /// off by default because anything that *can* be reached over HTTPS *must*
+    /// be (otherwise the bearer token + signed describe travel in cleartext).
+    /// Callers should only set this when they have out-of-band assurance that
+    /// the network path is trusted (private VPC, SSH tunnel, dev loopback).
+    #[must_use]
+    pub fn with_insecure_allowed(mut self, allowed: bool) -> Self {
+        self.insecure_allowed = allowed;
+        self
     }
 
     #[must_use]
@@ -45,6 +69,12 @@ impl GreenticStoreRegistry {
         } else {
             req
         }
+    }
+
+    /// Guard called before every network request so an insecure base URL can
+    /// never leak a bearer token or fetch an artifact over cleartext http.
+    fn ensure_secure_url(&self) -> Result<(), RegistryError> {
+        validate_registry_url(&self.base_url, self.insecure_allowed)
     }
 }
 
@@ -92,6 +122,67 @@ struct PublishResponseDto {
     published_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// Reject registry URLs that would send bearer tokens or download artifacts in
+/// cleartext. `https://` is always allowed; `http://` is allowed only for
+/// loopback hosts (`localhost` / `127.0.0.1` / `::1`) to keep local dev and
+/// tests working. Callers that have out-of-band assurance the path is trusted
+/// (private VPC, SSH tunnel, the migration window before a Store gets TLS)
+/// can pass `allow_insecure = true` to opt back into cleartext.
+/// Build the HTTP client without panicking, while preserving the security
+/// invariant that we never auto-follow redirects: an HTTPS endpoint that 3xx's
+/// to `http://` would otherwise pull the artifact/body over cleartext, bypassing
+/// the scheme check on the configured URL (audit N5). The degraded fallback
+/// keeps `Policy::none()`; only a total TLS-backend failure (where no request
+/// could succeed anyway) drops to the bare default, and that is logged.
+fn build_secure_client() -> Client {
+    let no_redirect = || reqwest::redirect::Policy::none();
+    Client::builder()
+        .user_agent(concat!("gtdx/", env!("CARGO_PKG_VERSION")))
+        .redirect(no_redirect())
+        .build()
+        .or_else(|_| Client::builder().redirect(no_redirect()).build())
+        .unwrap_or_else(|e| {
+            tracing::error!(
+                "failed to build a redirect-restricted HTTP client ({e}); \
+                 falling back to the default client (redirects may be followed)"
+            );
+            Client::new()
+        })
+}
+
+fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), RegistryError> {
+    if let Some(rest) = url.strip_prefix("https://") {
+        if rest.is_empty() {
+            return Err(RegistryError::InsecureRegistryUrl(url.into()));
+        }
+        return Ok(());
+    }
+    if let Some(rest) = url.strip_prefix("http://") {
+        let host = rest
+            .split(['/', ':'])
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(']')
+            .trim_start_matches('[');
+        if matches!(host, "localhost" | "127.0.0.1" | "::1") {
+            return Ok(());
+        }
+        if allow_insecure {
+            // The opt-in escape hatch is downgrading a non-loopback request to
+            // cleartext — the bearer token and signed describe cross the wire
+            // unencrypted. Make that auditable rather than silent (audit N6).
+            tracing::warn!(
+                host,
+                "GTDX_ALLOW_INSECURE_REGISTRY: talking to remote registry over plaintext HTTP; \
+                 credentials and artifacts are NOT encrypted in transit"
+            );
+            return Ok(());
+        }
+        return Err(RegistryError::InsecureRegistryUrl(url.into()));
+    }
+    Err(RegistryError::InsecureRegistryUrl(url.into()))
+}
+
 fn extract_existing_sha(body: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     v.get("existing_sha")
@@ -107,6 +198,7 @@ impl ExtensionRegistry for GreenticStoreRegistry {
     }
 
     async fn search(&self, query: SearchQuery) -> Result<Vec<ExtensionSummary>, RegistryError> {
+        self.ensure_secure_url()?;
         let mut req = self.client.get(self.url("/api/v1/extensions"));
         if let Some(k) = query.kind {
             req = req.query(&[("kind", k.dir_name())]);
@@ -138,6 +230,7 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         name: &str,
         version: &str,
     ) -> Result<ExtensionMetadata, RegistryError> {
+        self.ensure_secure_url()?;
         let resp = self
             .with_auth(
                 self.client
@@ -163,18 +256,48 @@ impl ExtensionRegistry for GreenticStoreRegistry {
     }
 
     async fn fetch(&self, name: &str, version: &str) -> Result<ExtensionArtifact, RegistryError> {
+        self.ensure_secure_url()?;
         let metadata = self.metadata(name, version).await?;
-        let bytes = self
+        let mut response = self
             .with_auth(
                 self.client
                     .get(self.url(&format!("/api/v1/extensions/{name}/{version}/artifact"))),
             )
             .send()
             .await?
-            .error_for_status()?
-            .bytes()
-            .await?
-            .to_vec();
+            .error_for_status()?;
+
+        // Read the body in chunks with a hard size cap so a huge (or zip-bomb)
+        // response cannot exhaust memory before we ever inspect it.
+        let mut bytes: Vec<u8> = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if bytes.len() + chunk.len() > self.max_artifact_bytes {
+                return Err(RegistryError::ArtifactTooLarge {
+                    limit: self.max_artifact_bytes,
+                });
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+
+        // Verify the downloaded bytes against the digest the registry advertised
+        // in its metadata. This catches truncation, corruption, and an artifact
+        // swapped on the (separate) artifact endpoint. It does NOT establish
+        // publisher trust — that is the trust-root work tracked under D.5.
+        // Constant-time compare so a forged digest can't be probed byte-by-byte
+        // via response timing (audit P0-3).
+        //
+        // Hash on a blocking thread: this runs over up to `max_artifact_bytes`
+        // (256 MiB by default), which would otherwise stall the async runtime
+        // worker (audit cycle-2 P3). Move the bytes in and hand them back to
+        // avoid a copy.
+        let (bytes, computed) = tokio::task::spawn_blocking(move || {
+            let computed = greentic_extension_sdk_contract::artifact_sha256(&bytes);
+            (bytes, computed)
+        })
+        .await
+        .map_err(|e| RegistryError::Storage(format!("hash task failed: {e}")))?;
+        crate::digest::verify_digest(&metadata.artifact_sha256, &computed)?;
+
         Ok(ExtensionArtifact {
             name: metadata.name,
             version: metadata.version,
@@ -188,6 +311,7 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         &self,
         req: crate::publish::PublishRequest,
     ) -> Result<crate::publish::PublishReceipt, RegistryError> {
+        self.ensure_secure_url()?;
         let token = self.token.as_deref().ok_or_else(|| {
             RegistryError::AuthRequired(format!(
                 "no token configured for registry '{}'; run: gtdx login --registry {}",
@@ -246,7 +370,10 @@ impl ExtensionRegistry for GreenticStoreRegistry {
                 "store publish failed: {status} {body}"
             )));
         }
-        let dto: PublishResponseDto = resp.json().await.unwrap_or_default();
+        // Propagate a decode error rather than `unwrap_or_default()`: a 2xx with
+        // a malformed/empty body must not fabricate a success receipt from
+        // client-side fallbacks (audit cycle-1 P1-5).
+        let dto: PublishResponseDto = resp.json().await?;
         Ok(crate::publish::PublishReceipt {
             url: dto.url.unwrap_or_else(|| {
                 format!(
@@ -269,6 +396,7 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         struct Dto {
             versions: Vec<String>,
         }
+        self.ensure_secure_url()?;
         let resp = self
             .with_auth(
                 self.client
@@ -281,5 +409,77 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         }
         let dto: Dto = resp.error_for_status()?.json().await?;
         Ok(dto.versions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GreenticStoreRegistry, validate_registry_url};
+    use crate::error::RegistryError;
+    use crate::registry::ExtensionRegistry;
+    use crate::types::SearchQuery;
+
+    #[test]
+    fn https_url_is_allowed() {
+        assert!(validate_registry_url("https://store.greentic.ai", false).is_ok());
+    }
+
+    #[test]
+    fn http_localhost_is_allowed() {
+        assert!(validate_registry_url("http://127.0.0.1:8080", false).is_ok());
+        assert!(validate_registry_url("http://localhost:3000/api", false).is_ok());
+    }
+
+    #[test]
+    fn http_remote_is_rejected() {
+        assert!(matches!(
+            validate_registry_url("http://store.greentic.ai", false),
+            Err(RegistryError::InsecureRegistryUrl(_))
+        ));
+    }
+
+    #[test]
+    fn http_remote_allowed_when_insecure_opt_in() {
+        // Escape hatch for trusted-path Stores that have not been fronted by
+        // TLS yet. `allow_insecure = true` must let the URL through even when
+        // the host is neither HTTPS nor loopback.
+        assert!(validate_registry_url("http://62.171.174.152:3030", true).is_ok());
+        assert!(validate_registry_url("http://store.greentic.ai", true).is_ok());
+    }
+
+    #[test]
+    fn non_http_scheme_is_rejected_even_with_opt_in() {
+        // The escape hatch is for `http://` only. Anything else (ftp, raw
+        // hostname) is still a hard reject — the opt-in does not turn off
+        // scheme parsing.
+        assert!(matches!(
+            validate_registry_url("ftp://store.greentic.ai", false),
+            Err(RegistryError::InsecureRegistryUrl(_))
+        ));
+        assert!(matches!(
+            validate_registry_url("ftp://store.greentic.ai", true),
+            Err(RegistryError::InsecureRegistryUrl(_))
+        ));
+        assert!(matches!(
+            validate_registry_url("store.greentic.ai", false),
+            Err(RegistryError::InsecureRegistryUrl(_))
+        ));
+        assert!(matches!(
+            validate_registry_url("store.greentic.ai", true),
+            Err(RegistryError::InsecureRegistryUrl(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn insecure_url_refuses_network_request() {
+        // A registry pointed at a cleartext remote must refuse before sending,
+        // so a bearer token never crosses the wire.
+        let reg =
+            GreenticStoreRegistry::new("evil", "http://store.greentic.ai", Some("secret".into()));
+        let err = reg.search(SearchQuery::default()).await.unwrap_err();
+        assert!(
+            matches!(err, RegistryError::InsecureRegistryUrl(_)),
+            "expected InsecureRegistryUrl, got {err}"
+        );
     }
 }

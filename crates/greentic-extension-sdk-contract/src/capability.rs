@@ -56,14 +56,22 @@ impl fmt::Display for CapabilityId {
 pub type CapabilityVersion = semver::Version;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilityRef {
     pub id: CapabilityId,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<crate::deprecated::Deprecated>,
 }
 
 impl CapabilityRef {
-    #[must_use]
-    pub fn version_req(&self) -> VersionReq {
-        VersionReq::parse(&self.version).unwrap_or(VersionReq::STAR)
+    /// Parse the version requirement. Fails closed — a malformed string is an
+    /// error, never a silent `*` match-everything (audit M2).
+    ///
+    /// # Errors
+    /// `MalformedVersion` if `self.version` is not a valid semver requirement.
+    pub fn version_req(&self) -> Result<VersionReq, ContractError> {
+        VersionReq::parse(&self.version)
+            .map_err(|e| ContractError::MalformedVersion(format!("{}: {e}", self.version)))
     }
 }
