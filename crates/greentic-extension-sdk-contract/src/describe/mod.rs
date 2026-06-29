@@ -1,23 +1,25 @@
+use greentic_types::secrets::SecretRequirement;
 use serde::{Deserialize, Serialize};
 
 use crate::capability::CapabilityRef;
 use crate::kind::ExtensionKind;
 
+pub mod contributions;
+pub mod localization_block;
 pub mod provider;
-pub use provider::RuntimeGtpack;
 
-/// Top-level descriptor for a Greentic extension.
+pub use contributions::{
+    Contributions, DwProvider, Knowledge, NodeType, OutputPort, Prompt, Recipe, Schema, Tool,
+};
+pub use localization_block::Localization;
+
+/// Top-level descriptor for a Greentic extension (v2 shape).
 ///
 /// Invariants enforced at deserialize time:
-/// - `kind == Provider`  ↔  `runtime.gtpack.is_some()` (required)
-/// - `kind == Design` with `runtime.gtpack.is_some()` requires `contributions.nodeTypes`
-///   to be a non-empty array (node-providing design extension)
-/// - `runtime.gtpack.is_some()` is forbidden on all other kinds
+/// - `runtime.components` must have at least one entry
 /// - `execution.is_some()` only when `kind == Bundle`
-///
-/// `execution` is a pass-through `serde_json::Value` at contract level;
-/// each `BundleExtension`'s own reader parses the typed shape
-/// (`{kind: "builtin", builtinId: "..."}` or `{kind: "wasm"}`).
+/// - every `runtime_ref` in `contributions.node_types` and `contributions.tools`
+///   must reference a key that exists in `runtime.components`
 #[derive(Debug, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DescribeJson {
@@ -26,85 +28,130 @@ pub struct DescribeJson {
     #[serde(rename = "apiVersion")]
     pub api_version: String,
     pub kind: ExtensionKind,
+    pub compat: crate::compat::Compat,
     pub metadata: Metadata,
-    pub engine: Engine,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<Engine>,
     pub capabilities: Capabilities,
     pub runtime: Runtime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<serde_json::Value>,
-    pub contributions: serde_json::Value,
+    pub contributions: contributions::Contributions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub localization: Option<localization_block::Localization>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<Signature>,
+    /// SHA-256 (lowercase hex) of the canonical `manifest.json`. Binds the
+    /// whole-archive ledger into the signed describe (audit C2/H7). Optional
+    /// only for backward compat during migration; production packs MUST set it.
+    #[serde(
+        rename = "manifestSha256",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub manifest_sha256: Option<String>,
+    /// Secrets that this extension requires operators to provision before it can
+    /// run. Mirrors the per-tool `secret_requirements` but applies extension-wide.
+    #[serde(
+        rename = "requiredSecrets",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub required_secrets: Vec<SecretRequirement>,
 }
 
 /// Private intermediate for deserialization — identical shape to `DescribeJson`.
-/// `TryFrom` validates the kind-specific invariants before constructing the real type.
+/// `TryFrom` validates the invariants before constructing the real type.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DescribeJsonRaw {
-    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$schema", default)]
     schema_ref: Option<String>,
     #[serde(rename = "apiVersion")]
     api_version: String,
     kind: ExtensionKind,
+    compat: crate::compat::Compat,
     metadata: Metadata,
-    engine: Engine,
+    #[serde(default)]
+    engine: Option<Engine>,
     capabilities: Capabilities,
     runtime: Runtime,
     #[serde(default)]
     execution: Option<serde_json::Value>,
-    contributions: serde_json::Value,
+    contributions: contributions::Contributions,
+    #[serde(default)]
+    localization: Option<localization_block::Localization>,
     #[serde(default)]
     signature: Option<Signature>,
+    #[serde(rename = "manifestSha256", default)]
+    manifest_sha256: Option<String>,
+    #[serde(rename = "requiredSecrets", default)]
+    required_secrets: Vec<SecretRequirement>,
 }
 
 impl TryFrom<DescribeJsonRaw> for DescribeJson {
     type Error = String;
 
     fn try_from(raw: DescribeJsonRaw) -> Result<Self, String> {
-        let has_gtpack = raw.runtime.gtpack.is_some();
-        let has_node_types = raw
-            .contributions
-            .get("nodeTypes")
-            .and_then(|v| v.as_array())
-            .is_some_and(|a| !a.is_empty());
-
-        match (raw.kind, has_gtpack) {
-            (ExtensionKind::Provider, false) => {
-                return Err("kind=ProviderExtension requires `runtime.gtpack` to be set".into());
-            }
-            (ExtensionKind::Design, true) if !has_node_types => {
-                return Err(
-                    "DesignExtension with `runtime.gtpack` must contribute `nodeTypes` \
-                     (gtpack is only justified when the extension teaches the runtime new node types)"
-                        .into(),
-                );
-            }
-            (k, true) if k != ExtensionKind::Provider && k != ExtensionKind::Design => {
-                return Err(format!(
-                    "runtime.gtpack is only allowed for ProviderExtension, or for \
-                     DesignExtension that contributes `nodeTypes` (got kind={k:?})"
-                ));
-            }
-            _ => {}
+        if raw.runtime.components.is_empty() {
+            return Err("runtime.components must declare at least one entry".into());
         }
+
+        // Mirror the JSON Schema bound (memoryLimitMB ∈ [1, 1024]) in the type
+        // itself, so a doc deserialized without first running schema validation
+        // can't carry 0 or a multi-gigabyte value (audit cycle-2 N8).
+        if !(1..=1024).contains(&raw.runtime.memory_limit_mb) {
+            return Err(format!(
+                "runtime.memoryLimitMB must be in [1, 1024] (got {})",
+                raw.runtime.memory_limit_mb
+            ));
+        }
+
         if raw.execution.is_some() && raw.kind != ExtensionKind::Bundle {
             return Err(format!(
                 "`execution` is only allowed when kind=BundleExtension (got kind={:?})",
                 raw.kind
             ));
         }
+
+        let known: std::collections::BTreeSet<&crate::component_id::ComponentId> =
+            raw.runtime.components.keys().collect();
+        for nt in &raw.contributions.node_types {
+            if let Some(rr) = &nt.runtime_ref
+                && !known.contains(rr)
+            {
+                return Err(format!(
+                    "node_type {:?} runtime_ref {:?} not in runtime.components",
+                    nt.type_id, rr
+                ));
+            }
+        }
+        for tool in &raw.contributions.tools {
+            if let Some(rr) = &tool.runtime_ref
+                && !known.contains(rr)
+            {
+                return Err(format!(
+                    "tool {:?} runtime_ref {:?} not in runtime.components",
+                    tool.name, rr
+                ));
+            }
+        }
+
         Ok(DescribeJson {
             schema_ref: raw.schema_ref,
             api_version: raw.api_version,
             kind: raw.kind,
+            compat: raw.compat,
             metadata: raw.metadata,
             engine: raw.engine,
             capabilities: raw.capabilities,
             runtime: raw.runtime,
             execution: raw.execution,
             contributions: raw.contributions,
+            localization: raw.localization,
             signature: raw.signature,
+            manifest_sha256: raw.manifest_sha256,
+            required_secrets: raw.required_secrets,
         })
     }
 }
@@ -125,9 +172,9 @@ pub struct Metadata {
     pub id: String,
     pub name: String,
     pub version: String,
-    pub summary: String,
+    pub summary: crate::localization::LocalizedString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    pub description: Option<crate::localization::LocalizedString>,
     pub author: Author,
     pub license: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -173,14 +220,13 @@ pub struct Capabilities {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Runtime {
-    pub component: String,
     #[serde(rename = "memoryLimitMB", default = "default_memory")]
     pub memory_limit_mb: u32,
     pub permissions: Permissions,
-    /// Provider-only: bundled `.gtpack` artifact metadata.
-    /// Present if and only if `kind == ProviderExtension`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gtpack: Option<RuntimeGtpack>,
+    pub components: std::collections::BTreeMap<
+        crate::component_id::ComponentId,
+        crate::runtime_component::RuntimeComponent,
+    >,
 }
 
 const fn default_memory() -> u32 {
@@ -196,15 +242,39 @@ pub struct Permissions {
     pub secrets: Vec<String>,
     #[serde(rename = "callExtensionKinds", default)]
     pub call_extension_kinds: Vec<String>,
+    /// LLM roles (wire names, e.g. `"sorla_composer"`) this extension is allowed
+    /// to request from the host `greentic:extension-host/llm` import. The host
+    /// resolves each role to a tenant-configured provider; an empty list means
+    /// the extension may not call the LLM host import at all.
+    #[serde(rename = "llmRoles", default, skip_serializing_if = "Vec::is_empty")]
+    pub llm_roles: Vec<String>,
+    /// OAuth provider ids (e.g. `"hubspot"`) this extension is allowed to request
+    /// tokens for via the host `greentic:oauth-broker/broker-v1` import. The host
+    /// rejects `get-token` for any provider not listed here; an empty list means
+    /// the extension may not call the OAuth broker import at all.
+    #[serde(
+        rename = "oauthProviders",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub oauth_providers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignatureAlgorithm {
+    #[serde(rename = "ed25519")]
+    Ed25519,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Signature {
-    pub algorithm: String,
+    pub algorithm: SignatureAlgorithm,
     #[serde(rename = "publicKey")]
     pub public_key: String,
     pub value: String,
+    #[serde(rename = "keyId", default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
 }
 
 impl DescribeJson {
@@ -212,10 +282,79 @@ impl DescribeJson {
     pub fn identity_key(&self) -> String {
         format!("{}@{}", self.metadata.id, self.metadata.version)
     }
+}
 
-    pub fn typed_contributions(
-        &self,
-    ) -> Result<crate::contributions::Contributions, crate::ContractError> {
-        crate::contributions::validate_contributions(&self.contributions)
+#[cfg(test)]
+mod engine_optional_tests {
+    use super::*;
+
+    fn minimal_describe_json(with_engine: bool) -> serde_json::Value {
+        let mut doc = serde_json::json!({
+            "apiVersion": "greentic.ai/v2",
+            "kind": "DesignExtension",
+            "compat": {
+                "min_designer_version": ">=1.2.0",
+                "min_runner_version": "^1.2.0",
+                "contract_version": "1.2.0"
+            },
+            "metadata": {
+                "id": "greentic.engine-test",
+                "name": "Engine Test",
+                "version": "0.1.0",
+                "summary": "x",
+                "author": { "name": "Greentic" },
+                "license": "MIT"
+            },
+            "capabilities": { "offered": [], "required": [] },
+            "runtime": {
+                "memoryLimitMB": 32,
+                "permissions": {},
+                "components": {
+                    "main": {
+                        "oci_ref": "ghcr.io/greentic/engine-test:0.1.0",
+                        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "world": "greentic:x/design-extension"
+                    }
+                }
+            },
+            "contributions": {}
+        });
+        if with_engine {
+            doc["engine"] = serde_json::json!({
+                "greenticDesigner": ">=1.2.0",
+                "extRuntime": "^1.2.0"
+            });
+        }
+        doc
+    }
+
+    #[test]
+    fn describe_without_engine_parses() {
+        let doc = minimal_describe_json(false);
+        let parsed: DescribeJson = serde_json::from_value(doc).expect("must parse without engine");
+        assert!(parsed.engine.is_none());
+    }
+
+    #[test]
+    fn describe_with_engine_still_parses() {
+        let doc = minimal_describe_json(true);
+        let parsed: DescribeJson = serde_json::from_value(doc).expect("must parse with engine");
+        assert!(parsed.engine.is_some());
+    }
+
+    #[test]
+    fn permissions_parses_oauth_providers() {
+        let json = r#"{ "network": [], "secrets": [], "oauthProviders": ["hubspot"] }"#;
+        let p: Permissions = serde_json::from_str(json).unwrap();
+        assert_eq!(p.oauth_providers, vec!["hubspot".to_string()]);
+    }
+
+    #[test]
+    fn permissions_oauth_providers_defaults_empty_and_is_skipped_when_empty() {
+        let json = r#"{ "network": [], "secrets": [] }"#;
+        let p: Permissions = serde_json::from_str(json).unwrap();
+        assert!(p.oauth_providers.is_empty());
+        let out = serde_json::to_string(&p).unwrap();
+        assert!(!out.contains("oauthProviders"), "got: {out}");
     }
 }

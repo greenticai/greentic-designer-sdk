@@ -1,0 +1,10 @@
+{
+  "$schema": "https://store.greentic.cloud/schemas/describe-v2.json",
+  "apiVersion": "greentic.ai/v2",
+  "kind": "DesignExtension",
+  "compat": { "min_designer_version": ">=1.2.0", "min_runner_version": "^1.2.0", "contract_version": "1.2.0" },
+  "metadata": { "id": "greentic.good", "name": "Good", "version": "0.1.0", "summary": "x", "author": { "name": "G" }, "license": "MIT" },
+  "capabilities": { "offered": [], "required": [] },
+  "runtime": { "memoryLimitMB": 32, "permissions": {}, "components": { "main": { "oci_ref": "ghcr.io/greentic/good:0.1.0", "sha256": "abc1230000000000000000000000000000000000000000000000000000000000", "world": "greentic:x/y" } } },
+  "contributions": { "tools": [ { "name": "do_thing", "export": "greentic:extension-design/tools.invoke-tool", "runtime_ref": "main" } ] }
+}

@@ -1,7 +1,11 @@
+#![forbid(unsafe_code)]
+
 mod commands;
 mod dev;
 mod publish;
+mod registry_security;
 mod scaffold;
+mod signing;
 
 use clap::{Parser, Subcommand};
 
@@ -20,6 +24,8 @@ struct Cli {
 enum Command {
     /// Validate an extension directory against the describe.json schema
     Validate(commands::validate::Args),
+    /// Register a component-tool by URL against greentic-designer-admin
+    Component(commands::component::Args),
     /// List installed extensions
     List(commands::list::Args),
     /// Install an extension from a registry or local .gtxpack
@@ -54,6 +60,12 @@ enum Command {
     Sign(commands::sign::Args),
     /// Verify an extension's signature (file, directory, or .gtxpack)
     Verify(commands::verify::Args),
+    /// Lint a describe.json for cross-field invariants beyond JSON Schema
+    Lint(commands::lint::Args),
+    /// Check installed extensions for available updates
+    Outdated(commands::outdated::Args),
+    /// Update installed extensions to the latest permitted version
+    Update(commands::update::Args),
     /// Print version
     Version,
 }
@@ -69,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Validate(args) => commands::validate::run(&args, &home),
+        Command::Component(args) => commands::component::run(args, &home).await,
         Command::List(args) => commands::list::run(args, &home),
         Command::Install(args) => commands::install::run(args, &home).await,
         Command::Keygen(args) => commands::keygen::run(&args, &home),
@@ -78,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
         Command::New(args) => commands::new::run(&args, &home),
         Command::Dev(args) => commands::dev::run(args, &home).await,
         Command::Publish(args) => commands::publish::run(args, &home).await,
-        Command::Login(args) => commands::login::run_login(&args, &home),
+        Command::Login(args) => commands::login::run_login(&args, &home).await,
         Command::Logout(args) => commands::login::run_logout(&args, &home),
         Command::Registries(args) => commands::registries::run(args, &home),
         Command::Doctor(args) => commands::doctor::run(args, &home).await,
@@ -86,6 +99,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Disable(args) => commands::disable::run(&args, &home),
         Command::Sign(args) => commands::sign::run(&args, &home),
         Command::Verify(args) => commands::verify::run(&args, &home),
+        Command::Lint(args) => commands::lint::run(&args, &home),
+        Command::Outdated(args) => commands::outdated::run(args, &home).await,
+        Command::Update(args) => commands::update::run(args, &home).await,
         Command::Version => {
             println!("gtdx {}", env!("CARGO_PKG_VERSION"));
             Ok(())

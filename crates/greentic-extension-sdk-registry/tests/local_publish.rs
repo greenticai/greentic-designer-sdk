@@ -1,21 +1,30 @@
 use chrono::Utc;
 use greentic_extension_sdk_contract::{
-    DescribeJson, ExtensionKind,
-    describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime},
+    Compat, DescribeJson, ExtensionKind, LocalizedString,
+    describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
 };
 use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
 use greentic_extension_sdk_registry::publish::PublishRequest;
 
+fn default_compat() -> Compat {
+    Compat {
+        min_designer_version: ">=1.0.0".parse().unwrap(),
+        min_runner_version: "^0.12.0".parse().unwrap(),
+        contract_version: "1.2.0".parse().unwrap(),
+    }
+}
+
 fn sample_describe(version: &str) -> DescribeJson {
     DescribeJson {
         schema_ref: None,
-        api_version: "greentic.ai/v1".into(),
+        api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
+        compat: default_compat(),
         metadata: Metadata {
             id: "com.example.demo".into(),
             name: "demo".into(),
             version: version.into(),
-            summary: "s".into(),
+            summary: LocalizedString::plain("s"),
             description: None,
             author: Author {
                 name: "a".into(),
@@ -29,23 +38,25 @@ fn sample_describe(version: &str) -> DescribeJson {
             icon: None,
             screenshots: vec![],
         },
-        engine: Engine {
+        engine: Some(Engine {
             greentic_designer: "^0.1".into(),
             ext_runtime: "^0.1".into(),
-        },
+        }),
         capabilities: Capabilities {
             offered: vec![],
             required: vec![],
         },
         runtime: Runtime {
-            component: "extension.wasm".into(),
             memory_limit_mb: 64,
             permissions: Permissions::default(),
-            gtpack: None,
+            components: std::collections::BTreeMap::new(),
         },
         execution: None,
-        contributions: serde_json::json!({}),
+        contributions: Contributions::default(),
+        localization: None,
         signature: None,
+        manifest_sha256: None,
+        required_secrets: vec![],
     }
 }
 
@@ -104,6 +115,31 @@ fn force_overwrites_existing_version() {
     assert_eq!(receipt.sha256, "xyz");
     let sha_sidecar = tmp.path().join("com.example.demo/0.1.0/artifact.sha256");
     assert_eq!(std::fs::read_to_string(&sha_sidecar).unwrap().trim(), "xyz");
+}
+
+#[test]
+fn corrupt_index_is_not_silently_zeroed() {
+    // A corrupt index.json must NOT be replaced with an empty default and
+    // re-persisted — that would permanently drop every prior entry. Publish
+    // should fail loudly and leave the existing index untouched (audit N14).
+    let tmp = tempfile::tempdir().unwrap();
+    let reg = LocalFilesystemRegistry::new("test", tmp.path().to_path_buf());
+    reg.publish_local(&sample_req("0.1.0", false)).unwrap();
+
+    let index_path = tmp.path().join("index.json");
+    std::fs::write(&index_path, b"{ this is not valid json").unwrap();
+
+    let err = reg.publish_local(&sample_req("0.2.0", false)).unwrap_err();
+    assert!(
+        matches!(err, greentic_extension_sdk_registry::RegistryError::Json(_)),
+        "corrupt index should surface a parse error, got: {err:?}"
+    );
+    // The corrupt file is preserved (not overwritten with an empty index).
+    let after = std::fs::read(&index_path).unwrap();
+    assert_eq!(
+        after, b"{ this is not valid json",
+        "publish must not overwrite a corrupt index with a default"
+    );
 }
 
 #[test]

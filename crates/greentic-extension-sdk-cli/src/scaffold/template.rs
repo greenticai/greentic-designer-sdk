@@ -6,13 +6,13 @@ use include_dir::{Dir, include_dir};
 
 static TEMPLATES_COMMON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/common");
 static TEMPLATES_DESIGN: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/design");
-static TEMPLATES_DESIGN_ARTIFACT_PRODUCER: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/templates/design-artifact-producer");
 static TEMPLATES_BUNDLE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/bundle");
 static TEMPLATES_DEPLOY: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/deploy");
 static TEMPLATES_PROVIDER: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/provider");
 static TEMPLATES_WASM_COMPONENT: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/templates/wasm-component");
+static TEMPLATES_LLM: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/llm");
+static TEMPLATES_MCP: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/mcp");
 
 #[derive(Debug, Clone)]
 pub struct TemplateEntry {
@@ -59,11 +59,12 @@ pub fn load_templates_common() -> Vec<TemplateEntry> {
 pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
     match kind {
         "design" => collect(&TEMPLATES_DESIGN),
-        "design-artifact-producer" => collect(&TEMPLATES_DESIGN_ARTIFACT_PRODUCER),
         "bundle" => collect(&TEMPLATES_BUNDLE),
         "deploy" => collect(&TEMPLATES_DEPLOY),
         "provider" => collect(&TEMPLATES_PROVIDER),
         "wasm-component" => collect(&TEMPLATES_WASM_COMPONENT),
+        "llm" => collect(&TEMPLATES_LLM),
+        "mcp" => collect(&TEMPLATES_MCP),
         _ => Vec::new(),
     }
 }
@@ -196,13 +197,189 @@ mod tests {
         assert!(entries.iter().any(|e| e.dst_rel == "src/lib.rs"));
     }
 
+    /// Audit P1 (E.3.a): every kind must scaffold a rust-toolchain.toml
+    /// pinned to the same workspace toolchain. Without this the user's
+    /// `cargo build` picks up whatever's in their PATH and silently
+    /// produces wasm with the wrong feature set.
     #[test]
-    fn load_kind_design_artifact_producer_returns_example_output() {
-        let entries = load_templates_kind("design-artifact-producer");
-        assert!(
-            entries
+    fn every_kind_template_ships_rust_toolchain_pinned_to_1_95_0() {
+        for kind in [
+            "design",
+            "bundle",
+            "deploy",
+            "provider",
+            "wasm-component",
+            "llm",
+            "mcp",
+        ] {
+            let entries = load_templates_kind(kind);
+            let toolchain = entries
                 .iter()
-                .any(|e| e.dst_rel == "examples/artifact-output.json")
+                .find(|e| e.dst_rel == "rust-toolchain.toml")
+                .unwrap_or_else(|| panic!("kind {kind} missing rust-toolchain.toml template"));
+            let content = std::str::from_utf8(toolchain.src_bytes).expect("utf8");
+            assert!(
+                content.contains("channel = \"1.95.0\""),
+                "kind {kind} toolchain template does not pin 1.95.0:\n{content}",
+            );
+        }
+    }
+
+    /// Audit P1 (E.3.b): extension kinds that use cargo-component's generated
+    /// bindings must scaffold `wit-bindgen-rt = "0.41"` (the current pinned
+    /// version for those kinds). 0.35 emits older intrinsics that newer
+    /// cargo-component rejects.
+    ///
+    /// The `mcp` kind is exempt: it uses inline `wit_bindgen::generate!` via
+    /// `wit-bindgen` (macros feature) so the crate compiles on the host as
+    /// well as wasm32. It must not use `wit-bindgen-rt` directly.
+    #[test]
+    fn every_kind_template_ships_wit_bindgen_rt_0_41() {
+        for kind in ["design", "bundle", "deploy", "provider", "llm"] {
+            let entries = load_templates_kind(kind);
+            let cargo_toml = entries
+                .iter()
+                .find(|e| e.dst_rel == "Cargo.toml")
+                .unwrap_or_else(|| panic!("kind {kind} missing Cargo.toml template"));
+            let content = std::str::from_utf8(cargo_toml.src_bytes).expect("utf8");
+            assert!(
+                content.contains("wit-bindgen-rt = { version = \"0.41\""),
+                "kind {kind} Cargo.toml does not pin wit-bindgen-rt 0.41:\n{content}",
+            );
+        }
+    }
+
+    /// The `mcp` kind uses inline `wit_bindgen::generate!` (host-compatible
+    /// bindings) and must depend on `wit-bindgen` with the `macros` feature,
+    /// not the older `wit-bindgen-rt` shim.
+    #[test]
+    fn mcp_kind_template_ships_wit_bindgen_macros() {
+        let entries = load_templates_kind("mcp");
+        let cargo_toml = entries
+            .iter()
+            .find(|e| e.dst_rel == "Cargo.toml")
+            .unwrap_or_else(|| panic!("mcp kind missing Cargo.toml template"));
+        let content = std::str::from_utf8(cargo_toml.src_bytes).expect("utf8");
+        assert!(
+            content.contains("wit-bindgen") && content.contains("macros"),
+            "mcp Cargo.toml must depend on wit-bindgen with macros feature:\n{content}",
         );
+        assert!(
+            !content.contains("wit-bindgen-rt"),
+            "mcp Cargo.toml must NOT use wit-bindgen-rt (use wit-bindgen + macros instead):\n{content}",
+        );
+    }
+
+    /// The `wasm-component` scaffold is a standalone cargo-component project
+    /// with no parent workspace, so its Cargo.toml must use concrete
+    /// `[package]` fields, not `edition.workspace = true` / `*.workspace`
+    /// inherits — which would make `cargo build` fail on a fresh scaffold
+    /// (audit cycle-2 N12).
+    #[test]
+    fn wasm_component_cargo_toml_has_no_workspace_inherits() {
+        let entries = load_templates_kind("wasm-component");
+        let cargo_toml = entries
+            .iter()
+            .find(|e| e.dst_rel.ends_with("Cargo.toml"))
+            .expect("wasm-component must ship a Cargo.toml template");
+        let content = std::str::from_utf8(cargo_toml.src_bytes).expect("utf8");
+        assert!(
+            !content.contains(".workspace = true") && !content.contains(".workspace=true"),
+            "wasm-component Cargo.toml must not inherit from a (non-existent) workspace:\n{content}",
+        );
+        assert!(
+            content.contains("edition = \"2024\""),
+            "wasm-component Cargo.toml must pin edition concretely:\n{content}",
+        );
+    }
+
+    /// Every kind's `describe.json` template must emit v2 shape — after
+    /// the v1->v2 ecosystem migration (PR-series ending in greentic-biz/
+    /// greentic-designer-extensions#58), scaffolded extensions that still
+    /// emit `apiVersion: greentic.ai/v1` won't round-trip through the
+    /// 1.2.x runtime without manual editing. This guard catches any
+    /// future template that regresses to v1 shape.
+    #[test]
+    fn every_kind_describe_template_is_v2() {
+        for kind in [
+            "design",
+            "bundle",
+            "deploy",
+            "provider",
+            "wasm-component",
+            "llm",
+            "mcp",
+        ] {
+            let entries = load_templates_kind(kind);
+            let describe = entries
+                .iter()
+                .find(|e| e.dst_rel == "describe.json")
+                .unwrap_or_else(|| panic!("kind {kind} missing describe.json template"));
+            let content = std::str::from_utf8(describe.src_bytes).expect("utf8");
+            assert!(
+                content.contains("\"apiVersion\": \"greentic.ai/v2\""),
+                "kind {kind} describe.json template not v2:\n{content}",
+            );
+            assert!(
+                content.contains("\"compat\":"),
+                "kind {kind} describe.json missing `compat` block:\n{content}",
+            );
+            assert!(
+                content.contains("\"components\":"),
+                "kind {kind} describe.json missing `runtime.components` map:\n{content}",
+            );
+            assert!(
+                !content.contains("\"component\": \"extension.wasm\""),
+                "kind {kind} describe.json still has v1 singular `runtime.component`:\n{content}",
+            );
+        }
+    }
+
+    /// E.4.b: the `llm` template tree resolves through `load_templates_kind`
+    /// and ships the canonical 5-file design-extension skeleton.
+    #[test]
+    fn load_kind_llm_returns_full_template_set() {
+        let entries = load_templates_kind("llm");
+        let names: Vec<&str> = entries.iter().map(|e| e.dst_rel.as_str()).collect();
+        assert!(
+            names.contains(&"Cargo.toml"),
+            "missing Cargo.toml: {names:?}"
+        );
+        assert!(
+            names.contains(&"describe.json"),
+            "missing describe.json: {names:?}"
+        );
+        assert!(
+            names.contains(&"src/lib.rs"),
+            "missing src/lib.rs: {names:?}"
+        );
+        assert!(
+            names.contains(&"wit/world.wit"),
+            "missing wit/world.wit: {names:?}"
+        );
+        assert!(
+            names.contains(&"rust-toolchain.toml"),
+            "missing rust-toolchain.toml: {names:?}"
+        );
+    }
+
+    /// The `mcp` template tree resolves through `load_templates_kind` and ships
+    /// the single-file `wasix:mcp/router` skeleton plus the bundled `wasix-mcp`
+    /// WIT dep so `cargo component build` resolves the exported router
+    /// interface.
+    #[test]
+    fn load_kind_mcp_returns_full_template_set() {
+        let entries = load_templates_kind("mcp");
+        let names: Vec<&str> = entries.iter().map(|e| e.dst_rel.as_str()).collect();
+        for expected in [
+            "Cargo.toml",
+            "describe.json",
+            "src/lib.rs",
+            "wit/world.wit",
+            "wit/deps/wasix-mcp/package.wit",
+            "rust-toolchain.toml",
+        ] {
+            assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        }
     }
 }

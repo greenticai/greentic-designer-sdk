@@ -6,6 +6,7 @@ use base64::Engine as _;
 use clap::Args as ClapArgs;
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::{EncodePrivateKey, spki::der::pem::LineEnding};
+use rand::rngs::OsRng;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -16,8 +17,7 @@ pub struct Args {
 }
 
 pub fn run(args: &Args, _home: &Path) -> Result<()> {
-    let seed: [u8; 32] = rand::random();
-    let signing_key = SigningKey::from_bytes(&seed);
+    let signing_key = SigningKey::generate(&mut OsRng);
     let pem = signing_key
         .to_pkcs8_pem(LineEnding::LF)
         .map_err(|e| anyhow::anyhow!("encode PKCS8 PEM: {e}"))?;

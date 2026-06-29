@@ -93,7 +93,8 @@ async fn install_from_registry(
         .token_env
         .as_deref()
         .and_then(|e| std::env::var(e).ok());
-    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token);
+    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token)
+        .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
     let installer = Installer::new(storage.clone_shallow(), &reg);
     installer
         .install(
@@ -125,10 +126,48 @@ fn parse_pack_name(filename: &str) -> anyhow::Result<(String, String)> {
     let stem = filename
         .strip_suffix(".gtxpack")
         .ok_or_else(|| anyhow::anyhow!("not a .gtxpack file: {filename}"))?;
-    let idx = stem
-        .rfind('-')
-        .ok_or_else(|| anyhow::anyhow!("no version in filename: {filename}"))?;
-    let (name, rest) = stem.split_at(idx);
-    let version = rest.strip_prefix('-').unwrap_or(rest);
-    Ok((name.into(), version.into()))
+    // The name may contain '-' and the version may itself contain '-' in a
+    // prerelease (e.g. `1.0.0-rc1`), so a naive rfind('-') splits inside the
+    // prerelease. Split at the first '-' whose remainder parses as a full
+    // semver version — name segments never parse as semver.
+    for (idx, _) in stem.match_indices('-') {
+        let candidate = &stem[idx + 1..];
+        if semver::Version::parse(candidate).is_ok() {
+            return Ok((stem[..idx].to_string(), candidate.to_string()));
+        }
+    }
+    Err(anyhow::anyhow!("no semver version in filename: {filename}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pack_name;
+
+    #[test]
+    fn parses_simple_name_and_version() {
+        let (name, version) = parse_pack_name("single-0.1.0.gtxpack").unwrap();
+        assert_eq!(name, "single");
+        assert_eq!(version, "0.1.0");
+    }
+
+    #[test]
+    fn parses_dashed_name() {
+        let (name, version) = parse_pack_name("my-ext-1.0.0.gtxpack").unwrap();
+        assert_eq!(name, "my-ext");
+        assert_eq!(version, "1.0.0");
+    }
+
+    #[test]
+    fn parses_prerelease_version_with_dashed_name() {
+        // The bug: rfind('-') splits inside the prerelease, yielding
+        // name="my-ext-1.0.0", version="rc1".
+        let (name, version) = parse_pack_name("my-ext-1.0.0-rc1.gtxpack").unwrap();
+        assert_eq!(name, "my-ext");
+        assert_eq!(version, "1.0.0-rc1");
+    }
+
+    #[test]
+    fn rejects_filename_without_version() {
+        assert!(parse_pack_name("noversion.gtxpack").is_err());
+    }
 }
