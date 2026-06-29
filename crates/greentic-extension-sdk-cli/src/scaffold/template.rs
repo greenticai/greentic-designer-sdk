@@ -49,6 +49,13 @@ fn translate_dst(rel: &str) -> String {
     if dst == "gitignore" {
         dst = ".gitignore".to_string();
     }
+    // The template tree can't hold a literal `.claude/` directory — a dotfile
+    // dir under the SDK's own `templates/` would be acted on by local tooling
+    // (same reason `.gitignore` ships as `gitignore`). Author it under
+    // `claude/` and re-dot it to `.claude/` at write time.
+    if let Some(rest) = dst.strip_prefix("claude/") {
+        dst = format!(".claude/{rest}");
+    }
     dst
 }
 
@@ -186,6 +193,65 @@ mod tests {
             entries
                 .iter()
                 .any(|e| e.dst_rel == "gitignore.tmpl" || e.dst_rel == ".gitignore")
+        );
+    }
+
+    /// Every scaffold ships agent-onboarding docs so AI coding tools (Claude
+    /// Code, Codex, …) pick up the build/publish workflow and the
+    /// placeholder-vs-generated distinctions without re-deriving them. AGENTS.md
+    /// is the universal source of truth; CLAUDE.md is a thin pointer to it.
+    /// Both live in `common/`, so they apply to every kind.
+    #[test]
+    fn load_common_returns_agent_onboarding_docs() {
+        let entries = load_templates_common();
+        for expected in ["AGENTS.md", "CLAUDE.md"] {
+            assert!(
+                entries.iter().any(|e| e.dst_rel == expected),
+                "common templates missing {expected}: {:?}",
+                entries.iter().map(|e| &e.dst_rel).collect::<Vec<_>>(),
+            );
+        }
+        // CLAUDE.md must point readers at AGENTS.md so the two never drift.
+        let claude = entries
+            .iter()
+            .find(|e| e.dst_rel == "CLAUDE.md")
+            .expect("CLAUDE.md present");
+        let body = std::str::from_utf8(claude.src_bytes).expect("utf8");
+        assert!(
+            body.contains("AGENTS.md"),
+            "CLAUDE.md must reference AGENTS.md:\n{body}",
+        );
+    }
+
+    /// Every scaffold ships Claude Code project config so AI coding tools run the
+    /// build/check commands without per-command permission prompts (`settings.json`)
+    /// and get a one-shot pre-publish gate (`/check`). Both are authored under
+    /// `claude/` and re-dotted to `.claude/` by [`translate_dst`].
+    #[test]
+    fn load_common_returns_dotclaude_config() {
+        let entries = load_templates_common();
+        for expected in [".claude/settings.json", ".claude/commands/check.md"] {
+            assert!(
+                entries.iter().any(|e| e.dst_rel == expected),
+                "common templates missing {expected}: {:?}",
+                entries.iter().map(|e| &e.dst_rel).collect::<Vec<_>>(),
+            );
+        }
+        // settings.json must parse as JSON and pre-approve the core build commands.
+        let settings = entries
+            .iter()
+            .find(|e| e.dst_rel == ".claude/settings.json")
+            .expect(".claude/settings.json present");
+        let body = std::str::from_utf8(settings.src_bytes).expect("utf8");
+        let parsed: serde_json::Value = serde_json::from_str(body).expect("settings.json parses");
+        let allow = parsed
+            .get("permissions")
+            .and_then(|p| p.get("allow"))
+            .and_then(|a| a.as_array())
+            .expect("permissions.allow is an array");
+        assert!(
+            allow.iter().any(|v| v.as_str() == Some("Bash(gtdx:*)")),
+            "settings.json must pre-approve gtdx commands:\n{body}",
         );
     }
 
