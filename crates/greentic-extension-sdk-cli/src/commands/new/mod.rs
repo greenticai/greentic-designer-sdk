@@ -1,6 +1,9 @@
+mod wizard;
+
 use std::{
     collections::BTreeMap,
     fs,
+    io::IsTerminal,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -16,9 +19,12 @@ use crate::scaffold::{
 };
 
 #[derive(ClapArgs, Debug)]
+// CLI flag struct: each bool is an independent on/off switch, not shared state.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Args {
     /// Project folder name (kebab-case). Also default id suffix.
-    pub name: String,
+    /// Omit (and run on a terminal) to launch the interactive wizard.
+    pub name: Option<String>,
 
     /// Extension kind
     #[arg(short = 'k', long, value_enum, default_value = "design")]
@@ -52,9 +58,13 @@ pub struct Args {
     #[arg(long)]
     pub force: bool,
 
-    /// Skip interactive prompts
+    /// Skip the interactive wizard; resolve everything from flags/defaults.
     #[arg(short = 'y', long)]
     pub yes: bool,
+
+    /// Force the interactive wizard even when a name/flags are given.
+    #[arg(short = 'w', long)]
+    pub wizard: bool,
 
     /// Node type ID (defaults to derived suffix of --name).
     #[arg(long)]
@@ -65,31 +75,84 @@ pub struct Args {
     pub label: Option<String>,
 }
 
+/// Fully-resolved scaffold inputs, produced either from CLI flags
+/// (non-interactive) or from the interactive wizard.
+pub(super) struct Resolved {
+    name: String,
+    kind: Kind,
+    id: String,
+    version: String,
+    author: String,
+    license: String,
+    no_git: bool,
+    dir: Option<PathBuf>,
+    force: bool,
+    node_type_id: Option<String>,
+    label: Option<String>,
+}
+
 pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
-    let target = args
+    let resolved = resolve(args)?;
+
+    let target = resolved
         .dir
         .clone()
-        .unwrap_or_else(|| PathBuf::from(&args.name));
+        .unwrap_or_else(|| PathBuf::from(&resolved.name));
+
+    run_preflight(&target, resolved.force)?;
+    prepare_target(&target, resolved.force)?;
+
+    let ctx = build_context(&resolved);
+    let mut files_written = render_templates(&ctx, resolved.kind.as_str(), &target)?;
+    files_written += write_wit_and_lock(resolved.kind.as_str(), &target)?;
+
+    make_scripts_executable(&target)?;
+    run_git_init(&target, resolved.no_git);
+
+    print_summary(resolved.kind.as_str(), &target, files_written);
+    Ok(())
+}
+
+/// Decide between the interactive wizard and flag-driven resolution.
+///
+/// The wizard runs when explicitly requested (`--wizard`) or when no project
+/// name was supplied — provided we are attached to a terminal and `--yes` was
+/// not passed. Otherwise inputs are taken verbatim from the CLI flags, which
+/// keeps the original scripted/`--yes` behaviour intact.
+fn resolve(args: &Args) -> anyhow::Result<Resolved> {
+    let wants_wizard = args.wizard || (args.name.is_none() && !args.yes);
+    if wants_wizard && std::io::stdin().is_terminal() {
+        return wizard::run(args);
+    }
+    resolve_from_flags(args)
+}
+
+fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
+    let name = args.name.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing project name: run `gtdx new <name> [flags]`, or `gtdx new` on a terminal for the interactive wizard"
+        )
+    })?;
     let id = args
         .id
         .clone()
-        .unwrap_or_else(|| format!("com.example.{}", args.name));
+        .unwrap_or_else(|| format!("com.example.{name}"));
     let author = args.author.clone().unwrap_or_else(detect_git_author);
     validate_id(&id)?;
     validate_version(&args.version)?;
-
-    run_preflight(&target, args.force)?;
-    prepare_target(&target, args.force)?;
-
-    let ctx = build_context(args, &id, &author);
-    let mut files_written = render_templates(&ctx, args.kind.as_str(), &target)?;
-    files_written += write_wit_and_lock(args.kind.as_str(), &target)?;
-
-    make_scripts_executable(&target)?;
-    run_git_init(&target, args.no_git);
-
-    print_summary(args.kind.as_str(), &target, files_written);
-    Ok(())
+    Ok(Resolved {
+        name,
+        kind: args.kind,
+        id,
+        version: args.version.clone(),
+        author,
+        license: args.license.clone(),
+        no_git: args.no_git,
+        dir: args.dir.clone(),
+        force: args.force,
+        node_type_id: args.node_type_id.clone(),
+        label: args.label.clone(),
+    })
 }
 
 fn run_preflight(target: &Path, force: bool) -> anyhow::Result<()> {
@@ -114,24 +177,24 @@ fn prepare_target(target: &Path, force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_context(args: &Args, id: &str, author: &str) -> Context {
+fn build_context(resolved: &Resolved) -> Context {
     let mut ctx = Context::new();
-    ctx.set("name", args.name.clone());
-    let name_cargo = args.name.replace('.', "-");
+    ctx.set("name", resolved.name.clone());
+    let name_cargo = resolved.name.replace('.', "-");
     ctx.set("name_cargo", &name_cargo);
-    ctx.set("kind", args.kind.as_str());
+    ctx.set("kind", resolved.kind.as_str());
     // Assumes ASCII kebab-case `name`; non-ASCII or all-uppercase input may produce odd labels.
-    let derived_id = args
+    let derived_id = resolved
         .name
         .split('.')
         .next_back()
-        .unwrap_or(&args.name)
+        .unwrap_or(&resolved.name)
         .to_string();
-    let node_type_id = args
+    let node_type_id = resolved
         .node_type_id
         .clone()
         .unwrap_or_else(|| derived_id.clone());
-    let label = args.label.clone().unwrap_or_else(|| {
+    let label = resolved.label.clone().unwrap_or_else(|| {
         derived_id
             .replace('-', " ")
             .split(' ')
@@ -147,11 +210,12 @@ fn build_context(args: &Args, id: &str, author: &str) -> Context {
     });
     ctx.set("node_type_id", &node_type_id);
     ctx.set("label", &label);
+    let id = resolved.id.as_str();
     ctx.set("id", id);
     ctx.set("id_wit", id_to_wit_package(id));
-    ctx.set("version", &args.version);
-    ctx.set("author", author);
-    ctx.set("license", &args.license);
+    ctx.set("version", &resolved.version);
+    ctx.set("author", &resolved.author);
+    ctx.set("license", &resolved.license);
     ctx.set("contract_version", CONTRACT_VERSION);
     // `sdk_version` is the gtdx CLI / SDK crate version (the toolchain that
     // generated this scaffold). v2 describe.json templates use it for

@@ -68,11 +68,23 @@ gtdx --version
 
 ### Scaffold and build an extension
 
+There are two ways to scaffold. Pick whichever you prefer:
+
 ```bash
+# 1) Flag-driven (scriptable, CI-friendly)
 gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm | mcp
+
+# 2) Interactive wizard — just run `gtdx new` with no name on a terminal
+gtdx new                          # prompts for name, kind, id, version, author, license
+gtdx new --wizard                 # force the wizard even when flags are given
+
 cd my-ext
 gtdx dev --once
 ```
+
+The wizard uses any flags you pass as prompt defaults, so `gtdx new my-ext --wizard`
+pre-fills the name. Pass `--yes` to skip the wizard and resolve everything from
+flags/defaults (useful in scripts and CI, where there is no terminal).
 
 This rebuilds, packs, and produces `dist/<name>-<version>.gtxpack`. The
 pack includes a `manifest.json` integrity ledger (sha256 of every entry)
