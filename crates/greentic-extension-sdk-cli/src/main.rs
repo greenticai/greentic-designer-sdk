@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
         Command::New(args) => commands::new::run(&args, &home),
         Command::Dev(args) => commands::dev::run(args, &home).await,
         Command::Publish(args) => commands::publish::run(args, &home).await,
-        Command::Login(args) => commands::login::run_login(&args, &home),
+        Command::Login(args) => commands::login::run_login(&args, &home).await,
         Command::Logout(args) => commands::login::run_logout(&args, &home),
         Command::Registries(args) => commands::registries::run(args, &home),
         Command::Doctor(args) => commands::doctor::run(args, &home).await,

@@ -154,14 +154,19 @@ The default registry is the public Greentic store, `greentic-store`
 `gtdx registries add` it first.
 
 ```bash
-gtdx login                  # opens the store in your browser, then paste a token
-gtdx login --no-browser     # skip the browser; just paste a token
+gtdx login                  # browser device login (OAuth 2.0 Device Grant)
+gtdx login --no-browser     # print the URL + code instead of opening a browser
+gtdx login --paste          # skip device login; paste a token manually
 gtdx login --token <TOKEN>  # non-interactive (also reads $GTDX_TOKEN) — for CI
 ```
 
-`login` resolves the registry URL, opens it so you can create an access token,
-and stores that token in `~/.greentic/credentials.toml` (owner-only). To target
-a different store, configure it once and it overrides the built-in:
+By default `login` runs the **OAuth 2.0 Device Authorization Grant** (RFC 8628):
+it shows a short code, opens the store's `/device` page, and waits while you sign
+in and approve in the browser — then a fresh token is minted and stored in
+`~/.greentic/credentials.toml` (owner-only). No copy-pasting required. Against a
+store that does not implement device login, it transparently falls back to the
+manual token paste. To target a different store, configure it once and it
+overrides the built-in:
 
 ```bash
 gtdx registries add greentic-store https://staging.store.example  # override URL

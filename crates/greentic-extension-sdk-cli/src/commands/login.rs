@@ -1,8 +1,10 @@
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use clap::Args as ClapArgs;
 use greentic_extension_sdk_registry::config::resolve_registry_url;
 use greentic_extension_sdk_registry::credentials::Credentials;
+use serde::{Deserialize, Serialize};
 
 /// Env var checked for a token in non-interactive/CI logins.
 const TOKEN_ENV: &str = "GTDX_TOKEN";
@@ -14,13 +16,17 @@ pub struct Args {
     pub registry: Option<String>,
 
     /// Access token. When omitted, falls back to the `GTDX_TOKEN` env var, then
-    /// to an interactive prompt. Supplying it makes login non-interactive (CI).
+    /// to browser login. Supplying it makes login non-interactive (CI).
     #[arg(long)]
     pub token: Option<String>,
 
-    /// Do not open the browser to the token-creation page.
+    /// Do not open the browser automatically (the URL is printed instead).
     #[arg(long)]
     pub no_browser: bool,
+
+    /// Skip device login and paste a token manually instead.
+    #[arg(long)]
+    pub paste: bool,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -29,7 +35,7 @@ pub struct LogoutArgs {
     pub registry: Option<String>,
 }
 
-pub fn run_login(args: &Args, home: &Path) -> anyhow::Result<()> {
+pub async fn run_login(args: &Args, home: &Path) -> anyhow::Result<()> {
     let cfg = super::load_config(home)?;
     let registry_name = args
         .registry
@@ -42,7 +48,7 @@ pub fn run_login(args: &Args, home: &Path) -> anyhow::Result<()> {
         )
     })?;
 
-    let token = obtain_token(args, &registry_name, &registry_url)?;
+    let token = resolve_login_token(args, &registry_name, &registry_url).await?;
     if token.trim().is_empty() {
         anyhow::bail!("no token provided; nothing was saved");
     }
@@ -57,11 +63,15 @@ pub fn run_login(args: &Args, home: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Resolve the token from (in priority order) `--token`, `$GTDX_TOKEN`, or an
-/// interactive prompt. The interactive path opens the registry in the browser
-/// first (unless `--no-browser`) so the user can create an access token, then
-/// pastes it back — a device-login-style flow against the current token API.
-fn obtain_token(args: &Args, registry_name: &str, registry_url: &str) -> anyhow::Result<String> {
+/// Resolve the access token from (in priority order) `--token`, `$GTDX_TOKEN`,
+/// browser device login, or a manual token paste. Device login is the default
+/// interactive path and transparently falls back to paste when the store does
+/// not implement it.
+async fn resolve_login_token(
+    args: &Args,
+    registry_name: &str,
+    registry_url: &str,
+) -> anyhow::Result<String> {
     if let Some(token) = &args.token {
         return Ok(token.clone());
     }
@@ -72,13 +82,142 @@ fn obtain_token(args: &Args, registry_name: &str, registry_url: &str) -> anyhow:
         return Ok(token);
     }
 
+    if !args.paste {
+        match device_login(registry_url, args.no_browser).await {
+            Ok(Some(token)) => return Ok(token),
+            Ok(None) => {
+                eprintln!(
+                    "note: {registry_url} does not support device login; falling back to manual token paste"
+                );
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    paste_token(registry_name, registry_url, args.no_browser)
+}
+
+// ---- Device Authorization Grant (RFC 8628) client ----
+
+#[derive(Serialize)]
+struct DeviceCodeRequest {
+    client_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    verification_uri_complete: String,
+    expires_in: i64,
+    interval: i64,
+}
+
+#[derive(Serialize)]
+struct DeviceTokenRequest<'a> {
+    device_code: &'a str,
+}
+
+#[derive(Deserialize)]
+struct DeviceTokenResponse {
+    status: String,
+    access_token: Option<String>,
+}
+
+/// Run the device-authorization flow against `registry_url`. Returns
+/// `Ok(Some(token))` on approval, `Ok(None)` when the store has no device
+/// endpoints (caller falls back to paste), and `Err` on denial/expiry/timeout.
+async fn device_login(registry_url: &str, no_browser: bool) -> anyhow::Result<Option<String>> {
+    let client = reqwest::Client::new();
+    let code: DeviceCodeResponse = {
+        let response = client
+            .post(format!("{registry_url}/api/v1/auth/device/code"))
+            .json(&DeviceCodeRequest {
+                client_name: Some(client_name()),
+            })
+            .send()
+            .await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        response.error_for_status()?.json().await?
+    };
+
+    println!();
+    println!("To sign in, visit:");
+    println!("    {}", code.verification_uri);
+    println!("and enter the code:  {}", code.user_code);
+    println!();
+    if !no_browser && open_in_browser(&code.verification_uri_complete).is_ok() {
+        println!(
+            "(opened your browser to {})",
+            code.verification_uri_complete
+        );
+    }
+    println!("Waiting for approval…");
+
+    let token_url = format!("{registry_url}/api/v1/auth/device/token");
+    let interval = Duration::from_secs(u64::try_from(code.interval).unwrap_or(5).max(1));
+    let ttl = Duration::from_secs(u64::try_from(code.expires_in).unwrap_or(900).max(1));
+    let deadline = Instant::now() + ttl;
+
+    loop {
+        tokio::time::sleep(interval).await;
+        if Instant::now() > deadline {
+            anyhow::bail!("device login timed out; run `gtdx login` again");
+        }
+        let poll: DeviceTokenResponse = client
+            .post(&token_url)
+            .json(&DeviceTokenRequest {
+                device_code: &code.device_code,
+            })
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        match poll.status.as_str() {
+            "approved" => {
+                let token = poll
+                    .access_token
+                    .ok_or_else(|| anyhow::anyhow!("store approved login but returned no token"))?;
+                return Ok(Some(token));
+            }
+            "pending" => {}
+            "denied" => anyhow::bail!("login was denied in the browser"),
+            "expired" => anyhow::bail!("device code expired; run `gtdx login` again"),
+            other => anyhow::bail!("unexpected device login status: {other}"),
+        }
+    }
+}
+
+/// A human label for this client, shown on the browser approval page.
+fn client_name() -> String {
+    let host = std::env::var("HOSTNAME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .or_else(|| std::env::var("HOST").ok().filter(|h| !h.is_empty()));
+    match host {
+        Some(host) => format!("gtdx on {host}"),
+        None => "gtdx CLI".to_string(),
+    }
+}
+
+/// Manual token paste: open the store so the user can mint a token, then read
+/// it from a hidden prompt.
+fn paste_token(
+    registry_name: &str,
+    registry_url: &str,
+    no_browser: bool,
+) -> anyhow::Result<String> {
     println!("Logging in to {registry_name} ({registry_url})");
-    if args.no_browser {
+    if no_browser {
         println!("Create an access token, then paste it below.");
     } else {
         match open_in_browser(registry_url) {
             Ok(()) => println!(
-                "Opened {registry_url} in your browser. Create an access token there, then paste it below."
+                "Opened {registry_url} in your browser. Create an access token, then paste it below."
             ),
             Err(_) => println!(
                 "Could not open a browser. Visit {registry_url} to create an access token, then paste it below."
