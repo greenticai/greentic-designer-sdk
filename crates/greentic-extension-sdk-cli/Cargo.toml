@@ -11,6 +11,17 @@ description = "gtdx: CLI for Greentic Designer Extensions"
 name = "gtdx"
 path = "src/main.rs"
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/gtdx-v{ version }-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+bin-dir = "gtdx{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.aarch64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [dependencies]
 anstyle = { workspace = true }
 anyhow = { workspace = true }
@@ -20,9 +31,10 @@ clap = { workspace = true }
 dialoguer = { workspace = true }
 directories = { workspace = true }
 ed25519-dalek = { workspace = true, features = ["pkcs8", "pem"] }
-greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "0.4.6" }
-greentic-extension-sdk-registry = { path = "../greentic-extension-sdk-registry", version = "0.4.6" }
-greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "0.4.6" }
+greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "1.1.0-dev" }
+greentic-extension-sdk-registry = { path = "../greentic-extension-sdk-registry", version = "1.1.0-dev" }
+greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "1.1.0-dev" }
+greentic-types = { workspace = true }
 include_dir = { workspace = true }
 notify-debouncer-full = { workspace = true }
 pkcs8 = { workspace = true }
@@ -46,9 +58,10 @@ zip = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
-greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "0.4.6" }
+greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "1.1.0-dev" }
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
+wiremock = "0.6"
 
 [lints]
 workspace = true

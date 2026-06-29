@@ -1,8 +1,12 @@
 //! Registry client + install lifecycle for Greentic Designer Extensions.
 
+#![forbid(unsafe_code)]
+
 pub mod config;
 pub mod credentials;
+pub mod digest;
 pub mod error;
+mod extract;
 pub mod hex;
 pub mod lifecycle;
 pub mod local;
@@ -14,7 +18,10 @@ pub mod publish;
 pub mod registry;
 pub mod storage;
 pub mod store;
+pub mod trust_store;
 pub mod types;
+pub mod update;
+mod verify;
 
 pub use self::error::RegistryError;
 pub use self::publish::{PublishReceipt, PublishRequest, SignatureBlob};

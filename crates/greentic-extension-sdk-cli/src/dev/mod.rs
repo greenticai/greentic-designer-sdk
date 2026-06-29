@@ -3,6 +3,7 @@
 pub mod builder;
 pub mod event;
 pub mod installer;
+pub mod mount;
 pub mod packer;
 pub mod state;
 pub mod watcher;
@@ -268,8 +269,24 @@ fn count_watched_files(project_dir: &Path) -> usize {
 }
 
 fn probe_describe_field(project_dir: &Path, key: &str) -> Option<String> {
-    let bytes = std::fs::read(project_dir.join("describe.json")).ok()?;
-    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let describe_path = project_dir.join("describe.json");
+    let bytes = match std::fs::read(&describe_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            // Surface the problem instead of silently showing "unknown" in the
+            // dev loop banner — a missing/unreadable describe.json is a project
+            // setup error the developer should fix.
+            tracing::warn!(path = %describe_path.display(), error = %e, "cannot read describe.json");
+            return None;
+        }
+    };
+    let v: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(path = %describe_path.display(), error = %e, "describe.json is not valid JSON");
+            return None;
+        }
+    };
     match key {
         "kind" => v["kind"].as_str().map(str::to_string),
         _ => v["metadata"][key].as_str().map(str::to_string),

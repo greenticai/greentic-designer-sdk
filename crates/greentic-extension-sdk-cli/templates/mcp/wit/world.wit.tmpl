@@ -1,0 +1,14 @@
+package {{id_wit}};
+
+// wasix:mcp router world.
+//
+// A local-WASM MCP server: the component exports the `wasix:mcp/router`
+// interface so the runtime's MCP executor (greentic-mcp-exec `WasixExecutor`,
+// the `router_echo` reference) can list and call its tools directly. This is
+// NOT a greentic design extension — it imports no greentic WIT and exports the
+// `router` interface only.
+//
+// The `wasix:mcp@25.6.18` package is bundled under `wit/deps/wasix-mcp/`.
+world mcp-router {
+  export wasix:mcp/router@25.6.18;
+}

@@ -1,0 +1,149 @@
+// LLM design extension guest for {{id}}.
+//
+// This scaffold implements every export required by the extension-design
+// contract. The `complete` tool demonstrates the LLM-extension pattern:
+// pull an API key from host secrets, build a request, call host http,
+// return a structured response. Replace the example URL + payload shape
+// with the provider you target.
+
+#[allow(warnings)]
+mod bindings;
+
+use bindings::exports::greentic::extension_base::{lifecycle, manifest};
+use bindings::exports::greentic::extension_design::{knowledge, prompting, tools, validation};
+use bindings::greentic::extension_base::types;
+use bindings::greentic::extension_host::{http, secrets};
+
+struct Component;
+
+// ---- extension-base/manifest ----
+impl manifest::Guest for Component {
+    fn get_identity() -> types::ExtensionIdentity {
+        types::ExtensionIdentity {
+            id: "{{id}}".to_string(),
+            version: "{{version}}".to_string(),
+            kind: types::Kind::Design,
+        }
+    }
+
+    fn get_offered() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+
+    fn get_required() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+}
+
+// ---- extension-base/lifecycle ----
+impl lifecycle::Guest for Component {
+    fn init(_config_json: String) -> Result<(), types::ExtensionError> {
+        // TODO: parse provider config (api base URL, default model) here.
+        Ok(())
+    }
+
+    fn shutdown() {
+        // No-op for a stateless LLM client. Override if you cache a client.
+    }
+}
+
+// ---- extension-design/tools ----
+impl tools::Guest for Component {
+    fn list_tools() -> Vec<tools::ToolDefinition> {
+        vec![tools::ToolDefinition {
+            name: "complete".to_string(),
+            description: "Run an LLM completion against {{name}}.".to_string(),
+            input_schema_json: r#"{
+  "type": "object",
+  "properties": {
+    "prompt":     { "type": "string" },
+    "max_tokens": { "type": "integer", "minimum": 1, "default": 256 }
+  },
+  "required": ["prompt"]
+}"#
+            .to_string(),
+            output_schema_json: r#"{
+  "type": "object",
+  "properties": {
+    "text": { "type": "string" }
+  },
+  "required": ["text"]
+}"#
+            .to_string(),
+        }]
+    }
+
+    fn invoke_tool(
+        name: String,
+        args_json: String,
+    ) -> Result<String, types::ExtensionError> {
+        if name != "complete" {
+            return Err(types::ExtensionError::InvalidInput(format!(
+                "unknown tool: {name}"
+            )));
+        }
+        // 1. Pull API key from host secrets (alias declared in describe.json).
+        let api_key = secrets::get("api_key")
+            .map_err(|e| types::ExtensionError::Runtime(format!("secrets::get: {e:?}")))?;
+        // 2. Build the HTTP request (provider-specific endpoint).
+        let req = http::Request {
+            method: http::Method::Post,
+            url: "https://api.example.com/v1/complete".to_string(),
+            headers: vec![
+                ("authorization".to_string(), format!("Bearer {api_key}")),
+                ("content-type".to_string(), "application/json".to_string()),
+            ],
+            body: Some(args_json.into_bytes()),
+        };
+        // 3. Call host http (subject to permissions.network allowlist).
+        let resp = http::fetch(&req)
+            .map_err(|e| types::ExtensionError::Runtime(format!("http::fetch: {e:?}")))?;
+        // 4. Return the upstream body verbatim. Real impl should parse + reshape.
+        String::from_utf8(resp.body)
+            .map_err(|e| types::ExtensionError::Runtime(format!("non-utf8 body: {e}")))
+    }
+}
+
+// ---- extension-design/validation ----
+impl validation::Guest for Component {
+    fn validate_content(
+        _content_type: String,
+        _content_json: String,
+    ) -> validation::ValidateResult {
+        validation::ValidateResult {
+            valid: true,
+            diagnostics: Vec::new(),
+        }
+    }
+}
+
+// ---- extension-design/prompting ----
+impl prompting::Guest for Component {
+    fn system_prompt_fragments() -> Vec<prompting::PromptFragment> {
+        Vec::new()
+    }
+}
+
+// ---- extension-design/knowledge ----
+impl knowledge::Guest for Component {
+    fn list_entries(
+        _category_filter: Option<String>,
+    ) -> Vec<knowledge::EntrySummary> {
+        Vec::new()
+    }
+
+    fn get_entry(id: String) -> Result<knowledge::Entry, types::ExtensionError> {
+        Err(types::ExtensionError::InvalidInput(format!(
+            "unknown entry: {id}"
+        )))
+    }
+
+    fn suggest_entries(
+        _query: String,
+        _limit: u32,
+    ) -> Vec<knowledge::EntrySummary> {
+        Vec::new()
+    }
+}
+
+bindings::export!(Component with_types_in bindings);

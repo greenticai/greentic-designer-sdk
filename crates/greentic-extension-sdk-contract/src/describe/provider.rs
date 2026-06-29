@@ -3,6 +3,8 @@
 //! `RuntimeGtpack` is an optional nested field on `Runtime` — populated when
 //! `kind == ProviderExtension`. Enforces SHA-256 format at parse time.
 
+use std::str::FromStr;
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,11 +22,45 @@ where
     D: Deserializer<'de>,
 {
     let s = String::deserialize(d)?;
-    if s.len() != 64 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(serde::de::Error::custom(format!(
-            "invalid sha256: expected 64 lowercase hex chars, got len={} value={s:?}",
-            s.len()
-        )));
-    }
+    // Reuse the canonical `Sha256` validator (lowercase-only). The previous
+    // hand-rolled check used `is_ascii_hexdigit()`, which accepts uppercase
+    // `A-F` — diverging from the v2 schema pattern `^[0-9a-f]{64}$`, the
+    // `Sha256` newtype, and `pack_writer::sha256_hex`. That let a doc pass
+    // deserialization yet fail schema validation (and vice-versa).
+    crate::Sha256::from_str(&s).map_err(serde::de::Error::custom)?;
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeGtpack;
+
+    fn json_with_sha(sha: &str) -> String {
+        format!(
+            r#"{{"file":"pack.gtpack","sha256":"{sha}","pack_id":"p","component_version":"1.0.0"}}"#
+        )
+    }
+
+    #[test]
+    fn accepts_lowercase_hex_sha256() {
+        let sha = "a".repeat(64);
+        let parsed: RuntimeGtpack = serde_json::from_str(&json_with_sha(&sha)).unwrap();
+        assert_eq!(parsed.sha256, sha);
+    }
+
+    #[test]
+    fn rejects_uppercase_hex_sha256() {
+        let sha = "A".repeat(64);
+        let err = serde_json::from_str::<RuntimeGtpack>(&json_with_sha(&sha)).unwrap_err();
+        assert!(
+            err.to_string().contains("non-lowercase-hex"),
+            "expected lowercase-hex rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_length_sha256() {
+        let err = serde_json::from_str::<RuntimeGtpack>(&json_with_sha("abc")).unwrap_err();
+        assert!(err.to_string().contains("64 hex chars"), "got: {err}");
+    }
 }

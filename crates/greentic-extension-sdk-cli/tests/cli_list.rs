@@ -1,8 +1,8 @@
 //! Integration tests for `gtdx list --status`.
 
 use greentic_extension_sdk_contract::{
-    DescribeJson, ExtensionKind,
-    describe::{Author, Capabilities, Engine, Metadata, Permissions, Runtime},
+    Compat, DescribeJson, ExtensionKind, RuntimeComponent,
+    describe::{Author, Capabilities, Contributions, Engine, Metadata, Permissions, Runtime},
 };
 use tempfile::TempDir;
 
@@ -14,11 +14,12 @@ fn gtdx_bin() -> std::path::PathBuf {
     p
 }
 
-fn gtdx_cmd() -> std::process::Command {
-    let bin = gtdx_bin();
-    // Integration tests execute the locally built gtdx binary from Cargo output.
-    // foxguard: ignore[rs/no-command-injection]
-    std::process::Command::new(bin)
+fn default_compat() -> Compat {
+    Compat {
+        min_designer_version: ">=1.0.0".parse().unwrap(),
+        min_runner_version: "^0.12.0".parse().unwrap(),
+        contract_version: "1.2.0".parse().unwrap(),
+    }
 }
 
 fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
@@ -30,13 +31,16 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
 
     let describe = DescribeJson {
         schema_ref: None,
-        api_version: "greentic.ai/v1".into(),
+        api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
+        compat: default_compat(),
         metadata: Metadata {
             id: id.into(),
             name: id.into(),
             version: version.into(),
-            summary: format!("Test fixture for {id}"),
+            summary: greentic_extension_sdk_contract::LocalizedString::plain(format!(
+                "Test fixture for {id}"
+            )),
             description: None,
             author: Author {
                 name: "Test".into(),
@@ -50,23 +54,39 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
             icon: None,
             screenshots: vec![],
         },
-        engine: Engine {
+        engine: Some(Engine {
             greentic_designer: "*".into(),
             ext_runtime: "*".into(),
-        },
+        }),
         capabilities: Capabilities {
             offered: vec![],
             required: vec![],
         },
         runtime: Runtime {
-            component: "extension.wasm".into(),
             memory_limit_mb: 64,
             permissions: Permissions::default(),
-            gtpack: None,
+            components: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(
+                    "stub".parse().unwrap(),
+                    RuntimeComponent {
+                        oci_ref: Some("oci://ghcr.io/example/stub:latest".into()),
+                        gtpack: None,
+                        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .parse()
+                            .unwrap(),
+                        world: "greentic:component/stub@0.1.0".into(),
+                    },
+                );
+                m
+            },
         },
         execution: None,
-        contributions: serde_json::json!({}),
+        contributions: Contributions::default(),
+        localization: None,
         signature: None,
+        manifest_sha256: None,
+        required_secrets: vec![],
     };
 
     std::fs::write(
@@ -82,7 +102,7 @@ fn list_status_shows_disabled_extensions() {
     write_design_fixture(tmp.path(), "test.qux", "0.1.0");
 
     // Disable it first.
-    let s = gtdx_cmd()
+    let s = std::process::Command::new(gtdx_bin())
         .args([
             "--home",
             tmp.path().to_str().unwrap(),
@@ -93,7 +113,7 @@ fn list_status_shows_disabled_extensions() {
         .unwrap();
     assert!(s.success());
 
-    let output = gtdx_cmd()
+    let output = std::process::Command::new(gtdx_bin())
         .args(["--home", tmp.path().to_str().unwrap(), "list", "--status"])
         .output()
         .unwrap();
@@ -112,7 +132,7 @@ fn list_without_status_does_not_show_column() {
     let tmp = TempDir::new().unwrap();
     write_design_fixture(tmp.path(), "test.qux", "0.1.0");
 
-    let output = gtdx_cmd()
+    let output = std::process::Command::new(gtdx_bin())
         .args(["--home", tmp.path().to_str().unwrap(), "list"])
         .output()
         .unwrap();

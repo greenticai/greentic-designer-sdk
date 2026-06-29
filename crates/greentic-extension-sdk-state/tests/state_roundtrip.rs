@@ -50,17 +50,63 @@ fn save_atomic_writes_then_reload_returns_same_data() {
 }
 
 #[test]
-fn save_atomic_does_not_leave_tmp_or_lock_on_disk() {
+fn save_atomic_leaves_no_tmp_file() {
     let tmp = TempDir::new().unwrap();
     let state = ExtensionState::default();
     state.save_atomic(tmp.path()).unwrap();
 
-    let names: Vec<_> = std::fs::read_dir(tmp.path())
+    let names: Vec<String> = std::fs::read_dir(tmp.path())
         .unwrap()
-        .map(|e| e.unwrap().file_name())
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(names.len(), 1, "expected one file, got: {names:?}");
-    assert_eq!(names[0], "extensions-state.json");
+    // The state file must exist and no `.tmp` may linger. The `.lock` file is
+    // intentionally persistent — deleting it would race another process holding
+    // a lock on the same inode.
+    assert!(names.iter().any(|n| n == "extensions-state.json"));
+    assert!(
+        !names.iter().any(|n| std::path::Path::new(n)
+            .extension()
+            .is_some_and(|e| e == "tmp")),
+        "no .tmp should remain, got: {names:?}"
+    );
+}
+
+#[test]
+fn concurrent_updates_all_survive() {
+    use std::sync::Arc;
+    let tmp = Arc::new(TempDir::new().unwrap());
+    let mut handles = vec![];
+    for i in 0..8 {
+        let tmp = tmp.clone();
+        handles.push(std::thread::spawn(move || {
+            let key_id = format!("ext.{i}");
+            // Retry through lock contention until this update lands.
+            for attempt in 0..1000u64 {
+                if ExtensionState::update(tmp.path(), |s| {
+                    s.set_enabled(&key_id, "0.1.0", false);
+                })
+                .is_ok()
+                {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5 + attempt % 7));
+            }
+            panic!("update for {key_id} never succeeded");
+        }));
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // Every update must be present — the lock is held across load+save, so no
+    // read-modify-write clobbers another writer's change.
+    let final_state = ExtensionState::load(tmp.path()).unwrap();
+    for i in 0..8 {
+        assert!(
+            !final_state.is_enabled(&format!("ext.{i}"), "0.1.0"),
+            "update for ext.{i} was lost"
+        );
+    }
 }
 
 #[test]

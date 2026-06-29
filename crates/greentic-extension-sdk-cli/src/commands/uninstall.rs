@@ -18,6 +18,7 @@ pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
         ExtensionKind::Design,
         ExtensionKind::Bundle,
         ExtensionKind::Deploy,
+        ExtensionKind::WasixMcpRouter,
     ] {
         let dir = storage.kind_dir(kind);
         if !dir.exists() {

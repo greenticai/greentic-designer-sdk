@@ -1,0 +1,38 @@
+{
+  "$schema": "https://store.greentic.cloud/schemas/describe-v2.json",
+  "apiVersion": "greentic.ai/v2",
+  "kind": "DesignExtension",
+  "compat": {
+    "min_designer_version": ">=1.2.0",
+    "min_runner_version": "^0.12.0",
+    "contract_version": "1.2.0"
+  },
+  "metadata": {
+    "id": "greentic.cycle",
+    "name": "cycle",
+    "version": "0.1.0",
+    "summary": "Capability self-cycle fixture.",
+    "author": { "name": "Test" },
+    "license": "MIT"
+  },
+  "capabilities": {
+    "offered": [{ "id": "greentic:test/ping", "version": "1.0.0" }],
+    "required": [{ "id": "greentic:test/ping", "version": "1.0.0" }]
+  },
+  "runtime": {
+    "components": {
+      "cycle": {
+        "gtpack": {
+          "file": "extension.wasm",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pack_id": "greentic.cycle",
+          "component_version": "0.1.0"
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "world": "greentic:cycle/extension@1.0.0"
+      }
+    },
+    "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
+  },
+  "contributions": {}
+}

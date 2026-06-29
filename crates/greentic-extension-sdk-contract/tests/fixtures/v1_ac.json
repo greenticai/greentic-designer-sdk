@@ -1,0 +1,151 @@
+{
+  "apiVersion": "greentic.ai/v1",
+  "kind": "DesignExtension",
+  "metadata": {
+    "id": "greentic.adaptive-cards",
+    "name": "Adaptive Cards",
+    "version": "1.9.0",
+    "summary": "Design and validate Microsoft Adaptive Cards v1.6",
+    "description": "Schema-level validation, prompts, and tool exports for AdaptiveCards v1.6. Knowledge base ships empty; advanced examples curated separately.",
+    "author": {
+      "name": "Greentic",
+      "email": "team@greentic.ai"
+    },
+    "license": "MIT",
+    "repository": "https://github.com/greenticai/greentic-designer-extensions",
+    "keywords": [
+      "adaptive-cards",
+      "ui",
+      "microsoft",
+      "design-extension"
+    ],
+    "icon": "assets/icon.svg"
+  },
+  "engine": {
+    "greenticDesigner": ">=1.2.0",
+    "extRuntime": "^1.2.0"
+  },
+  "capabilities": {
+    "offered": [
+      {
+        "id": "greentic:adaptive-cards/schema",
+        "version": "1.6.0"
+      },
+      {
+        "id": "greentic:adaptive-cards/validate",
+        "version": "1.0.0"
+      },
+      {
+        "id": "greentic:adaptive-cards/transform",
+        "version": "1.0.0"
+      },
+      {
+        "id": "greentic:adaptive-cards/dsl-roles",
+        "version": "0.1.0"
+      }
+    ],
+    "required": []
+  },
+  "runtime": {
+    "component": "extension.wasm",
+    "memoryLimitMB": 64,
+    "permissions": {
+      "network": [],
+      "secrets": [],
+      "callExtensionKinds": []
+    }
+  },
+  "contributions": {
+    "schemas": [
+      "schemas/adaptive-card-v1.6.json"
+    ],
+    "prompts": [
+      "prompts/rules.md",
+      "prompts/examples.md"
+    ],
+    "knowledge": [
+      "knowledge/"
+    ],
+    "nodeTypes": [
+      {
+        "type_id": "adaptive-card",
+        "label": "Adaptive Card",
+        "category": "visual",
+        "icon": "🎴",
+        "color": "#0d9488",
+        "complexity": "complex",
+        "config_schema": "{\"type\":\"object\",\"properties\":{\"template\":{\"type\":\"string\",\"title\":\"Template\",\"description\":\"Starting template — switch to the Preview tab to design the card body\",\"default\":\"custom\"},\"tier\":{\"type\":\"string\",\"title\":\"Visual tier\",\"enum\":[\"free\",\"pro\",\"enterprise\"],\"default\":\"free\"}}}",
+        "output_ports": [
+          { "name": "default", "label": "Next" }
+        ]
+      },
+      {
+        "type_id": "component",
+        "label": "Component",
+        "category": "integration",
+        "icon": "⚙️",
+        "color": "#6366f1",
+        "complexity": "complex",
+        "config_schema": "{\"type\":\"object\",\"required\":[\"component_id\"],\"properties\":{\"component_id\":{\"type\":\"string\",\"description\":\"WASM component identifier\"},\"operation\":{\"type\":\"string\"},\"input\":{\"type\":\"object\"}}}",
+        "output_ports": [
+          { "name": "default", "label": "Next" }
+        ]
+      },
+      {
+        "type_id": "condition",
+        "label": "Condition",
+        "category": "logic",
+        "icon": "🔀",
+        "color": "#eab308",
+        "complexity": "simple",
+        "config_schema": "{\"type\":\"object\",\"required\":[\"expression\",\"operator\"],\"properties\":{\"expression\":{\"type\":\"string\",\"description\":\"Value to evaluate. Supports ${form.*} and ${step-N.output.*} refs\"},\"operator\":{\"type\":\"string\",\"enum\":[\"equals\",\"not_equals\",\"contains\",\"not_contains\",\"greater_than\",\"less_than\",\"is_empty\",\"is_not_empty\",\"matches\"]},\"value\":{\"type\":\"string\",\"description\":\"Comparison value (ignored for is_empty/is_not_empty)\"}}}",
+        "output_ports": [
+          { "name": "yes", "label": "Match" },
+          { "name": "no", "label": "No Match" }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "validate_card",
+        "export": "greentic:extension-design/validation.validate-content"
+      },
+      {
+        "name": "analyze_card",
+        "export": "greentic:extension-design/tools.invoke-tool"
+      },
+      {
+        "name": "check_accessibility",
+        "export": "greentic:extension-design/tools.invoke-tool"
+      },
+      {
+        "name": "optimize_card",
+        "export": "greentic:extension-design/tools.invoke-tool"
+      },
+      {
+        "name": "transform_card",
+        "export": "greentic:extension-design/tools.invoke-tool"
+      },
+      {
+        "name": "template_card",
+        "export": "greentic:extension-design/tools.invoke-tool"
+      },
+      {
+        "name": "data_to_card",
+        "export": "greentic:extension-design/tools.invoke-tool"
+      },
+      {
+        "name": "list_examples",
+        "export": "greentic:extension-design/knowledge.list-entries"
+      },
+      {
+        "name": "get_example",
+        "export": "greentic:extension-design/knowledge.get-entry"
+      },
+      {
+        "name": "suggest_layout",
+        "export": "greentic:extension-design/knowledge.suggest-entries"
+      }
+    ]
+  }
+}

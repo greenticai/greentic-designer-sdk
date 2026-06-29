@@ -49,3 +49,30 @@ fn provider_kind_serde_roundtrip() {
 fn provider_kind_dir_name() {
     assert_eq!(ExtensionKind::Provider.dir_name(), "provider");
 }
+
+/// `wasix:mcp/router` uses a colon and a forward-slash — serde must
+/// deserialize the literal string, not a pascal-case alias.
+#[test]
+fn wasix_mcp_router_deserializes_from_json_string() {
+    let parsed: ExtensionKind = serde_json::from_str("\"wasix:mcp/router\"").unwrap();
+    assert_eq!(parsed, ExtensionKind::WasixMcpRouter);
+}
+
+#[test]
+fn wasix_mcp_router_serializes_to_correct_json_string() {
+    let json = serde_json::to_string(&ExtensionKind::WasixMcpRouter).unwrap();
+    assert_eq!(json, "\"wasix:mcp/router\"");
+}
+
+#[test]
+fn wasix_mcp_router_serde_roundtrip() {
+    let original = ExtensionKind::WasixMcpRouter;
+    let serialized = serde_json::to_string(&original).unwrap();
+    let deserialized: ExtensionKind = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(deserialized, original);
+}
+
+#[test]
+fn wasix_mcp_router_dir_name() {
+    assert_eq!(ExtensionKind::WasixMcpRouter.dir_name(), "mcp");
+}
