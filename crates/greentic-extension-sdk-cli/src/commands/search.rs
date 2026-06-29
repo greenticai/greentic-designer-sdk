@@ -29,12 +29,14 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         .token_env
         .as_deref()
         .and_then(|e| std::env::var(e).ok());
-    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token);
+    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token)
+        .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
 
     let kind = match args.kind.as_deref() {
         Some("design") => Some(greentic_extension_sdk_contract::ExtensionKind::Design),
         Some("bundle") => Some(greentic_extension_sdk_contract::ExtensionKind::Bundle),
         Some("deploy") => Some(greentic_extension_sdk_contract::ExtensionKind::Deploy),
+        Some("mcp") => Some(greentic_extension_sdk_contract::ExtensionKind::WasixMcpRouter),
         Some(x) => return Err(anyhow::anyhow!("unknown kind: {x}")),
         None => None,
     };

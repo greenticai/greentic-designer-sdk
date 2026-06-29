@@ -90,16 +90,46 @@ pub fn build_gtxpack(entries: Vec<PackEntry>) -> Result<Vec<u8>, PackWriterError
     Ok(cursor.into_inner())
 }
 
+/// Build a deterministic `.gtxpack` AND inject a `manifest.json` entry
+/// listing every other file with its sha256 + size. The manifest is
+/// computed AFTER text normalization, so the sha256 in the manifest
+/// matches the bytes that land in the ZIP.
+///
+/// Use [`build_gtxpack`] for the no-manifest path (legacy + tests that
+/// don't need integrity coverage).
+///
+/// # Errors
+///
+/// Returns a zip / IO error if the underlying writer fails, or wraps a
+/// JCS encode error if `manifest.json` cannot be canonicalized.
+pub fn build_gtxpack_with_manifest(entries: Vec<PackEntry>) -> Result<Vec<u8>, PackWriterError> {
+    let normalized: Vec<PackEntry> = entries.into_iter().map(normalize_entry).collect();
+
+    let manifest = crate::manifest::build_manifest(
+        normalized
+            .iter()
+            .filter(|e| !e.is_dir)
+            .map(|e| (e.path.as_str(), e.bytes.as_slice())),
+    );
+    let manifest_bytes = serde_jcs::to_vec(&manifest).map_err(|e| {
+        PackWriterError::Io(std::io::Error::other(format!(
+            "manifest.json canonicalize: {e}"
+        )))
+    })?;
+
+    let mut all = normalized;
+    all.push(PackEntry::file(
+        crate::manifest::MANIFEST_ENTRY_NAME,
+        manifest_bytes,
+    ));
+    build_gtxpack(all)
+}
+
 /// Lowercase hex SHA256 of the given bytes.
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(64);
-    for b in digest {
-        use std::fmt::Write as _;
-        write!(&mut out, "{b:02x}").expect("write to String");
-    }
-    out
+    crate::hex::encode(&digest)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -178,5 +208,33 @@ mod tests {
         assert!(names.contains(&"a.wasm".to_string()));
         assert!(names.contains(&"describe.json".to_string()));
         assert!(names.contains(&"z.md".to_string()));
+    }
+
+    #[test]
+    fn pack_with_manifest_contains_manifest_json_and_passes_verify() {
+        let entries = vec![
+            PackEntry::file("describe.json", br#"{"k":1}"#.to_vec()),
+            PackEntry::file("extension.wasm", b"\0asm\x01\x00\x00\x00".to_vec()),
+        ];
+        let bytes = build_gtxpack_with_manifest(entries).unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        assert!(
+            archive.by_name("manifest.json").is_ok(),
+            "manifest.json must be present in archive root",
+        );
+        crate::manifest::verify_archive_against_manifest(&bytes).unwrap();
+    }
+
+    #[test]
+    fn pack_with_manifest_is_deterministic() {
+        let mk = || {
+            vec![
+                PackEntry::file("describe.json", br#"{"k":1}"#.to_vec()),
+                PackEntry::file("extension.wasm", b"\0asm\x01\x00\x00\x00".to_vec()),
+            ]
+        };
+        let a = build_gtxpack_with_manifest(mk()).unwrap();
+        let b = build_gtxpack_with_manifest(mk()).unwrap();
+        assert_eq!(sha256_hex(&a), sha256_hex(&b));
     }
 }

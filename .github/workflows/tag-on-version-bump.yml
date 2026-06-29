@@ -13,5 +13,8 @@ concurrency:
 
 jobs:
   tag:
-    uses: greenticai/.github/.github/workflows/tag-on-version-bump.yml@main
+    # Pinned to greenticai/.github@main (7fd49c4) instead of floating @main so a
+    # force-push/compromise of that repo can't run with our tag-write secrets.
+    # Bump this SHA deliberately when adopting upstream workflow changes.
+    uses: greenticai/.github/.github/workflows/tag-on-version-bump.yml@7fd49c401689eed4e26e19bd5ea9b8bb5a7a823d
     secrets: inherit
