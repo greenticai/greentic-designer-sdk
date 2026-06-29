@@ -9,22 +9,24 @@ pub mod template;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Kind {
     Design,
-    DesignArtifactProducer,
     Bundle,
     Deploy,
     Provider,
     WasmComponent,
+    Mcp,
+    Llm,
 }
 
 impl Kind {
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Design => "design",
-            Kind::DesignArtifactProducer => "design-artifact-producer",
             Kind::Bundle => "bundle",
             Kind::Deploy => "deploy",
             Kind::Provider => "provider",
             Kind::WasmComponent => "wasm-component",
+            Kind::Mcp => "mcp",
+            Kind::Llm => "llm",
         }
     }
 }
@@ -39,10 +41,12 @@ mod tests {
     }
 
     #[test]
-    fn design_artifact_producer_kind_str() {
-        assert_eq!(
-            Kind::DesignArtifactProducer.as_str(),
-            "design-artifact-producer"
-        );
+    fn mcp_kind_str() {
+        assert_eq!(Kind::Mcp.as_str(), "mcp");
+    }
+
+    #[test]
+    fn llm_kind_str() {
+        assert_eq!(Kind::Llm.as_str(), "llm");
     }
 }

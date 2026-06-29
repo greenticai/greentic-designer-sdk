@@ -15,13 +15,7 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
     greentic_extension_sdk_contract::schema::validate_describe_json(&value)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let describe: greentic_extension_sdk_contract::DescribeJson = serde_json::from_value(value)?;
-    let contributions = describe
-        .typed_contributions()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let _: greentic_extension_sdk_contract::DescribeJson = serde_json::from_value(value)?;
     println!("✓ {} valid", describe_path.display());
-    if !contributions.node_types.is_empty() {
-        println!("  nodeTypes: {} valid", contributions.node_types.len());
-    }
     Ok(())
 }

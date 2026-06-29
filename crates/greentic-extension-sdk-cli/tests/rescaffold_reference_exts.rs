@@ -18,13 +18,6 @@ fn gtdx_bin() -> PathBuf {
     p
 }
 
-fn gtdx_cmd() -> std::process::Command {
-    let bin = gtdx_bin();
-    // Integration tests execute the locally built gtdx binary from Cargo output.
-    // foxguard: ignore[rs/no-command-injection]
-    std::process::Command::new(bin)
-}
-
 fn run(cmd: &mut Command) -> (bool, String) {
     let out = cmd.output().expect("spawn");
     (
@@ -42,7 +35,7 @@ fn rescaffold_ac_extension_layout_overlap() {
     let ac_path = std::env::var("AC_EXT_PATH").expect("AC_EXT_PATH");
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("ac-rescaffolded");
-    let (ok, e) = run(gtdx_cmd()
+    let (ok, e) = run(Command::new(gtdx_bin())
         .arg("new")
         .arg("adaptive-cards")
         .arg("--kind")
@@ -74,7 +67,7 @@ fn rescaffold_bundle_standard_layout_overlap() {
     let std_path = std::env::var("BUNDLE_STD_PATH").expect("BUNDLE_STD_PATH");
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("bundle-rescaffolded");
-    let (ok, e) = run(gtdx_cmd()
+    let (ok, e) = run(Command::new(gtdx_bin())
         .arg("new")
         .arg("bundle-standard")
         .arg("--kind")

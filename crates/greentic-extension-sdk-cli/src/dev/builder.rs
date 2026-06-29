@@ -94,11 +94,42 @@ fn cargo_target_dir(project_dir: &Path) -> anyhow::Result<PathBuf> {
 ///
 /// `<target>` is resolved via `cargo metadata` so workspace members find
 /// artifacts at the workspace root, not a non-existent crate-local
-/// `target/`. Returns the first lexicographic `.wasm` so multi-target
-/// workspaces get deterministic behavior.
+/// `target/`. Prefers the artifact named after the project's own crate
+/// (`[package].name` with `-`→`_`), falling back to the first lexicographic
+/// `.wasm` so single-crate projects and ambiguous cases stay deterministic.
+/// Read `[package].name` from `<project_dir>/Cargo.toml`, if present.
+fn project_crate_name(project_dir: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(project_dir.join("Cargo.toml")).ok()?;
+    let value: toml::Value = toml::from_str(&raw).ok()?;
+    value
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Pick the `.wasm` artifact whose filename matches `crate_name` (with `-`
+/// normalized to `_`, as cargo does). Falls back to the lexicographically-first
+/// candidate when there is no name match (or no crate name), so single-crate
+/// projects keep working while multi-crate workspaces get the right artifact.
+fn select_wasm_artifact(mut candidates: Vec<PathBuf>, crate_name: Option<&str>) -> Option<PathBuf> {
+    candidates.sort();
+    if let Some(name) = crate_name {
+        let wanted = format!("{}.wasm", name.replace('-', "_"));
+        if let Some(hit) = candidates
+            .iter()
+            .find(|p| p.file_name().and_then(|s| s.to_str()) == Some(wanted.as_str()))
+        {
+            return Some(hit.clone());
+        }
+    }
+    candidates.into_iter().next()
+}
+
 pub fn find_wasm_artifact(project_dir: &Path, profile: Profile) -> anyhow::Result<PathBuf> {
     let profile_name = profile.as_str();
     let target_dir = cargo_target_dir(project_dir)?;
+    let crate_name = project_crate_name(project_dir);
     let candidates_dirs = [
         target_dir.join("wasm32-wasip2").join(profile_name),
         target_dir.join("wasm32-wasip1").join(profile_name),
@@ -107,14 +138,13 @@ pub fn find_wasm_artifact(project_dir: &Path, profile: Profile) -> anyhow::Resul
         if !dir.exists() {
             continue;
         }
-        let mut candidates: Vec<_> = std::fs::read_dir(dir)?
+        let candidates: Vec<_> = std::fs::read_dir(dir)?
             .flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("wasm"))
             .collect();
-        candidates.sort();
-        if let Some(first) = candidates.into_iter().next() {
-            return Ok(first);
+        if let Some(hit) = select_wasm_artifact(candidates, crate_name.as_deref()) {
+            return Ok(hit);
         }
     }
     anyhow::bail!(
@@ -175,6 +205,51 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("target/wasm32-wasip2/release")).unwrap();
         let err = find_wasm_artifact(tmp.path(), Profile::Release).unwrap_err();
         assert!(err.to_string().contains("no .wasm"));
+    }
+
+    #[test]
+    fn select_wasm_prefers_crate_name_match() {
+        let candidates = vec![
+            PathBuf::from("/t/aaa.wasm"),
+            PathBuf::from("/t/my_ext.wasm"),
+            PathBuf::from("/t/zzz.wasm"),
+        ];
+        // crate name uses '-', artifact uses '_' — normalization must match.
+        let got = select_wasm_artifact(candidates, Some("my-ext")).unwrap();
+        assert_eq!(got.file_name().unwrap(), "my_ext.wasm");
+    }
+
+    #[test]
+    fn select_wasm_falls_back_to_first_lexicographic_without_match() {
+        let candidates = vec![PathBuf::from("/t/zzz.wasm"), PathBuf::from("/t/aaa.wasm")];
+        let got = select_wasm_artifact(candidates, Some("nomatch")).unwrap();
+        assert_eq!(got.file_name().unwrap(), "aaa.wasm");
+    }
+
+    #[test]
+    fn select_wasm_none_for_empty() {
+        assert!(select_wasm_artifact(vec![], Some("x")).is_none());
+    }
+
+    #[test]
+    fn find_wasm_artifact_prefers_matching_crate_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            b"[package]\nname = \"my-ext\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        let dir = tmp.path().join("target/wasm32-wasip2/debug");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("aaa.wasm"), b"a").unwrap();
+        std::fs::write(dir.join("my_ext.wasm"), b"m").unwrap();
+        std::fs::write(dir.join("zzz.wasm"), b"z").unwrap();
+        let got = find_wasm_artifact(tmp.path(), Profile::Debug).unwrap();
+        assert_eq!(
+            got.file_name().unwrap(),
+            "my_ext.wasm",
+            "should pick the artifact named after the crate, not the first lexicographic"
+        );
     }
 
     #[test]

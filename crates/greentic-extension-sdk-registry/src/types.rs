@@ -55,8 +55,37 @@ pub struct ExtensionArtifact {
     pub signature: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AuthToken {
     pub registry: String,
     pub token: String,
+}
+
+// Hand-written so the secret `token` never leaks via `{:?}`/tracing (audit N10).
+impl std::fmt::Debug for AuthToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthToken")
+            .field("registry", &self.registry)
+            .field("token", &"***")
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthToken;
+
+    #[test]
+    fn debug_redacts_token() {
+        let t = AuthToken {
+            registry: "store.greentic.cloud".into(),
+            token: "super-secret-token".into(),
+        };
+        let rendered = format!("{t:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "token leaked into Debug: {rendered}"
+        );
+        assert!(rendered.contains("store.greentic.cloud"));
+    }
 }

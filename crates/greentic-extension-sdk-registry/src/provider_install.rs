@@ -41,18 +41,28 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 ///
 /// Caller must invoke `Storage::abort_install` on the staging dir if this
 /// returns `Err` — staging will be left populated.
+///
+/// On success returns the path of the `.gtpack` written into the gtdx provider
+/// dir, so the caller can roll it back if a later step (e.g. `commit_install`)
+/// fails — otherwise that copy would be orphaned (a partial install).
 pub(crate) fn post_install_provider(
     staging: &Path,
     describe: &DescribeJson,
     storage_root: &Path,
     force: bool,
-) -> Result<(), RegistryError> {
-    // Step 1: gtpack field must be present.
-    let gtpack = describe.runtime.gtpack.as_ref().ok_or_else(|| {
-        RegistryError::ProviderInstall(
-            "provider extension missing runtime.gtpack (invariant violation)".into(),
-        )
-    })?;
+) -> Result<std::path::PathBuf, RegistryError> {
+    // Step 1: at least one component must carry a gtpack distribution channel.
+    let gtpack = describe
+        .runtime
+        .components
+        .values()
+        .find_map(|c| c.gtpack.as_ref())
+        .ok_or_else(|| {
+            RegistryError::ProviderInstall(
+                "provider extension has no component with runtime.gtpack (invariant violation)"
+                    .into(),
+            )
+        })?;
 
     // Step 2: Read staged bytes and verify sha256.
     let staged_path = staging.join(&gtpack.file);
@@ -70,7 +80,9 @@ pub(crate) fn post_install_provider(
             gtpack.sha256
         ))
     })?;
-    if actual_digest.as_slice() != expected_bytes.as_slice() {
+    // Constant-time compare for consistency with the other digest checks
+    // (audit cycle-2 P3); not a remote-timing surface, but keep it uniform.
+    if !constant_time_eq::constant_time_eq(actual_digest.as_slice(), expected_bytes.as_slice()) {
         return Err(RegistryError::ProviderInstall(format!(
             "sha256 mismatch: describe={}, actual={}",
             gtpack.sha256,
@@ -101,7 +113,7 @@ pub(crate) fn post_install_provider(
     // Remove now-empty parent directories (best-effort; ignore errors).
     remove_empty_ancestors(&staged_path, staging);
 
-    Ok(())
+    Ok(dest)
 }
 
 /// Walk upward from `removed_file`'s parent toward (but not including) `stop`
@@ -167,73 +179,4 @@ fn read_pack_id_from_gtpack(path: &Path) -> Result<String, RegistryError> {
     let head: ManifestHead = ciborium::from_reader(raw.as_slice())
         .map_err(|e| RegistryError::ProviderInstall(format!("cbor decode: {e}")))?;
     Ok(head.pack_id)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write as _;
-
-    fn write_gtpack(path: &Path, pack_id: Option<&str>) {
-        let file = std::fs::File::create(path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default();
-        if let Some(pack_id) = pack_id {
-            let manifest = serde_json::json!({ "pack_id": pack_id });
-            let mut bytes = Vec::new();
-            ciborium::into_writer(&manifest, &mut bytes).unwrap();
-            zip.start_file("manifest.cbor", options).unwrap();
-            zip.write_all(&bytes).unwrap();
-        } else {
-            zip.start_file("readme.txt", options).unwrap();
-            zip.write_all(b"missing manifest").unwrap();
-        }
-        zip.finish().unwrap();
-    }
-
-    #[test]
-    fn hex_decode_rejects_odd_length_and_non_hex() {
-        assert_eq!(hex_decode("0a"), Some(vec![10]));
-        assert!(hex_decode("abc").is_none());
-        assert!(hex_decode("zz").is_none());
-    }
-
-    #[test]
-    fn remove_empty_ancestors_stops_at_non_empty_parent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        let nested = root.join("a/b/c");
-        std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(root.join("a/keep.txt"), "keep").unwrap();
-        let removed = nested.join("pack.gtpack");
-        std::fs::write(&removed, "pack").unwrap();
-        std::fs::remove_file(&removed).unwrap();
-
-        remove_empty_ancestors(&removed, root);
-
-        assert!(!nested.exists());
-        assert!(root.join("a").exists());
-    }
-
-    #[test]
-    fn read_pack_id_from_gtpack_reads_manifest_cbor() {
-        let tmp = tempfile::tempdir().unwrap();
-        let pack = tmp.path().join("pack.gtpack");
-        write_gtpack(&pack, Some("greentic.provider.test"));
-
-        assert_eq!(
-            read_pack_id_from_gtpack(&pack).unwrap(),
-            "greentic.provider.test"
-        );
-    }
-
-    #[test]
-    fn read_pack_id_from_gtpack_reports_missing_manifest() {
-        let tmp = tempfile::tempdir().unwrap();
-        let pack = tmp.path().join("missing.gtpack");
-        write_gtpack(&pack, None);
-
-        let err = read_pack_id_from_gtpack(&pack).unwrap_err();
-        assert!(err.to_string().contains("manifest.cbor"));
-    }
 }

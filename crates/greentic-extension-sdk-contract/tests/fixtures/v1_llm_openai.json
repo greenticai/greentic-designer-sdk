@@ -1,0 +1,57 @@
+{
+  "apiVersion": "greentic.ai/v1",
+  "kind": "DesignExtension",
+  "metadata": {
+    "id": "greentic.llm-openai",
+    "name": "LLM OpenAI (and compatible)",
+    "version": "1.2.0",
+    "summary": "Connect flows to OpenAI, Ollama, OpenRouter, Together, and custom OpenAI-compatible endpoints.",
+    "author": { "name": "Greentic AI", "email": "team@greentic.ai" },
+    "license": "Apache-2.0"
+  },
+  "engine": {
+    "greenticDesigner": ">=0.6.0",
+    "extRuntime": "^0.3.0"
+  },
+  "capabilities": {
+    "offered": [{ "id": "greentic:llm-openai/node", "version": "0.1.0" }],
+    "required": []
+  },
+  "runtime": {
+    "component": "extension.wasm",
+    "memoryLimitMB": 32,
+    "permissions": {
+      "network": ["https://api.openai.com", "https://openrouter.ai", "https://api.together.xyz"],
+      "secrets": ["*"],
+      "callExtensionKinds": []
+    },
+    "gtpack": {
+      "file": "runtime/component-llm-openai.gtpack",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "pack_id": "greentic.llm-openai",
+      "component_version": "0.6.0"
+    }
+  },
+  "contributions": {
+    "nodeTypes": [
+      {
+        "type_id": "llm-openai",
+        "label": "LLM OpenAI",
+        "category": "ai",
+        "icon": "robot",
+        "color": "#0d9488",
+        "complexity": "complex",
+        "config_schema": "__CONFIG_SCHEMA_STRINGIFIED__",
+        "output_ports": [
+          { "name": "success", "label": "Success" },
+          { "name": "error",   "label": "Error" }
+        ]
+      }
+    ],
+    "tools": [
+      { "name": "test_prompt",       "export": "greentic:extension-design/tools.invoke-tool" },
+      { "name": "validate_messages", "export": "greentic:extension-design/tools.invoke-tool" }
+    ],
+    "prompts": ["prompts/llm-openai-rules.md"]
+  }
+}

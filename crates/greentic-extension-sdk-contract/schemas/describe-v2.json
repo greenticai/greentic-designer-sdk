@@ -1,0 +1,395 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://store.greentic.cloud/schemas/describe-v2.json",
+  "title": "Greentic Designer Extension describe.json v2",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "compat",
+    "metadata",
+    "capabilities",
+    "runtime",
+    "contributions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "apiVersion": {
+      "const": "greentic.ai/v2"
+    },
+    "kind": {
+      "enum": [
+        "DesignExtension",
+        "BundleExtension",
+        "DeployExtension",
+        "ProviderExtension"
+      ]
+    },
+    "compat": {
+      "$ref": "#/$defs/compat"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "engine": {
+      "$ref": "#/$defs/engine"
+    },
+    "capabilities": {
+      "$ref": "#/$defs/capabilities"
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "execution": {
+      "type": "object",
+      "description": "BundleExtension dispatch config (builtin vs wasm). Ignored for other kinds."
+    },
+    "contributions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodeTypes": {
+          "type": "array",
+          "items": {}
+        },
+        "dwProviders": {
+          "type": "array",
+          "items": {}
+        },
+        "tools": {
+          "type": "array",
+          "items": {}
+        },
+        "recipes": {
+          "type": "array",
+          "items": {}
+        },
+        "knowledge": {
+          "type": "array",
+          "items": {}
+        },
+        "prompts": {
+          "type": "array",
+          "items": {}
+        },
+        "schemas": {
+          "type": "array",
+          "items": {}
+        },
+        "guardrails": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["export"],
+            "properties": {
+              "export": { "type": "string" },
+              "runtime_ref": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "localization": {
+      "type": "object"
+    },
+    "signature": {
+      "$ref": "#/$defs/signature"
+    },
+    "manifestSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "requiredSecrets": {
+      "type": "array",
+      "description": "Canonical list of credential secrets the operator must supply before this extension can function.",
+      "items": {
+        "$ref": "#/$defs/secretRequirement"
+      }
+    }
+  },
+  "$defs": {
+    "secretRequirement": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Namespaced secret key, e.g. tavily/api_key."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether the secret is mandatory for the extension to function."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this secret is used for."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "bytes",
+            "text",
+            "json"
+          ],
+          "description": "Expected encoding of the secret value."
+        },
+        "scope": {
+          "type": "object",
+          "description": "Scope hints: env, tenant, team."
+        },
+        "schema": {
+          "type": "object",
+          "description": "JSON Schema describing the secret value structure (used when format=json)."
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Example values or placeholder strings for operator UX."
+        }
+      }
+    },
+    "compat": {
+      "type": "object",
+      "required": [
+        "min_designer_version",
+        "min_runner_version",
+        "contract_version"
+      ],
+      "properties": {
+        "min_designer_version": {
+          "type": "string"
+        },
+        "min_runner_version": {
+          "type": "string"
+        },
+        "contract_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.-]+)?(\\+[a-zA-Z0-9.-]+)?$"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "version",
+        "summary",
+        "author",
+        "license"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]*\\.[a-z0-9.-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.-]+)?(\\+[a-zA-Z0-9.-]+)?$"
+        },
+        "summary": {},
+        "description": {},
+        "author": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "publicKey": {
+              "type": "string"
+            }
+          }
+        },
+        "license": {
+          "type": "string"
+        },
+        "homepage": {
+          "type": "string",
+          "format": "uri"
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "icon": {
+          "type": "string"
+        },
+        "screenshots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "required": [
+        "greenticDesigner",
+        "extRuntime"
+      ],
+      "properties": {
+        "greenticDesigner": {
+          "type": "string"
+        },
+        "extRuntime": {
+          "type": "string"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "offered": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capRef"
+          }
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capRef"
+          }
+        }
+      }
+    },
+    "capRef": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*:[a-z][a-z0-9/._-]*$"
+        },
+        "version": {
+          "type": "string"
+        },
+        "deprecated": {}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "permissions",
+        "components"
+      ],
+      "properties": {
+        "memoryLimitMB": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "permissions": {
+          "type": "object",
+          "properties": {
+            "network": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "secrets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "callExtensionKinds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "llmRoles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "LLM roles (wire names, e.g. sorla_composer) this extension may request from the host greentic:extension-host/llm import."
+            }
+          }
+        },
+        "components": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/runtimeComponent"
+          }
+        }
+      }
+    },
+    "runtimeComponent": {
+      "type": "object",
+      "required": [
+        "sha256",
+        "world"
+      ],
+      "properties": {
+        "oci_ref": {
+          "type": "string"
+        },
+        "gtpack": {
+          "type": "object"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "world": {
+          "type": "string"
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "publicKey",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "keyId": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Auto-installed by cargo-husky on first `cargo test`.
+#
+# Lightweight pre-push smoke test: only the library unit tests run here.
+# Heavier checks (workspace integration, release build, publish dry-run)
+# belong on the CI server. Pre-commit (fmt + clippy) catches the cheap
+# mistakes, pre-push catches regressions in compiled code without paying
+# the multi-minute full-CI tax on every push.
+#
+# To run the full gate locally before pushing, invoke `./ci/local_check.sh`
+# from the workspace root.
+
+set -euo pipefail
+
+echo "[husky pre-push] cargo test --lib"
+cargo test --lib --quiet

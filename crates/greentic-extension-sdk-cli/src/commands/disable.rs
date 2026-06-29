@@ -24,9 +24,8 @@ pub fn run(args: &DisableArgs, home: &Path) -> Result<()> {
 
     warn_dependents(home, &id)?;
 
-    let mut state = ExtensionState::load(home).context("loading state")?;
-    state.set_enabled(&id, &version, false);
-    state.save_atomic(home).context("saving state")?;
+    ExtensionState::update(home, |state| state.set_enabled(&id, &version, false))
+        .context("updating state")?;
 
     tracing::info!(ext_id = %id, version = %version, action = "disable", "extension state changed");
     println!("Disabled: {id}@{version} (designer will reload)");

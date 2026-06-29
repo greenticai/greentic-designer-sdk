@@ -45,7 +45,8 @@ async fn install_provider_extracts_gtpack_to_providers_gtdx_dir() {
         "0.1.0",
         &gtpack_bytes,
         &sha,
-    );
+    )
+    .unwrap();
 
     let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fixture", "0.1.0");
 
@@ -92,6 +93,57 @@ async fn install_provider_extracts_gtpack_to_providers_gtdx_dir() {
     );
 }
 
+#[test]
+fn provider_install_rolls_back_gtpack_when_commit_fails() {
+    let tmp = TempDir::new().unwrap();
+    let tmp_home = TempDir::new().unwrap();
+
+    let gtpack_bytes = b"fake-gtpack-content".to_vec();
+    let sha = support::sha256_hex(&gtpack_bytes);
+    let gtxpack_path = support::build_provider_fixture_gtxpack(
+        tmp.path(),
+        "greentic.provider.fixture",
+        "0.1.0",
+        &gtpack_bytes,
+        &sha,
+    )
+    .unwrap();
+    let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fixture", "0.1.0");
+
+    // Force commit_install to fail: pre-create the final extension path as a
+    // *file*, so the rename/remove during commit errors out.
+    let provider_dir = tmp_home.path().join("extensions/provider");
+    std::fs::create_dir_all(&provider_dir).unwrap();
+    std::fs::write(
+        provider_dir.join("greentic.provider.fixture-0.1.0"),
+        b"not a dir",
+    )
+    .unwrap();
+
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp.path());
+    let installer = Installer::new(storage, &reg);
+
+    let result = installer.install_artifact(
+        &artifact,
+        InstallOptions {
+            trust_policy: TrustPolicy::Loose,
+            accept_permissions: true,
+            force: false,
+        },
+    );
+    assert!(result.is_err(), "install should fail when commit fails");
+
+    // The gtpack copied to the gtdx dir must be rolled back, not orphaned.
+    let gtdx_pack = tmp_home
+        .path()
+        .join("runtime/packs/providers/gtdx/greentic.provider.fixture-0.1.0.gtpack");
+    assert!(
+        !gtdx_pack.exists(),
+        "provider gtpack must be removed when the install does not commit"
+    );
+}
+
 #[tokio::test]
 async fn install_provider_rejects_sha256_mismatch() {
     let tmp = TempDir::new().unwrap();
@@ -106,7 +158,8 @@ async fn install_provider_rejects_sha256_mismatch() {
         "0.1.0",
         &real_bytes,
         &wrong_sha,
-    );
+    )
+    .unwrap();
 
     let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fake", "0.1.0");
 
@@ -141,7 +194,7 @@ async fn install_provider_refuses_conflict_with_manual_pack() {
     std::fs::create_dir_all(&manual_dir).unwrap();
     std::fs::write(
         manual_dir.join("telegram.gtpack"),
-        support::encode_gtpack_with_pack_id("greentic.provider.telegram"),
+        support::encode_gtpack_with_pack_id("greentic.provider.telegram").unwrap(),
     )
     .unwrap();
 
@@ -154,7 +207,8 @@ async fn install_provider_refuses_conflict_with_manual_pack() {
         "0.1.0",
         &gtpack_bytes,
         &sha,
-    );
+    )
+    .unwrap();
 
     let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.telegram", "0.1.0");
 

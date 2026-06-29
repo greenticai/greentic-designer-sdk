@@ -46,19 +46,26 @@ impl Storage {
         self.root.join("registry.json")
     }
 
-    /// Creates a `.tmp` staging directory next to the final install path.
-    /// Caller writes into staging, then calls [`commit_install`].
+    /// Creates a unique `.tmp` staging directory next to the final install
+    /// path. Caller writes into staging, then calls [`commit_install`].
+    ///
+    /// The staging name carries a per-process pid + atomic counter so two
+    /// concurrent installs of the same extension never share (or delete) each
+    /// other's staging dir.
     pub fn begin_install(
         &self,
         kind: ExtensionKind,
         name: &str,
         version: &str,
     ) -> Result<(PathBuf, PathBuf), RegistryError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
+
         let final_dir = self.extension_dir(kind, name, version);
-        let staging = final_dir.with_extension("tmp");
-        if staging.exists() {
-            std::fs::remove_dir_all(&staging)?;
-        }
+        let seq = STAGING_SEQ.fetch_add(1, Ordering::Relaxed);
+        let staging = self
+            .kind_dir(kind)
+            .join(format!("{name}-{version}.{}.{seq}.tmp", std::process::id()));
         std::fs::create_dir_all(&staging)?;
         Ok((staging, final_dir))
     }
@@ -67,11 +74,46 @@ impl Storage {
         if let Some(parent) = final_dir.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        if final_dir.exists() {
-            std::fs::remove_dir_all(final_dir)?;
+        if !final_dir.exists() {
+            std::fs::rename(staging, final_dir)?;
+            return Ok(());
         }
-        std::fs::rename(staging, final_dir)?;
-        Ok(())
+        // A non-directory occupying the slot is a corrupt/unexpected state; do
+        // not try to swap around it — fail so the caller rolls back.
+        if !std::fs::symlink_metadata(final_dir)?.is_dir() {
+            return Err(RegistryError::Storage(format!(
+                "install slot is not a directory: {}",
+                final_dir.display()
+            )));
+        }
+        // Replace an existing install without a window where the slot is empty:
+        // move the old install aside first, swap the new one in, then delete the
+        // old. If the swap fails, restore the old install so a failed upgrade
+        // never leaves the extension missing (audit cycle-2 P3).
+        // Append `.old` to the FULL directory name — `with_extension` would
+        // truncate the last version segment (`greentic.x-1.0.0` -> `.x-1.0.old`)
+        // and collide across versions. Qualify with pid + a counter so two
+        // processes never share a backup path.
+        let backup = {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static BACKUP_SEQ: AtomicU64 = AtomicU64::new(0);
+            let seq = BACKUP_SEQ.fetch_add(1, Ordering::Relaxed);
+            let mut name = final_dir.file_name().unwrap_or_default().to_os_string();
+            name.push(format!(".{}.{seq}.old", std::process::id()));
+            final_dir.with_file_name(name)
+        };
+        let _ = std::fs::remove_dir_all(&backup);
+        std::fs::rename(final_dir, &backup)?;
+        match std::fs::rename(staging, final_dir) {
+            Ok(()) => {
+                let _ = std::fs::remove_dir_all(&backup);
+                Ok(())
+            }
+            Err(e) => {
+                let _ = std::fs::rename(&backup, final_dir);
+                Err(e.into())
+            }
+        }
     }
 
     pub fn abort_install(&self, staging: &Path) {

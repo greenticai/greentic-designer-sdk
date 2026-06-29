@@ -1,0 +1,47 @@
+{
+  "$schema": "https://store.greentic.cloud/schemas/describe-v2.json",
+  "apiVersion": "greentic.ai/v2",
+  "kind": "wasix:mcp/router",
+  "compat": {
+    "min_designer_version": ">={{sdk_version}}",
+    "min_runner_version": "^{{sdk_version}}",
+    "contract_version": "{{sdk_version}}"
+  },
+  "metadata": {
+    "id": "{{id}}",
+    "name": "{{name}}",
+    "version": "{{version}}",
+    "summary": "A local-WASM MCP server exposing a wasix:mcp/router tool.",
+    "description": "A `wasix:mcp/router` component scaffolded by gtdx. It exports the wasix:mcp router interface and advertises one `{{name}}_echo` tool that echoes its `message` argument. Replace the example tool with your own in src/lib.rs.",
+    "author": {
+      "name": "{{author}}"
+    },
+    "license": "{{license}}"
+  },
+  "capabilities": {
+    "offered": [],
+    "required": []
+  },
+  "runtime": {
+    "memoryLimitMB": 64,
+    "world": "{{id_wit}}/mcp-router@1.0.0",
+    "components": {
+      "{{runtime_ref_key}}": {
+        "gtpack": {
+          "file": "extension.wasm",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pack_id": "{{id}}",
+          "component_version": "{{version}}"
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "world": "{{id_wit}}/mcp-router@1.0.0"
+      }
+    },
+    "permissions": {
+      "network": [],
+      "secrets": [],
+      "callExtensionKinds": []
+    }
+  },
+  "secret_requirements": []
+}
