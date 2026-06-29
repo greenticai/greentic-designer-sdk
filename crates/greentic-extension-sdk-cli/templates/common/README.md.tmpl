@@ -24,3 +24,6 @@ gtdx publish       # produce dist/{{id}}-{{version}}.gtxpack + install to local 
 - `src/lib.rs`    — WASM guest exports
 - `wit/`          — WIT contract (vendored by `gtdx new`; see `.gtdx-contract.lock`)
 - `i18n/en.json`  — user-facing strings
+- `AGENTS.md`     — guidance for AI coding agents (Claude Code, Codex, …)
+- `CLAUDE.md`     — Claude Code entry point (points to `AGENTS.md`)
+- `.claude/`      — Claude Code config: pre-approved build perms + `/check` command
