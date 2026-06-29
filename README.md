@@ -158,6 +158,11 @@ gtdx login                              # auth to Greentic Store
 gtdx publish --sign --key my-key.pem ./ # bind manifest, then sign — one step
 ```
 
+Prefer not to memorise the flags? `gtdx publish --wizard` walks you through
+registry, mode (real / dry-run / verify-only), signing + key source, trust
+policy and overwrite — using any flags you pass as defaults. The wizard is
+opt-in, so plain `gtdx publish` keeps its scripted, CI-friendly behaviour.
+
 `publish --sign` binds the whole-archive manifest into `describe.json` and then
 signs, so the embedded signature covers the entire pack. Key sources, in
 precedence order: `--key <path>`, `--key-id <id>` (loads

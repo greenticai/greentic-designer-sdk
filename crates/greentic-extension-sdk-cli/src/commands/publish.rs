@@ -1,8 +1,10 @@
 use std::fmt;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use clap::Args as ClapArgs;
 use clap::ValueEnum;
+use dialoguer::{Confirm, Input, Select};
 
 use crate::dev::builder::Profile;
 use crate::dev::project_dir_from_manifest;
@@ -110,9 +112,23 @@ pub struct Args {
     /// still drives the pack; only the build step is bypassed.
     #[arg(long, value_name = "PATH")]
     pub wasm: Option<PathBuf>,
+
+    /// Interactive wizard: prompt for registry, mode, signing and trust
+    /// instead of requiring the full flag string. Opt-in (publish keeps its
+    /// scripted defaults unless this is set).
+    #[arg(short = 'w', long)]
+    pub wizard: bool,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
+    let args = if args.wizard {
+        if !std::io::stdin().is_terminal() {
+            anyhow::bail!("--wizard requires an interactive terminal");
+        }
+        run_wizard(args)?
+    } else {
+        args
+    };
     if args.sign && args.key.is_none() && args.key_id.is_none() {
         eprintln!(
             "note: --sign with no --key/--key-id; reading PKCS8 PEM from ${}",
@@ -153,6 +169,161 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
             std::process::exit(err.exit_code());
         }
     }
+}
+
+/// Interactively fill in publish options, using the supplied `args` as
+/// defaults. Returns an updated `Args` that the normal `run` path consumes, so
+/// the wizard never duplicates publish logic — it only gathers inputs.
+fn run_wizard(mut args: Args) -> anyhow::Result<Args> {
+    println!("gtdx publish — interactive wizard (press Enter to accept defaults)\n");
+
+    args.registry = Input::<String>::new()
+        .with_prompt("Registry (local | file://… | oci://… | named entry)")
+        .default(args.registry.clone())
+        .interact_text()?;
+
+    let modes = [
+        "Publish for real",
+        "Dry-run (build + pack, no upload)",
+        "Verify-only (check version slot, no build)",
+    ];
+    let default_mode = if args.dry_run {
+        1
+    } else if args.verify_only {
+        2
+    } else {
+        0
+    };
+    let mode = Select::new()
+        .with_prompt("Mode")
+        .items(&modes)
+        .default(default_mode)
+        .interact()?;
+    args.dry_run = mode == 1;
+    args.verify_only = mode == 2;
+
+    let version = Input::<String>::new()
+        .with_prompt("Version override (blank = use describe.json)")
+        .allow_empty(true)
+        .default(args.version.clone().unwrap_or_default())
+        .interact_text()?;
+    let version = version.trim();
+    args.version = (!version.is_empty()).then(|| version.to_string());
+
+    // Signing is meaningless when no artifact is produced (verify-only).
+    if !args.verify_only {
+        prompt_signing(&mut args)?;
+    }
+
+    let trusts = [TrustArg::Loose, TrustArg::Normal, TrustArg::Strict];
+    let trust_labels = ["loose", "normal", "strict"];
+    let default_trust = trusts.iter().position(|t| *t == args.trust).unwrap_or(0);
+    let trust = Select::new()
+        .with_prompt("Trust policy")
+        .items(&trust_labels)
+        .default(default_trust)
+        .interact()?;
+    args.trust = trusts[trust];
+
+    args.force = Confirm::new()
+        .with_prompt("Overwrite an existing version if present?")
+        .default(args.force)
+        .interact()?;
+
+    print_publish_summary(&args, modes[mode]);
+    let proceed = Confirm::new()
+        .with_prompt("Proceed?")
+        .default(true)
+        .interact()?;
+    if !proceed {
+        anyhow::bail!("cancelled by user");
+    }
+    Ok(args)
+}
+
+fn prompt_signing(args: &mut Args) -> anyhow::Result<()> {
+    args.sign = Confirm::new()
+        .with_prompt("Sign the .gtxpack?")
+        .default(args.sign)
+        .interact()?;
+    if !args.sign {
+        return Ok(());
+    }
+    let sources = [
+        "Key file (PKCS8 PEM path)".to_string(),
+        "Key id (~/.greentic/keys/<id>.key)".to_string(),
+        format!("Env var (${})", args.key_env),
+    ];
+    let default_source = if args.key.is_some() {
+        0
+    } else if args.key_id.is_some() {
+        1
+    } else {
+        2
+    };
+    let source = Select::new()
+        .with_prompt("Signing key source")
+        .items(&sources)
+        .default(default_source)
+        .interact()?;
+    match source {
+        0 => {
+            let path = Input::<String>::new()
+                .with_prompt("PKCS8 PEM key file path")
+                .default(
+                    args.key
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                )
+                .interact_text()?;
+            args.key = Some(PathBuf::from(path.trim()));
+            args.key_id = None;
+        }
+        1 => {
+            let id = Input::<String>::new()
+                .with_prompt("Key id")
+                .default(args.key_id.clone().unwrap_or_default())
+                .interact_text()?;
+            args.key_id = Some(id.trim().to_string());
+            args.key = None;
+        }
+        _ => {
+            let env = Input::<String>::new()
+                .with_prompt("Env var holding the PKCS8 PEM")
+                .default(args.key_env.clone())
+                .interact_text()?;
+            args.key_env = env.trim().to_string();
+            args.key = None;
+            args.key_id = None;
+        }
+    }
+    Ok(())
+}
+
+fn print_publish_summary(args: &Args, mode_label: &str) {
+    println!("\nAbout to publish:");
+    println!("  registry  {}", args.registry);
+    println!("  mode      {mode_label}");
+    println!(
+        "  version   {}",
+        args.version
+            .clone()
+            .unwrap_or_else(|| "(from describe.json)".to_string())
+    );
+    println!("  sign      {}", args.sign);
+    if args.sign {
+        let key = if let Some(path) = &args.key {
+            format!("file {}", path.display())
+        } else if let Some(id) = &args.key_id {
+            format!("key-id {id}")
+        } else {
+            format!("env ${}", args.key_env)
+        };
+        println!("  key       {key}");
+    }
+    println!("  trust     {}", args.trust);
+    println!("  force     {}", args.force);
 }
 
 fn render_outcome(format: &str, outcome: &PublishOutcome) -> anyhow::Result<()> {
