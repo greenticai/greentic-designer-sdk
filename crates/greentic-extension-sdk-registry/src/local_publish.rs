@@ -120,7 +120,10 @@ fn update_index(root: &Path, req: &PublishRequest) -> Result<(), RegistryError> 
     let index_path = root.join(INDEX_FILE);
     let mut index: RegistryIndex = if index_path.exists() {
         let bytes = fs::read(&index_path)?;
-        serde_json::from_slice(&bytes).unwrap_or_default()
+        // Propagate a parse error rather than falling back to an empty index:
+        // silently zeroing a corrupt index and re-persisting it would
+        // permanently drop every prior entry (audit N14).
+        serde_json::from_slice(&bytes)?
     } else {
         RegistryIndex::default()
     };

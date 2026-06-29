@@ -1,0 +1,19 @@
+name: validate-extension-smoke
+on: [push, pull_request]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Build gtdx
+        run: cargo build -p greentic-extension-sdk-cli --bin gtdx
+      - name: Good fixture passes
+        run: ./target/debug/gtdx lint --publish --dir .github/actions/validate-extension/fixtures/good
+      - name: Bad fixture fails
+        run: |
+          if ./target/debug/gtdx lint --publish --dir .github/actions/validate-extension/fixtures/bad; then
+            echo "expected lint to fail on bad fixture" >&2
+            exit 1
+          fi

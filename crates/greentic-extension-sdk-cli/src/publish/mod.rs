@@ -1,228 +1,27 @@
 //! gtdx publish: build + validate + pack + publish orchestration.
-
+mod backend;
+mod error;
 pub mod receipt;
+mod signing_key;
+#[cfg(test)]
+mod tests;
 pub mod validator;
 
 use std::path::{Path, PathBuf};
 
 use greentic_extension_sdk_contract::DescribeJson;
 use greentic_extension_sdk_registry::RegistryError;
-use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
 use greentic_extension_sdk_registry::publish::{PublishRequest, SignatureBlob};
 use greentic_extension_sdk_registry::registry::ExtensionRegistry;
 
 use crate::dev::builder::{Profile, run_build};
-use crate::dev::packer::build_pack;
+use crate::dev::packer::build_pack_with_key;
 use crate::publish::receipt::{PublishReceiptJson, write_receipt};
 use crate::publish::validator::{format_errors, validate_for_publish};
-
-use greentic_extension_sdk_registry::credentials::Credentials;
-use greentic_extension_sdk_registry::oci::OciRegistry;
-use greentic_extension_sdk_registry::store::GreenticStoreRegistry;
-
-/// Typed publish error with spec §9 exit codes.
-#[derive(Debug)]
-pub enum PublishError {
-    /// describe.json missing, malformed, schema-invalid, or business-rule invalid. Exit 2.
-    DescribeInvalid(String),
-    /// `cargo component build` failed. Exit 70.
-    Build(String),
-    /// Target version already exists and `--force` was not supplied. Exit 10.
-    VersionExists(String),
-    /// Registry demands credentials but none were provided. Exit 20.
-    AuthRequired(String),
-    /// Registry refused the write (e.g. read-only / permissions). Exit 30.
-    RegistryNotWritable(String),
-    /// Backend path not yet implemented (Phase 2 stubs). Exit 50.
-    NotImplemented(String),
-    /// Filesystem I/O or network I/O failure. Exit 74.
-    Io(String),
-    /// Catch-all for unexpected errors. Exit 1.
-    Other(anyhow::Error),
-}
-
-impl std::fmt::Display for PublishError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PublishError::DescribeInvalid(m)
-            | PublishError::Build(m)
-            | PublishError::VersionExists(m)
-            | PublishError::AuthRequired(m)
-            | PublishError::RegistryNotWritable(m)
-            | PublishError::NotImplemented(m)
-            | PublishError::Io(m) => write!(f, "{m}"),
-            PublishError::Other(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for PublishError {}
-
-impl PublishError {
-    #[must_use]
-    pub fn exit_code(&self) -> i32 {
-        match self {
-            PublishError::DescribeInvalid(_) => 2,
-            PublishError::VersionExists(_) => 10,
-            PublishError::AuthRequired(_) => 20,
-            PublishError::RegistryNotWritable(_) => 30,
-            PublishError::NotImplemented(_) => 50,
-            PublishError::Build(_) => 70,
-            PublishError::Io(_) => 74,
-            PublishError::Other(_) => 1,
-        }
-    }
-}
-
-fn io_err<E: std::fmt::Display>(e: E) -> PublishError {
-    PublishError::Io(e.to_string())
-}
-
-enum Backend {
-    Local(LocalFilesystemRegistry),
-    Store(GreenticStoreRegistry),
-    Oci(OciRegistry),
-}
-
-impl Backend {
-    async fn publish(
-        &self,
-        req: greentic_extension_sdk_registry::publish::PublishRequest,
-    ) -> Result<
-        greentic_extension_sdk_registry::publish::PublishReceipt,
-        greentic_extension_sdk_registry::RegistryError,
-    > {
-        match self {
-            Backend::Local(r) => r.publish(req).await,
-            Backend::Store(r) => r.publish(req).await,
-            Backend::Oci(r) => r.publish(req).await,
-        }
-    }
-}
-
-fn resolve_backend(
-    uri: &str,
-    home: &Path,
-    oci_token_override: Option<&str>,
-) -> anyhow::Result<Backend> {
-    if uri == "local" {
-        let root = home.join("registries/local");
-        return Ok(Backend::Local(LocalFilesystemRegistry::new(
-            "publish-local",
-            root,
-        )));
-    }
-    if let Some(rest) = uri.strip_prefix("file://") {
-        let root = std::path::PathBuf::from(rest);
-        return Ok(Backend::Local(LocalFilesystemRegistry::new("file", root)));
-    }
-    if let Some(rest) = uri.strip_prefix("oci://") {
-        return build_oci_backend(rest, oci_token_override);
-    }
-
-    let cfg = greentic_extension_sdk_registry::config::load(&home.join("config.toml"))
-        .map_err(|e| anyhow::anyhow!("load config: {e}"))?;
-    let entry = cfg
-        .registries
-        .iter()
-        .find(|e| e.name == uri)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no registry named '{uri}' in {}/config.toml. Add one with: gtdx registries add {uri} <url>",
-                home.display()
-            )
-        })?;
-
-    let token = resolve_token(home, entry);
-    Ok(Backend::Store(GreenticStoreRegistry::new(
-        &entry.name,
-        &entry.url,
-        token,
-    )))
-}
-
-/// Parse `oci://<host>/<namespace>[/<artifact-name>]` into an `OciRegistry`.
-///
-/// Two forms are accepted:
-/// - `oci://ghcr.io/myorg` — namespace only; the final artifact name is
-///   taken from `PublishRequest.ext_name` per-publish (one GHCR package per
-///   extension).
-/// - `oci://ghcr.io/myorg/my-package` — fully qualified; every publish from
-///   this URI targets the same `my-package` (different tags per version).
-///
-/// Auth resolution:
-///
-///   1. `--oci-token` CLI flag (explicit override)
-///   2. `GHCR_TOKEN` env
-///   3. `GITHUB_TOKEN` env (CI-friendly — `actions/checkout@v4` exports this)
-///   4. `OCI_TOKEN` env (generic)
-///   5. anonymous (public pulls only; push will 401)
-fn build_oci_backend(spec: &str, oci_token_override: Option<&str>) -> anyhow::Result<Backend> {
-    let (host, rest) = spec.split_once('/').ok_or_else(|| {
-        anyhow::anyhow!(
-            "oci:// URI must include at least a namespace: oci://<host>/<namespace>[/<name>]"
-        )
-    })?;
-    if host.is_empty() {
-        anyhow::bail!("oci:// URI missing host: {spec}");
-    }
-
-    let (namespace, artifact_name) = match rest.rsplit_once('/') {
-        Some((ns, name)) if !ns.is_empty() && !name.is_empty() => {
-            (ns.to_string(), Some(name.to_string()))
-        }
-        _ => (rest.to_string(), None),
-    };
-    if namespace.is_empty() {
-        anyhow::bail!("oci:// URI namespace is empty: {spec}");
-    }
-
-    let token = oci_token_override
-        .map(str::to_string)
-        .or_else(|| non_empty_env("GHCR_TOKEN"))
-        .or_else(|| non_empty_env("GITHUB_TOKEN"))
-        .or_else(|| non_empty_env("OCI_TOKEN"));
-
-    let auth = token.map(|t| oci_basic_auth_for(host, t));
-    let mut reg = OciRegistry::new(format!("oci-{host}"), host, namespace, auth);
-    if let Some(name) = artifact_name {
-        reg = reg.with_artifact_name(name);
-    }
-    Ok(Backend::Oci(reg))
-}
-
-fn non_empty_env(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|s| !s.is_empty())
-}
-
-/// OCI registries expect `(username, password)` basic auth. GHCR convention
-/// is `(<any-username>, <PAT>)`. Docker Hub uses `(<dockerhub-user>, <PAT>)`.
-/// For registries we don't recognize, fall back to `("token", <PAT>)`.
-fn oci_basic_auth_for(host: &str, token: String) -> (String, String) {
-    let user = if host.ends_with("ghcr.io") {
-        // GHCR accepts any non-empty username; "USERNAME" is the documented
-        // placeholder but the actual GitHub handle also works. Using a static
-        // token label keeps the auth deterministic across developers.
-        "oauth2".to_string()
-    } else {
-        "token".to_string()
-    };
-    (user, token)
-}
-
-fn resolve_token(
-    home: &Path,
-    entry: &greentic_extension_sdk_registry::config::RegistryEntry,
-) -> Option<String> {
-    if let Some(var) = &entry.token_env
-        && let Ok(v) = std::env::var(var)
-        && !v.is_empty()
-    {
-        return Some(v);
-    }
-    let creds = Credentials::load(&home.join("credentials.toml")).ok()?;
-    creds.get(&entry.name).map(str::to_string)
-}
+use backend::{Backend, resolve_backend};
+pub use error::PublishError;
+use error::io_err;
+use signing_key::resolve_signing_key;
 
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -236,6 +35,10 @@ pub struct PublishConfig {
     pub force: bool,
     pub sign: bool,
     pub key_id: Option<String>,
+    /// Explicit PKCS8 PEM signing-key file (takes precedence over `key_id`).
+    pub key_path: Option<PathBuf>,
+    /// Env var holding a PKCS8 PEM signing key (fallback when no file/key-id).
+    pub key_env: String,
     pub version_override: Option<String>,
     pub trust_policy: String,
     pub verify_only: bool,
@@ -243,6 +46,11 @@ pub struct PublishConfig {
     /// `resolve_backend` falls back to `GHCR_TOKEN` / `GITHUB_TOKEN` /
     /// `OCI_TOKEN` env vars, then anonymous.
     pub oci_token: Option<String>,
+    /// Pre-built `wasm32-wasip2` component to pack instead of running
+    /// `cargo component build` from `project_dir`. Lets an externally produced
+    /// component (e.g. a generated MCP component) be packed + signed + published
+    /// through the same path. When `None`, the project is built from source.
+    pub wasm_override: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -268,8 +76,37 @@ pub enum PublishOutcome {
     },
 }
 
+/// Resolve the component `.wasm` to pack: an externally-built artifact when
+/// `--wasm` is given (skips `cargo component build`), otherwise a fresh build
+/// of the project. Kept separate from `run_publish` so the override branch is
+/// unit-testable without invoking the toolchain.
+fn resolve_publish_wasm(cfg: &PublishConfig) -> Result<PathBuf, PublishError> {
+    if let Some(wasm) = &cfg.wasm_override {
+        if !wasm.is_file() {
+            return Err(PublishError::Build(format!(
+                "--wasm path is not a file: {}",
+                wasm.display()
+            )));
+        }
+        return Ok(wasm.clone());
+    }
+    let build = run_build(&cfg.project_dir, cfg.profile)
+        .map_err(|e| PublishError::Build(format!("cargo component build: {e}")))?;
+    Ok(build.wasm_path)
+}
+
 #[allow(clippy::too_many_lines)]
 pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishError> {
+    // 0. `--trust strict` asserts a signed artifact; refuse to publish one
+    //    unsigned so the flag actually gates behavior instead of only labeling
+    //    the receipt (audit cycle-1 P2). Checked first so it fails fast before
+    //    any build/pack work.
+    if cfg.trust_policy == "strict" && !cfg.sign {
+        return Err(PublishError::Other(anyhow::anyhow!(
+            "--trust strict requires a signature; pass --sign with --key / --key-id / --key-env"
+        )));
+    }
+
     // 1. Load + schema-validate describe.json via ext-contract.
     let describe_path = cfg.project_dir.join("describe.json");
     let describe_bytes = std::fs::read(&describe_path).map_err(io_err)?;
@@ -293,41 +130,50 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
         .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
 
     if cfg.verify_only {
-        return verify_only(&backend, &describe, cfg.force);
+        return verify_only(&backend, &describe, cfg.force).await;
     }
 
-    // 4. Build (release unless cfg says otherwise).
-    let build = run_build(&cfg.project_dir, cfg.profile)
-        .map_err(|e| PublishError::Build(format!("cargo component build: {e}")))?;
+    // 4. Resolve the component wasm: an externally-built artifact (`--wasm`,
+    //    e.g. a generated MCP component) or a fresh `cargo component build`.
+    let wasm_path = resolve_publish_wasm(cfg)?;
 
-    // 5. Pack deterministic .gtxpack (staging file).
-    let staging_pack = cfg.project_dir.join("dist/publish-staging.gtxpack");
-    let info = build_pack(&cfg.project_dir, &build.wasm_path, &staging_pack)
-        .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
-    let pack_bytes = std::fs::read(&staging_pack).map_err(io_err)?;
-
-    // 6. Optional signing (reuse Wave 1 JCS sign_describe).
-    let signature = if cfg.sign {
-        let key_id = cfg
-            .key_id
-            .clone()
-            .ok_or_else(|| PublishError::Other(anyhow::anyhow!("--sign requires --key-id")))?;
-        let signing_key = load_signing_key(&cfg.home, &key_id)
-            .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
-        greentic_extension_sdk_contract::sign_describe(&mut describe, &signing_key)
-            .map_err(|e| PublishError::Other(anyhow::anyhow!("sign: {e}")))?;
-        let sig = describe
-            .signature
-            .as_ref()
-            .ok_or_else(|| PublishError::Other(anyhow::anyhow!("signing produced no signature")))?;
-        Some(SignatureBlob {
-            algorithm: sig.algorithm.clone(),
-            public_key: sig.public_key.clone(),
-            value: sig.value.clone(),
-            key_id,
-        })
+    // 5. Resolve the signing key first (if requested), so the *pack's*
+    //    describe.json is manifest-bound and signed — the installable artifact
+    //    carries the authenticated descriptor, not just the registry metadata.
+    let key_and_id = if cfg.sign {
+        Some(resolve_signing_key(cfg).map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?)
     } else {
         None
+    };
+
+    // 6. Pack deterministic .gtxpack (manifest-bound; signed when a key is set).
+    let staging_pack = cfg.project_dir.join("dist/publish-staging.gtxpack");
+    let info = build_pack_with_key(
+        &cfg.project_dir,
+        &wasm_path,
+        &staging_pack,
+        key_and_id.as_ref().map(|(key, _)| key),
+    )
+    .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
+    let pack_bytes = std::fs::read(&staging_pack).map_err(io_err)?;
+
+    // The pack's describe.json is now authoritative (bound + signed); use it for
+    // the registry metadata so the two match exactly.
+    describe = serde_json::from_slice(&info.describe_bytes)
+        .map_err(|e| PublishError::Other(anyhow::anyhow!("parse signed describe: {e}")))?;
+
+    let signature = match (&key_and_id, &describe.signature) {
+        (Some((_, key_id)), Some(sig)) => Some(SignatureBlob {
+            algorithm: match sig.algorithm {
+                greentic_extension_sdk_contract::SignatureAlgorithm::Ed25519 => {
+                    "ed25519".to_string()
+                }
+            },
+            public_key: sig.public_key.clone(),
+            value: sig.value.clone(),
+            key_id: key_id.clone(),
+        }),
+        _ => None,
     };
 
     if cfg.dry_run {
@@ -351,15 +197,27 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
         force: cfg.force,
     };
 
-    let receipt = backend.publish(req).await.map_err(map_registry_err)?;
+    let receipt = match backend.publish(req).await {
+        Ok(r) => r,
+        Err(e) => {
+            // Don't leave the transient staging pack behind on a failed publish
+            // (auth/network/conflict); it could be mistaken for a real artifact
+            // and accumulates across retries (audit cycle-2 P3).
+            let _ = std::fs::remove_file(&staging_pack);
+            return Err(map_registry_err(e));
+        }
+    };
 
-    // 8. Also copy into local ./dist/ with the canonical name.
-    let final_dist = cfg.dist_dir.join(format!(
-        "{}-{}.gtxpack",
-        describe.metadata.name, describe.metadata.version
-    ));
-    std::fs::create_dir_all(&cfg.dist_dir).map_err(io_err)?;
-    std::fs::write(&final_dist, &pack_bytes).map_err(io_err)?;
+    // 8. Also copy into local ./dist/ with the canonical name, and drop the
+    //    transient staging pack so it doesn't linger.
+    let final_dist = write_canonical_dist(
+        &staging_pack,
+        &cfg.dist_dir,
+        &describe.metadata.name,
+        &describe.metadata.version,
+        &pack_bytes,
+    )
+    .map_err(io_err)?;
 
     let receipt_json = PublishReceiptJson {
         artifact: final_dist
@@ -408,47 +266,53 @@ fn map_registry_err(e: RegistryError) -> PublishError {
     }
 }
 
-fn verify_only(
+async fn verify_only(
     backend: &Backend,
     describe: &DescribeJson,
     force: bool,
 ) -> Result<PublishOutcome, PublishError> {
+    let id = describe.metadata.id.clone();
+    let version = describe.metadata.version.clone();
     match backend {
         Backend::Local(r) => {
-            let ver_dir = r
-                .root_path()
-                .join(&describe.metadata.id)
-                .join(&describe.metadata.version);
+            let ver_dir = r.root_path().join(&id).join(&version);
             if ver_dir.exists() && !force {
                 return Err(PublishError::VersionExists(format!(
-                    "version {} already exists at {}",
-                    describe.metadata.version,
+                    "version {version} already exists at {}",
                     ver_dir.display()
                 )));
             }
             Ok(PublishOutcome::VerifyOnly {
-                ext_id: describe.metadata.id.clone(),
-                version: describe.metadata.version.clone(),
+                ext_id: id,
+                version,
                 registry: r.root_path().display().to_string(),
             })
         }
         Backend::Store(r) => {
-            // Server-side conflict check lands here in a future iteration;
-            // for now, verify_only on a remote registry is a no-op success.
+            // Real server-side conflict probe: list the published versions and
+            // fail if this one already exists (audit N3 — previously a no-op
+            // success that printed "slot free" without contacting the server).
+            let existing = r.list_versions(&id).await.map_err(map_registry_err)?;
+            if existing.contains(&version) && !force {
+                return Err(PublishError::VersionExists(format!(
+                    "version {version} already exists in {}",
+                    r.base_url()
+                )));
+            }
             Ok(PublishOutcome::VerifyOnly {
-                ext_id: describe.metadata.id.clone(),
-                version: describe.metadata.version.clone(),
+                ext_id: id,
+                version,
                 registry: r.base_url().to_string(),
             })
         }
         Backend::Oci(_) => {
-            // Server-side HEAD probe against the OCI manifest endpoint lands
-            // in a later iteration; for now verify-only is a pass-through.
-            Ok(PublishOutcome::VerifyOnly {
-                ext_id: describe.metadata.id.clone(),
-                version: describe.metadata.version.clone(),
-                registry: "oci-registry".into(),
-            })
+            // OCI has no real conflict probe here — `list_versions` is an
+            // empty-list stub, so reusing it would report every slot as free.
+            // Returning a success would be a false "slot free"; surface
+            // NotImplemented (distinct exit code) instead (audit N3).
+            Err(PublishError::NotImplemented(
+                "verify-only conflict probe is not implemented for OCI registries".into(),
+            ))
         }
     }
 }
@@ -461,17 +325,18 @@ fn backend_registry_label(backend: &Backend) -> String {
     }
 }
 
-fn load_signing_key(home: &Path, key_id: &str) -> anyhow::Result<ed25519_dalek::SigningKey> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-    let key_path = home.join("keys").join(format!("{key_id}.key"));
-    let bytes = std::fs::read_to_string(&key_path)
-        .map_err(|e| anyhow::anyhow!("read {}: {e}", key_path.display()))?;
-    let decoded = B64
-        .decode(bytes.trim())
-        .map_err(|e| anyhow::anyhow!("decode {key_id}.key: {e}"))?;
-    let arr: [u8; 32] = decoded
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("{key_id}.key must be 32 bytes base64"))?;
-    Ok(ed25519_dalek::SigningKey::from_bytes(&arr))
+/// Write the published bytes to `<dist_dir>/<name>-<version>.gtxpack` and remove
+/// the transient `staging` pack so it doesn't linger in `./dist` after publish.
+fn write_canonical_dist(
+    staging: &Path,
+    dist_dir: &Path,
+    name: &str,
+    version: &str,
+    bytes: &[u8],
+) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dist_dir)?;
+    let final_dist = dist_dir.join(format!("{name}-{version}.gtxpack"));
+    std::fs::write(&final_dist, bytes)?;
+    let _ = std::fs::remove_file(staging);
+    Ok(final_dist)
 }

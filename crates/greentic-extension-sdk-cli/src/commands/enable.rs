@@ -16,9 +16,8 @@ pub fn run(args: &EnableArgs, home: &Path) -> Result<()> {
 
     verify_installed(home, &id, &version)?;
 
-    let mut state = ExtensionState::load(home).context("loading state")?;
-    state.set_enabled(&id, &version, true);
-    state.save_atomic(home).context("saving state")?;
+    ExtensionState::update(home, |state| state.set_enabled(&id, &version, true))
+        .context("updating state")?;
 
     tracing::info!(ext_id = %id, version = %version, action = "enable", "extension state changed");
     println!("Enabled: {id}@{version} (designer will reload)");
@@ -32,7 +31,11 @@ pub(crate) fn parse_target(target: &str, home: &Path) -> Result<(String, String)
     let versions = installed_versions(home, target)?;
     match versions.len() {
         0 => Err(anyhow!("extension not installed: {target}")),
-        1 => Ok((target.to_string(), versions.into_iter().next().unwrap())),
+        1 => versions
+            .into_iter()
+            .next()
+            .map(|v| (target.to_string(), v))
+            .ok_or_else(|| anyhow!("internal: single-version list was empty for {target}")),
         _ => Err(anyhow!(
             "ambiguous version for {target}: installed = [{}]. Specify with @<version>.",
             versions.join(", ")

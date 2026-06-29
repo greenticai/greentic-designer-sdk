@@ -43,6 +43,7 @@ fn find_installed(
         ExtensionKind::Bundle,
         ExtensionKind::Deploy,
         ExtensionKind::Provider,
+        ExtensionKind::WasixMcpRouter,
     ];
 
     let mut candidates: Vec<(ExtensionKind, semver::Version, DescribeJson)> = Vec::new();
@@ -96,10 +97,13 @@ fn find_installed(
         return Ok(None);
     }
 
-    // Pick the highest semver among all candidates.
+    // Pick the highest semver among all candidates. `candidates` is non-empty
+    // (checked above); handle None defensively instead of unwrapping (P3).
     candidates.sort_by(|a, b| a.1.cmp(&b.1));
-    let (kind, _ver, describe) = candidates.into_iter().next_back().unwrap();
-    Ok(Some((kind, describe)))
+    match candidates.into_iter().next_back() {
+        Some((kind, _ver, describe)) => Ok(Some((kind, describe))),
+        None => Ok(None),
+    }
 }
 
 fn format_kind_display(kind: ExtensionKind) -> &'static str {
@@ -108,6 +112,7 @@ fn format_kind_display(kind: ExtensionKind) -> &'static str {
         ExtensionKind::Bundle => "BundleExtension",
         ExtensionKind::Deploy => "DeployExtension",
         ExtensionKind::Provider => "ProviderExtension",
+        ExtensionKind::WasixMcpRouter => "wasix:mcp/router",
     }
 }
 
@@ -116,10 +121,14 @@ fn render_info(kind: ExtensionKind, d: &DescribeJson) {
     println!("Name: {}", d.metadata.id);
     println!("Version: {}", d.metadata.version);
     println!("License: {}", d.metadata.license);
-    println!("Summary: {}", d.metadata.summary);
+    println!("Summary: {}", d.metadata.summary.default());
 
     if kind == ExtensionKind::Provider
-        && let Some(gtpack) = &d.runtime.gtpack
+        && let Some(gtpack) = d
+            .runtime
+            .components
+            .values()
+            .find_map(|c| c.gtpack.as_ref())
     {
         println!("Runtime pack: {}", gtpack.pack_id);
         println!("Component version: {}", gtpack.component_version);

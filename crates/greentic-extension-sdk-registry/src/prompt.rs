@@ -5,10 +5,15 @@ use greentic_extension_sdk_contract::DescribeJson;
 /// CI / scripting / `--yes` flag).
 #[must_use]
 pub fn confirm_install(describe: &DescribeJson, auto_accept: bool) -> bool {
-    if auto_accept {
+    let perms = &describe.runtime.permissions;
+    let requests_sensitive = !perms.network.is_empty()
+        || !perms.secrets.is_empty()
+        || !perms.call_extension_kinds.is_empty();
+    // Pre-approved (e.g. `--yes`/CI), or nothing sensitive is requested — no
+    // prompt needed, so this stays non-interactive in those cases.
+    if auto_accept || !requests_sensitive {
         return true;
     }
-    let perms = &describe.runtime.permissions;
     eprintln!();
     eprintln!(
         "⚠️  Extension {} v{} requests:",
@@ -25,10 +30,6 @@ pub fn confirm_install(describe: &DescribeJson, auto_accept: bool) -> bool {
             "  Cross-extension: may call {} extensions",
             perms.call_extension_kinds.join(", ")
         );
-    }
-    if perms.network.is_empty() && perms.secrets.is_empty() && perms.call_extension_kinds.is_empty()
-    {
-        eprintln!("  (no special permissions)");
     }
     eprintln!();
 

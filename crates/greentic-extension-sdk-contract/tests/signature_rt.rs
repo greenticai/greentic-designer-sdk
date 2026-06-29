@@ -1,13 +1,10 @@
 use ed25519_dalek::SigningKey;
 use greentic_extension_sdk_contract::{
-    DescribeJson, artifact_sha256, canonical_signing_payload, sign_describe, sign_ed25519,
-    verify_describe, verify_ed25519,
+    DescribeJson, SignatureAlgorithm, artifact_sha256, bind_manifest, build_manifest,
+    canonical_signing_payload, sign_describe, sign_ed25519, verify_describe_self_consistent,
+    verify_ed25519, verify_manifest_binding,
 };
-
-fn random_signing_key() -> SigningKey {
-    let seed: [u8; 32] = rand::random();
-    SigningKey::from_bytes(&seed)
-}
+use rand::rngs::OsRng;
 
 #[test]
 fn sha256_is_deterministic() {
@@ -17,7 +14,7 @@ fn sha256_is_deterministic() {
 
 #[test]
 fn round_trip_sign_verify() {
-    let sk = random_signing_key();
+    let sk = SigningKey::generate(&mut OsRng);
     let pk = sk.verifying_key();
     let pk_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pk.to_bytes());
     let payload = b"arbitrary payload";
@@ -27,7 +24,7 @@ fn round_trip_sign_verify() {
 
 #[test]
 fn tampered_payload_fails_verification() {
-    let sk = random_signing_key();
+    let sk = SigningKey::generate(&mut OsRng);
     let pk = sk.verifying_key();
     let pk_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pk.to_bytes());
     let sig = sign_ed25519(&sk, b"original");
@@ -37,8 +34,13 @@ fn tampered_payload_fails_verification() {
 
 fn sample_describe_with_sig(sig_value: Option<&str>) -> DescribeJson {
     let json = serde_json::json!({
-        "apiVersion": "greentic.ai/v1",
+        "apiVersion": "greentic.ai/v2",
         "kind": "DesignExtension",
+        "compat": {
+            "min_designer_version": ">=1.0.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "1.2.0"
+        },
         "metadata": {
             "id": "greentic.canonicalize-test",
             "name": "Canonicalize Test",
@@ -49,7 +51,17 @@ fn sample_describe_with_sig(sig_value: Option<&str>) -> DescribeJson {
         },
         "engine": { "greenticDesigner": "*", "extRuntime": "*" },
         "capabilities": { "offered": [], "required": [] },
-        "runtime": { "component": "x.wasm", "memoryLimitMB": 64, "permissions": {} },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
         "contributions": {},
         "signature": sig_value.map(|v| serde_json::json!({
             "algorithm": "ed25519",
@@ -84,12 +96,12 @@ fn canonical_payload_is_deterministic_across_serde_round_trip() {
 
 #[test]
 fn sign_describe_populates_signature_field() {
-    let sk = random_signing_key();
+    let sk = SigningKey::generate(&mut OsRng);
     let mut d = sample_describe_with_sig(None);
     assert!(d.signature.is_none());
     sign_describe(&mut d, &sk).expect("sign");
     let sig = d.signature.as_ref().expect("signature populated");
-    assert_eq!(sig.algorithm, "ed25519");
+    assert_eq!(sig.algorithm, SignatureAlgorithm::Ed25519);
     assert_eq!(sig.public_key.len(), 44, "base64 of 32 bytes is 44 chars");
     assert_eq!(sig.value.len(), 88, "base64 of 64 bytes is 88 chars");
 }
@@ -99,7 +111,7 @@ fn sign_describe_strips_preexisting_signature_before_signing() {
     // If caller passes a describe that already has a stale signature,
     // sign_describe should canonicalize as-if signature was None so the
     // new sig is not computed over a signed payload.
-    let sk = random_signing_key();
+    let sk = SigningKey::generate(&mut OsRng);
     let mut d_preexisting = sample_describe_with_sig(Some("STALE"));
     let mut d_fresh = sample_describe_with_sig(None);
     sign_describe(&mut d_preexisting, &sk).expect("sign");
@@ -113,16 +125,16 @@ fn sign_describe_strips_preexisting_signature_before_signing() {
 
 #[test]
 fn sign_describe_then_verify_describe_roundtrip() {
-    let sk = random_signing_key();
+    let sk = SigningKey::generate(&mut OsRng);
     let mut d = sample_describe_with_sig(None);
     sign_describe(&mut d, &sk).expect("sign");
-    verify_describe(&d).expect("verify");
+    verify_describe_self_consistent(&d).expect("verify");
 }
 
 #[test]
 fn verify_describe_missing_signature_fails() {
     let d = sample_describe_with_sig(None);
-    let err = verify_describe(&d).unwrap_err();
+    let err = verify_describe_self_consistent(&d).unwrap_err();
     assert!(matches!(
         err,
         greentic_extension_sdk_contract::ContractError::SignatureInvalid(_)
@@ -132,11 +144,11 @@ fn verify_describe_missing_signature_fails() {
 
 #[test]
 fn verify_describe_rejects_tampered_metadata() {
-    let sk = random_signing_key();
+    let sk = SigningKey::generate(&mut OsRng);
     let mut d = sample_describe_with_sig(None);
     sign_describe(&mut d, &sk).expect("sign");
     d.metadata.version = "99.99.99".into();
-    let err = verify_describe(&d).unwrap_err();
+    let err = verify_describe_self_consistent(&d).unwrap_err();
     assert!(matches!(
         err,
         greentic_extension_sdk_contract::ContractError::SignatureInvalid(_)
@@ -145,22 +157,86 @@ fn verify_describe_rejects_tampered_metadata() {
 
 #[test]
 fn verify_describe_rejects_non_ed25519_algorithm() {
-    let sk = random_signing_key();
-    let mut d = sample_describe_with_sig(None);
-    sign_describe(&mut d, &sk).expect("sign");
-    d.signature.as_mut().unwrap().algorithm = "sha256-hmac".into();
-    let err = verify_describe(&d).unwrap_err();
-    assert!(format!("{err}").contains("unsupported algorithm"));
+    // Since the enum prevents invalid algorithms at deserialization, this test
+    // verifies the constraint by attempting to deserialize with an invalid algorithm.
+    let json = serde_json::json!({
+        "apiVersion": "greentic.ai/v2",
+        "kind": "DesignExtension",
+        "compat": {
+            "min_designer_version": ">=1.0.0",
+            "min_runner_version": "^0.12.0",
+            "contract_version": "1.2.0"
+        },
+        "metadata": {
+            "id": "greentic.canonicalize-test",
+            "name": "Canonicalize Test",
+            "version": "0.1.0",
+            "summary": "test fixture",
+            "author": { "name": "test" },
+            "license": "MIT"
+        },
+        "engine": { "greenticDesigner": "*", "extRuntime": "*" },
+        "capabilities": { "offered": [], "required": [] },
+        "runtime": {
+            "memoryLimitMB": 64,
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] },
+            "components": {
+                "stub": {
+                    "oci_ref": "oci://ghcr.io/example/stub:latest",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "world": "greentic:component/stub@0.1.0"
+                }
+            }
+        },
+        "contributions": {},
+        "signature": {
+            "algorithm": "sha256-hmac",
+            "publicKey": "AAAA",
+            "value": "SIG"
+        }
+    });
+    let err: Result<DescribeJson, _> = serde_json::from_value(json);
+    assert!(err.is_err());
 }
 
 #[test]
 fn verify_describe_survives_serde_round_trip() {
     // Field-order-independence test: sign, re-serialize through serde_json,
     // re-parse, verify still passes. Proves JCS canonicalization is stable.
-    let sk = random_signing_key();
+    let sk = SigningKey::generate(&mut OsRng);
     let mut d1 = sample_describe_with_sig(None);
     sign_describe(&mut d1, &sk).expect("sign");
     let json = serde_json::to_string(&d1).unwrap();
     let d2: DescribeJson = serde_json::from_str(&json).unwrap();
-    verify_describe(&d2).expect("verify after serde roundtrip");
+    verify_describe_self_consistent(&d2).expect("verify after serde roundtrip");
+}
+
+#[test]
+fn bind_then_verify_manifest_binding() {
+    let manifest = build_manifest(vec![("extension.wasm", &b"\0asm"[..])]);
+    let manifest_bytes = serde_jcs::to_vec(&manifest).unwrap();
+    let mut describe = sample_describe_with_sig(None);
+    bind_manifest(&mut describe, &manifest_bytes);
+    assert!(describe.manifest_sha256.is_some());
+    verify_manifest_binding(&describe, &manifest_bytes).expect("binding holds");
+    let tampered = serde_jcs::to_vec(&build_manifest(vec![("evil.wasm", &b"x"[..])])).unwrap();
+    assert!(verify_manifest_binding(&describe, &tampered).is_err());
+}
+
+#[test]
+fn verify_manifest_binding_errors_when_unbound() {
+    // A describe that has never had bind_manifest called (manifest_sha256 is None)
+    // must return Err — not panic or silently pass.
+    let describe = sample_describe_with_sig(None);
+    assert!(describe.manifest_sha256.is_none());
+    let manifest_bytes = b"any bytes";
+    let err = verify_manifest_binding(&describe, manifest_bytes)
+        .expect_err("should fail when manifest_sha256 is absent");
+    assert!(
+        matches!(
+            err,
+            greentic_extension_sdk_contract::ContractError::SignatureInvalid(_)
+        ),
+        "expected SignatureInvalid, got: {err}"
+    );
 }

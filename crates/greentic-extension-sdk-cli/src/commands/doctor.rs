@@ -8,19 +8,12 @@ use greentic_extension_sdk_registry::storage::Storage;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
-    /// Optional extension source directory containing describe.json.
-    pub path: Option<String>,
-
     /// Skip network probes (offline mode).
     #[arg(long)]
     pub offline: bool,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
-    if let Some(path) = args.path {
-        return check_extension_source(Path::new(&path));
-    }
-
     let mut failures = 0usize;
     println!("toolchain");
     failures += check_toolchain();
@@ -101,10 +94,18 @@ async fn check_registries(home: &Path, offline: bool) -> usize {
         return 0;
     }
     let mut fails = 0;
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .expect("reqwest client");
+    {
+        Ok(c) => c,
+        Err(e) => {
+            // `doctor` is the command users run on a broken machine — a TLS/HTTP
+            // backend init failure must be reported, not panic the diagnostics.
+            println!("  \u{2717} cannot build HTTP client to probe registries: {e}");
+            return cfg.registries.len();
+        }
+    };
     for entry in &cfg.registries {
         if offline {
             println!(
@@ -188,6 +189,7 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
         ExtensionKind::Design,
         ExtensionKind::Bundle,
         ExtensionKind::Deploy,
+        ExtensionKind::WasixMcpRouter,
     ] {
         let dir = storage.kind_dir(kind);
         if !dir.exists() {
@@ -218,9 +220,6 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
             {
                 println!("  \u{2717} {}: {e}", describe_path.display());
                 bad += 1;
-            } else if let Err(e) = validate_node_types_for_describe(value) {
-                println!("  \u{2717} {}: {e}", describe_path.display());
-                bad += 1;
             } else {
                 println!("  \u{2713} {}", describe_path.display());
             }
@@ -232,49 +231,4 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
         println!("  {total} total, {bad} bad");
     }
     Ok(bad)
-}
-
-fn check_extension_source(path: &Path) -> anyhow::Result<()> {
-    let describe_path = path.join("describe.json");
-    let bytes = std::fs::read(&describe_path)?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-    greentic_extension_sdk_contract::schema::validate_describe_json(&value)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let contributions = validate_node_types_for_describe(value)?;
-
-    println!("extension");
-    println!("  \u{2713} {} valid", describe_path.display());
-    println!("Node types:");
-    println!("  count: {}", contributions.node_types.len());
-    println!("  valid: true");
-    println!("  config schemas valid: true");
-    println!("  output ports valid: true");
-    for warning in node_type_warnings(&contributions) {
-        println!("  \u{26A0} {warning}");
-    }
-    Ok(())
-}
-
-fn validate_node_types_for_describe(
-    value: serde_json::Value,
-) -> anyhow::Result<greentic_extension_sdk_contract::Contributions> {
-    let describe: greentic_extension_sdk_contract::DescribeJson = serde_json::from_value(value)?;
-    describe
-        .typed_contributions()
-        .map_err(|e| anyhow::anyhow!("{e}"))
-}
-
-fn node_type_warnings(
-    contributions: &greentic_extension_sdk_contract::Contributions,
-) -> Vec<String> {
-    let mut warnings = Vec::new();
-    for node in &contributions.node_types {
-        if node.output_ports.is_empty() {
-            warnings.push(format!("node type {} has no output ports", node.type_id));
-        }
-        if node.config_schema.is_none() {
-            warnings.push(format!("node type {} has no config schema", node.type_id));
-        }
-    }
-    warnings
 }

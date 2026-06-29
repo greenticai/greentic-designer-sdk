@@ -8,8 +8,17 @@ pub enum ContractError {
     #[error("capability id is malformed: {0}")]
     MalformedCapabilityId(String),
 
+    #[error("component id is malformed: {0}")]
+    MalformedComponentId(String),
+
+    #[error("locale is malformed: {0}")]
+    MalformedLocale(String),
+
     #[error("version is not semver: {0}")]
     MalformedVersion(String),
+
+    #[error("sha256 is malformed: {0}")]
+    MalformedSha256(String),
 
     #[error("signature verification failed: {0}")]
     SignatureInvalid(String),
@@ -20,11 +29,14 @@ pub enum ContractError {
     #[error("canonicalization failed: {0}")]
     Canonicalize(String),
 
-    #[error("generated artifact is invalid: {0}")]
-    GeneratedArtifactInvalid(String),
+    /// Publisher certificate failed to parse or verify against the root.
+    #[error("publisher cert invalid: {0}")]
+    CertInvalid(String),
 
-    #[error("node type contribution is invalid: {0}")]
-    NodeTypeInvalid(String),
+    /// The trust root is not available (e.g. production root key not yet
+    /// provisioned — org-blocked).
+    #[error("trust root unavailable: {0}")]
+    TrustRootUnavailable(String),
 
     #[error("io: {0}")]
     Io(#[from] std::io::Error),

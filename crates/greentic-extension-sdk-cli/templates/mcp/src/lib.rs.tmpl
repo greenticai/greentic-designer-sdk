@@ -1,0 +1,147 @@
+//! `wasix:mcp/router` guest for {{id}}.
+//!
+//! A local-WASM MCP server modeled on the `router_echo` reference fixture in
+//! `greentic-mcp`. The component exports the `wasix:mcp/router` interface so the
+//! runtime's MCP executor can `list-tools` / `call-tool` directly — no greentic
+//! design-extension host imports are involved.
+//!
+//! The starter advertises a single `{{name}}_echo` tool that echoes its
+//! `message` argument back as text. Replace it with the tools your server
+//! exposes: add entries to [`Router::list_tools`] and handle them in
+//! [`Router::call_tool`].
+//!
+//! Bindings are generated inline via `wit_bindgen::generate!` so the crate
+//! compiles on the host (`cargo check` / `cargo test`) as well as for the
+//! wasm32-wasip2 target. The `export!` macro is gated to `wasm32` because it
+//! emits cabi symbols a host linker rejects.
+
+mod bindings {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "mcp-router",
+        generate_all,
+        generate_unused_types: true,
+    });
+}
+
+use bindings::exports::wasix::mcp::router::{
+    CompletionError, CompletionRequest, CompletionResponse, ContentBlock, GetPromptResult, Guest,
+    McpResource, Prompt, PromptError, ReadResourceResult, ResourceError, Response,
+    ServerCapabilities, ServerDescription, TextContent, Tool, ToolAnnotations, ToolError,
+    ToolResult, ToolsCapability,
+};
+
+/// The single example tool this server advertises. Rename it (and the matching
+/// arm in [`Router::call_tool`]) when you add your own tools.
+const ECHO_TOOL: &str = "{{name}}_echo";
+
+/// JSON Schema for the `{{name}}_echo` tool input: one required `message`
+/// string.
+const ECHO_INPUT_SCHEMA: &str =
+    r#"{"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}"#;
+
+struct Router;
+
+impl Guest for Router {
+    fn name() -> String {
+        "{{id}}".into()
+    }
+
+    fn title() -> Option<String> {
+        Some("{{label}}".into())
+    }
+
+    fn instructions() -> String {
+        "Example wasix:mcp router scaffolded by gtdx. Echoes the `message` argument.".into()
+    }
+
+    fn describe_server() -> ServerDescription {
+        ServerDescription {
+            name: "{{id}}".into(),
+            title: Some("{{label}}".into()),
+            capabilities: ServerCapabilities {
+                prompts: None,
+                resources: None,
+                tools: Some(ToolsCapability {
+                    list_changed: Some(false),
+                }),
+                completions: None,
+            },
+            resources: None,
+            resource_metadata: None,
+            meta: None,
+        }
+    }
+
+    fn list_tools() -> Vec<Tool> {
+        vec![Tool {
+            name: ECHO_TOOL.into(),
+            title: Some("Echo".into()),
+            description: "Echo the `message` argument back as text.".into(),
+            input_schema: ECHO_INPUT_SCHEMA.into(),
+            output_schema: None,
+            annotations: Some(ToolAnnotations {
+                read_only: Some(true),
+                destructive: Some(false),
+                streaming: Some(false),
+                experimental: None,
+            }),
+            meta: None,
+        }]
+    }
+
+    fn call_tool(tool_name: String, arguments: String) -> Result<Response, ToolError> {
+        if tool_name != ECHO_TOOL {
+            return Err(ToolError::NotFound(tool_name));
+        }
+
+        // Pull the `message` field out of the JSON arguments; fall back to the
+        // raw payload if it is absent so the tool always returns something
+        // useful.
+        let message = serde_json::from_str::<serde_json::Value>(&arguments)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or(arguments);
+
+        let block = ContentBlock::Text(TextContent {
+            text: message,
+            annotations: None,
+        });
+
+        Ok(Response::Completed(ToolResult {
+            content: vec![block],
+            structured_content: None,
+            progress: None,
+            meta: None,
+            is_error: None,
+        }))
+    }
+
+    fn list_resources() -> Vec<McpResource> {
+        Vec::new()
+    }
+
+    fn read_resource(_uri: String) -> Result<ReadResourceResult, ResourceError> {
+        Err(ResourceError::NotFound("no resources".into()))
+    }
+
+    fn list_prompts() -> Vec<Prompt> {
+        Vec::new()
+    }
+
+    fn get_prompt(_prompt_name: String) -> Result<GetPromptResult, PromptError> {
+        Err(PromptError::NotFound("no prompts".into()))
+    }
+
+    fn complete(_request: CompletionRequest) -> Result<CompletionResponse, CompletionError> {
+        Err(CompletionError::NotFound("completions disabled".into()))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+bindings::export!(Router with_types_in bindings);
