@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use greentic_extension_sdk_registry::config::{GREENTIC_STORE_NAME, GREENTIC_STORE_URL};
 use greentic_extension_sdk_registry::credentials::Credentials;
 use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
 use greentic_extension_sdk_registry::oci::OciRegistry;
@@ -54,22 +55,33 @@ pub(super) fn resolve_backend(
 
     let cfg = greentic_extension_sdk_registry::config::load(&home.join("config.toml"))
         .map_err(|e| anyhow::anyhow!("load config: {e}"))?;
-    let entry = cfg
-        .registries
-        .iter()
-        .find(|e| e.name == uri)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
+
+    // A user-configured entry always wins; otherwise the canonical
+    // `greentic-store` name falls back to its built-in URL so the public store
+    // works without `gtdx registries add`.
+    let (name, url, token_env) = match cfg.registries.iter().find(|e| e.name == uri) {
+        Some(entry) => (
+            entry.name.clone(),
+            entry.url.clone(),
+            entry.token_env.clone(),
+        ),
+        None if uri == GREENTIC_STORE_NAME => (
+            GREENTIC_STORE_NAME.to_string(),
+            GREENTIC_STORE_URL.to_string(),
+            None,
+        ),
+        None => {
+            return Err(anyhow::anyhow!(
                 "no registry named '{uri}' in {}/config.toml. Add one with: gtdx registries add {uri} <url>",
                 home.display()
-            )
-        })?;
+            ));
+        }
+    };
 
-    let token = resolve_token(home, entry);
+    let token = resolve_token(home, &name, token_env.as_deref());
     let allow_insecure = crate::registry_security::insecure_registry_opt_in();
     Ok(Backend::Store(
-        GreenticStoreRegistry::new(&entry.name, &entry.url, token)
-            .with_insecure_allowed(allow_insecure),
+        GreenticStoreRegistry::new(&name, &url, token).with_insecure_allowed(allow_insecure),
     ))
 }
 
@@ -142,16 +154,13 @@ fn oci_basic_auth_for(host: &str, token: String) -> (String, String) {
     (user, token)
 }
 
-fn resolve_token(
-    home: &Path,
-    entry: &greentic_extension_sdk_registry::config::RegistryEntry,
-) -> Option<String> {
-    if let Some(var) = &entry.token_env
+fn resolve_token(home: &Path, name: &str, token_env: Option<&str>) -> Option<String> {
+    if let Some(var) = token_env
         && let Ok(v) = std::env::var(var)
         && !v.is_empty()
     {
         return Some(v);
     }
     let creds = Credentials::load(&home.join("credentials.toml")).ok()?;
-    creds.get(&entry.name).map(str::to_string)
+    creds.get(name).map(str::to_string)
 }

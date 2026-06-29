@@ -147,6 +147,27 @@ One-shot strict-parity install — build + pack + install the same way
 production install would, but for an already-built source dir (no
 watcher loop).
 
+### Log in to the store
+
+The default registry is the public Greentic store, `greentic-store`
+(`https://store.greentic.cloud`) — it is built in, so you do **not** need to
+`gtdx registries add` it first.
+
+```bash
+gtdx login                  # opens the store in your browser, then paste a token
+gtdx login --no-browser     # skip the browser; just paste a token
+gtdx login --token <TOKEN>  # non-interactive (also reads $GTDX_TOKEN) — for CI
+```
+
+`login` resolves the registry URL, opens it so you can create an access token,
+and stores that token in `~/.greentic/credentials.toml` (owner-only). To target
+a different store, configure it once and it overrides the built-in:
+
+```bash
+gtdx registries add greentic-store https://staging.store.example  # override URL
+gtdx login --registry <name>                                       # or a named registry
+```
+
 ### Sign and publish
 
 `keygen`, `sign`, and `publish --sign` all use one key format: **PKCS8 PEM**
@@ -154,7 +175,7 @@ ed25519.
 
 ```bash
 gtdx keygen --out my-key.pem            # PKCS8 PEM private key (mode 0600)
-gtdx login                              # auth to Greentic Store
+gtdx login                              # auth to the Greentic store (see above)
 gtdx publish --sign --key my-key.pem ./ # bind manifest, then sign — one step
 ```
 

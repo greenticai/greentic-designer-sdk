@@ -4,6 +4,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::RegistryError;
 
+/// Canonical name of the public Greentic extension store. Used as the default
+/// registry so `gtdx login` / `gtdx publish` target the store out of the box
+/// without the user having to `gtdx registries add` it first.
+pub const GREENTIC_STORE_NAME: &str = "greentic-store";
+
+/// Built-in URL backing [`GREENTIC_STORE_NAME`]. A `[[registries]]` entry in
+/// `config.toml` with the same name overrides this (e.g. to point at a staging
+/// store), so the constant is only a fallback, never a hard-coded override.
+pub const GREENTIC_STORE_URL: &str = "https://store.greentic.cloud";
+
+/// Resolve a registry name to its URL.
+///
+/// A user-configured `[[registries]]` entry always wins; when none matches and
+/// the name is the canonical [`GREENTIC_STORE_NAME`], the built-in
+/// [`GREENTIC_STORE_URL`] is returned. Returns `None` for any other unknown
+/// name so callers can surface a clear "register it first" error.
+#[must_use]
+pub fn resolve_registry_url(cfg: &GtdxConfig, name: &str) -> Option<String> {
+    if let Some(entry) = cfg.registries.iter().find(|entry| entry.name == name) {
+        return Some(entry.url.clone());
+    }
+    (name == GREENTIC_STORE_NAME).then(|| GREENTIC_STORE_URL.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GtdxConfig {
     #[serde(default)]
@@ -76,6 +100,42 @@ pub fn save(path: &Path, cfg: &GtdxConfig) -> Result<(), RegistryError> {
     #[cfg(not(unix))]
     std::fs::write(path, s)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::{
+        GREENTIC_STORE_NAME, GREENTIC_STORE_URL, GtdxConfig, RegistryEntry, resolve_registry_url,
+    };
+
+    #[test]
+    fn builtin_store_resolves_without_config() {
+        let cfg = GtdxConfig::default();
+        assert_eq!(
+            resolve_registry_url(&cfg, GREENTIC_STORE_NAME).as_deref(),
+            Some(GREENTIC_STORE_URL)
+        );
+    }
+
+    #[test]
+    fn configured_entry_overrides_builtin() {
+        let mut cfg = GtdxConfig::default();
+        cfg.registries.push(RegistryEntry {
+            name: GREENTIC_STORE_NAME.to_string(),
+            url: "https://staging.example.test".to_string(),
+            token_env: None,
+        });
+        assert_eq!(
+            resolve_registry_url(&cfg, GREENTIC_STORE_NAME).as_deref(),
+            Some("https://staging.example.test")
+        );
+    }
+
+    #[test]
+    fn unknown_name_is_none() {
+        let cfg = GtdxConfig::default();
+        assert!(resolve_registry_url(&cfg, "no-such-registry").is_none());
+    }
 }
 
 #[cfg(all(test, unix))]
