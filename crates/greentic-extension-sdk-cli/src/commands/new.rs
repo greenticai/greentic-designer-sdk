@@ -15,7 +15,7 @@ use crate::scaffold::{
     template::{self, Context},
 };
 
-#[derive(ClapArgs, Debug)]
+#[derive(ClapArgs, Debug, Clone)]
 pub struct Args {
     /// Project folder name (kebab-case). Also default id suffix.
     pub name: String,
@@ -70,7 +70,31 @@ pub struct Args {
     pub from_openapi: Option<PathBuf>,
 }
 
-pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
+fn wizard_fill(args: &mut Args) -> anyhow::Result<()> {
+    use dialoguer::{Confirm, Input};
+    use std::io::IsTerminal;
+
+    // Never prompt when the user opted out or stdin is not a TTY (CI, pipes).
+    if args.yes || !std::io::stdin().is_terminal() {
+        return Ok(());
+    }
+
+    // Only prompt for values the user did not already pass explicitly.
+    if args.from_openapi.is_none() && args.kind == Kind::Mcp {
+        let seed = Confirm::new()
+            .with_prompt("Seed this MCP extension from an OpenAPI spec?")
+            .default(false)
+            .interact()?;
+        if seed {
+            let path: String = Input::new().with_prompt("OpenAPI spec path").interact_text()?;
+            args.from_openapi = Some(PathBuf::from(path));
+        }
+    }
+    Ok(())
+}
+
+pub fn run(mut args: Args, _home: &Path) -> anyhow::Result<()> {
+    wizard_fill(&mut args)?;
     let target = args
         .dir
         .clone()
@@ -87,7 +111,7 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     run_preflight(&target, args.force)?;
     prepare_target(&target, args.force)?;
 
-    let ctx = build_context(args, &id, &author);
+    let ctx = build_context(&args, &id, &author);
 
     let files_written = if let Some(spec) = args.from_openapi.as_deref() {
         scaffold_from_openapi(&ctx, spec, &target)?

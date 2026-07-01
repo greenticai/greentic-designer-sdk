@@ -2,6 +2,20 @@ use std::process::Command;
 use super::fixtures::{gtdx_bin, run};
 
 #[test]
+fn yes_flag_skips_wizard_and_scaffolds_noninteractively() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("q");
+    // No stdin attached; -y must prevent any prompt and scaffold the echo mcp skeleton.
+    let (ok, _o, e) = run(Command::new(gtdx_bin())
+        .arg("new").arg("q")
+        .arg("--kind").arg("mcp")
+        .arg("--dir").arg(&proj)
+        .arg("-y").arg("--no-git").arg("--force"));
+    assert!(ok, "stderr:\n{e}");
+    assert!(proj.join("describe.json").exists());
+}
+
+#[test]
 fn from_openapi_requires_kind_mcp() {
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("demo");
