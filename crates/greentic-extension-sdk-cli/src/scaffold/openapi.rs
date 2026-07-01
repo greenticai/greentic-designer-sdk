@@ -2,25 +2,20 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Env override pointing at the `greentic-mcp-gen` binary (absolute path).
-#[allow(dead_code)] // wired in Task 4
 pub const MCP_GEN_BIN_ENV: &str = "GTDX_MCP_GEN_BIN";
 
-#[allow(dead_code)] // wired in Task 4
 fn non_empty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
 }
 
 /// Resolve the generator binary: `GTDX_MCP_GEN_BIN` (if it exists) then PATH.
-#[allow(dead_code)] // wired in Task 4
 pub fn resolve_mcp_gen() -> anyhow::Result<PathBuf> {
-    resolve_mcp_gen_with(
-        non_empty_env(MCP_GEN_BIN_ENV).map(PathBuf::from),
-        || which::which("greentic-mcp-gen").ok(),
-    )
+    resolve_mcp_gen_with(non_empty_env(MCP_GEN_BIN_ENV).map(PathBuf::from), || {
+        which::which("greentic-mcp-gen").ok()
+    })
 }
 
 /// Testable core: `override_path` wins if it exists on disk; else `on_path()`.
-#[allow(dead_code)] // wired in Task 4
 fn resolve_mcp_gen_with(
     override_path: Option<PathBuf>,
     on_path: impl Fn() -> Option<PathBuf>,
@@ -41,7 +36,6 @@ fn resolve_mcp_gen_with(
 }
 
 /// Artifacts the generator emits into `out_dir` (single-spec path).
-#[allow(dead_code)] // wired in Task 4
 pub struct GeneratedArtifacts {
     pub wasm: PathBuf,
     pub meta: Option<PathBuf>,
@@ -49,8 +43,8 @@ pub struct GeneratedArtifacts {
 
 /// Run `greentic-mcp-gen --spec <spec> --output-dir <out_dir>` and locate the
 /// newest `*.component.wasm` + its paired `*.component-meta.json`.
-#[allow(dead_code)] // wired in Task 4
-pub fn run_generator(bin: &Path,
+pub fn run_generator(
+    bin: &Path,
     spec: &Path,
     out_dir: &Path,
 ) -> anyhow::Result<GeneratedArtifacts> {
@@ -82,7 +76,6 @@ pub fn run_generator(bin: &Path,
     Ok(GeneratedArtifacts { wasm, meta })
 }
 
-#[allow(dead_code)] // wired in Task 4
 fn newest_matching(dir: &Path, suffix: &str) -> anyhow::Result<Option<PathBuf>> {
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
     for entry in std::fs::read_dir(dir)? {
@@ -109,10 +102,9 @@ fn newest_matching(dir: &Path, suffix: &str) -> anyhow::Result<Option<PathBuf>> 
 /// Patch a rendered mcp `describe.json` with network hosts + secret requirements
 /// taken from the generator's `component-meta.json`. Degrades to the rendered
 /// values (empty) with a warning when `meta` is absent.
-#[allow(dead_code)] // wired in Task 4
 pub fn author_describe_json(rendered: &str, meta: Option<&Path>) -> anyhow::Result<String> {
-    let mut doc: serde_json::Value =
-        serde_json::from_str(rendered).map_err(|e| anyhow::anyhow!("rendered describe.json is not valid JSON: {e}"))?;
+    let mut doc: serde_json::Value = serde_json::from_str(rendered)
+        .map_err(|e| anyhow::anyhow!("rendered describe.json is not valid JSON: {e}"))?;
 
     let Some(meta_path) = meta else {
         eprintln!(
@@ -149,15 +141,22 @@ mod tests {
 }"#;
         let dir = tempfile::tempdir().unwrap();
         let meta = dir.path().join("m.json");
-        std::fs::write(&meta, r#"{
+        std::fs::write(
+            &meta,
+            r#"{
   "servers": ["https://api.example.com"],
   "secret_requirements": [{"key":"EXAMPLE_KEY","required":true}],
   "oauth_scopes": []
-}"#).unwrap();
+}"#,
+        )
+        .unwrap();
 
         let out = author_describe_json(rendered, Some(&meta)).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["runtime"]["permissions"]["network"], serde_json::json!(["https://api.example.com"]));
+        assert_eq!(
+            v["runtime"]["permissions"]["network"],
+            serde_json::json!(["https://api.example.com"])
+        );
         assert_eq!(v["secret_requirements"][0]["key"], "EXAMPLE_KEY");
     }
 
@@ -166,7 +165,10 @@ mod tests {
         let rendered = r#"{"runtime":{"permissions":{"network":[]}},"secret_requirements":[]}"#;
         let out = author_describe_json(rendered, None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["runtime"]["permissions"]["network"], serde_json::json!([]));
+        assert_eq!(
+            v["runtime"]["permissions"]["network"],
+            serde_json::json!([])
+        );
         assert_eq!(v["secret_requirements"], serde_json::json!([]));
     }
 
@@ -178,7 +180,10 @@ mod tests {
             .expect_err("must fail");
         let msg = err.to_string();
         assert!(msg.contains("greentic-mcp-gen"), "guided error: {msg}");
-        assert!(msg.contains("cargo binstall"), "should suggest install: {msg}");
+        assert!(
+            msg.contains("cargo binstall"),
+            "should suggest install: {msg}"
+        );
     }
 
     #[test]

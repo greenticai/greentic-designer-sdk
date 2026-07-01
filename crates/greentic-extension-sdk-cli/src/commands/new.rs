@@ -15,7 +15,7 @@ use crate::scaffold::{
     template::{self, Context},
 };
 
-#[derive(ClapArgs, Debug, Clone)]
+#[derive(ClapArgs, Debug)]
 pub struct Args {
     /// Project folder name (kebab-case). Also default id suffix.
     pub name: String,
@@ -86,7 +86,9 @@ fn wizard_fill(args: &mut Args) -> anyhow::Result<()> {
             .default(false)
             .interact()?;
         if seed {
-            let path: String = Input::new().with_prompt("OpenAPI spec path").interact_text()?;
+            let path: String = Input::new()
+                .with_prompt("OpenAPI spec path")
+                .interact_text()?;
             args.from_openapi = Some(PathBuf::from(path));
         }
     }
@@ -226,7 +228,10 @@ fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::R
         "# Anchor manifest for `gtdx publish --wasm`. The component is the\n\
          # pre-built wasm generated from the OpenAPI spec; there is no crate to build here.\n\
          [package]\nname = \"{}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[lib]\npath = \"/dev/null\"\n",
-        target.file_name().and_then(|n| n.to_str()).unwrap_or("mcp-ext")
+        target
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("mcp-ext")
     );
     template::write_file(&target.join("Cargo.toml"), cargo_anchor.as_bytes())?;
     files += 1;

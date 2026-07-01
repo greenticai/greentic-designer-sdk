@@ -1,5 +1,5 @@
-use std::process::Command;
 use super::fixtures::{gtdx_bin, run};
+use std::process::Command;
 
 #[test]
 fn yes_flag_skips_wizard_and_scaffolds_noninteractively() {
@@ -7,10 +7,15 @@ fn yes_flag_skips_wizard_and_scaffolds_noninteractively() {
     let proj = tmp.path().join("q");
     // No stdin attached; -y must prevent any prompt and scaffold the echo mcp skeleton.
     let (ok, _o, e) = run(Command::new(gtdx_bin())
-        .arg("new").arg("q")
-        .arg("--kind").arg("mcp")
-        .arg("--dir").arg(&proj)
-        .arg("-y").arg("--no-git").arg("--force"));
+        .arg("new")
+        .arg("q")
+        .arg("--kind")
+        .arg("mcp")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git")
+        .arg("--force"));
     assert!(ok, "stderr:\n{e}");
     assert!(proj.join("describe.json").exists());
 }
@@ -21,13 +26,22 @@ fn from_openapi_requires_kind_mcp() {
     let proj = tmp.path().join("demo");
     // --kind design + --from-openapi must be rejected.
     let (ok, _o, e) = run(Command::new(gtdx_bin())
-        .arg("new").arg("demo")
-        .arg("--kind").arg("design")
-        .arg("--from-openapi").arg("api.yaml")
-        .arg("--dir").arg(&proj)
-        .arg("-y").arg("--no-git").arg("--force"));
+        .arg("new")
+        .arg("demo")
+        .arg("--kind")
+        .arg("design")
+        .arg("--from-openapi")
+        .arg("api.yaml")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git")
+        .arg("--force"));
     assert!(!ok, "expected failure");
-    assert!(e.contains("--from-openapi"), "stderr should explain the flag constraint:\n{e}");
+    assert!(
+        e.contains("--from-openapi"),
+        "stderr should explain the flag constraint:\n{e}"
+    );
 }
 
 #[cfg(unix)]
@@ -56,11 +70,17 @@ JSON
 
     let (ok, _o, e) = run(Command::new(gtdx_bin())
         .env("GTDX_MCP_GEN_BIN", &stub)
-        .arg("new").arg("petstore-ext")
-        .arg("--kind").arg("mcp")
-        .arg("--from-openapi").arg(&spec)
-        .arg("--dir").arg(&proj)
-        .arg("-y").arg("--no-git").arg("--force"));
+        .arg("new")
+        .arg("petstore-ext")
+        .arg("--kind")
+        .arg("mcp")
+        .arg("--from-openapi")
+        .arg(&spec)
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git")
+        .arg("--force"));
     assert!(ok, "stderr:\n{e}");
 
     // generated wasm present
@@ -69,6 +89,9 @@ JSON
     let describe: serde_json::Value =
         serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
     assert_eq!(describe["kind"], "wasix:mcp/router");
-    assert_eq!(describe["runtime"]["permissions"]["network"], serde_json::json!(["https://petstore.example.com"]));
+    assert_eq!(
+        describe["runtime"]["permissions"]["network"],
+        serde_json::json!(["https://petstore.example.com"])
+    );
     assert_eq!(describe["secret_requirements"][0]["key"], "PETSTORE_KEY");
 }
