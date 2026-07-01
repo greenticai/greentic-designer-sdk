@@ -2,6 +2,7 @@
 //! files under the 500-line limit.
 
 mod fixtures;
+mod openapi;
 mod scaffold_kinds;
 mod scaffold_validation;
 mod wasm_component;
