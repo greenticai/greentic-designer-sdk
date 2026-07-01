@@ -63,6 +63,11 @@ pub struct Args {
     /// Display label for the node (defaults to humanized --name).
     #[arg(long)]
     pub label: Option<String>,
+
+    /// Seed a `--kind mcp` extension from an OpenAPI/Swagger spec (generates the
+    /// router via greentic-mcp-gen instead of the empty echo skeleton).
+    #[arg(long, value_name = "SPEC")]
+    pub from_openapi: Option<PathBuf>,
 }
 
 pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
@@ -77,6 +82,7 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     let author = args.author.clone().unwrap_or_else(detect_git_author);
     validate_id(&id)?;
     validate_version(&args.version)?;
+    validate_from_openapi(args.kind, args.from_openapi.as_deref())?;
 
     run_preflight(&target, args.force)?;
     prepare_target(&target, args.force)?;
@@ -308,6 +314,13 @@ fn validate_version(version: &str) -> anyhow::Result<()> {
     semver::Version::parse(version)
         .map(|_| ())
         .map_err(|e| anyhow::anyhow!("version {version:?} is not valid semver: {e}"))
+}
+
+fn validate_from_openapi(kind: Kind, from_openapi: Option<&Path>) -> anyhow::Result<()> {
+    if from_openapi.is_some() && kind != Kind::Mcp {
+        anyhow::bail!("--from-openapi is only valid with --kind mcp");
+    }
+    Ok(())
 }
 
 fn id_to_wit_package(id: &str) -> String {
