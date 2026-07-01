@@ -68,11 +68,23 @@ gtdx --version
 
 ### Scaffold and build an extension
 
+There are two ways to scaffold. Pick whichever you prefer:
+
 ```bash
+# 1) Flag-driven (scriptable, CI-friendly)
 gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm | mcp
+
+# 2) Interactive wizard — just run `gtdx new` with no name on a terminal
+gtdx new                          # prompts for name, kind, id, version, author, license
+gtdx new --wizard                 # force the wizard even when flags are given
+
 cd my-ext
 gtdx dev --once
 ```
+
+The wizard uses any flags you pass as prompt defaults, so `gtdx new my-ext --wizard`
+pre-fills the name. Pass `--yes` to skip the wizard and resolve everything from
+flags/defaults (useful in scripts and CI, where there is no terminal).
 
 This rebuilds, packs, and produces `dist/<name>-<version>.gtxpack`. The
 pack includes a `manifest.json` integrity ledger (sha256 of every entry)
@@ -156,6 +168,32 @@ One-shot strict-parity install — build + pack + install the same way
 production install would, but for an already-built source dir (no
 watcher loop).
 
+### Log in to the store
+
+The default registry is the public Greentic store, `greentic-store`
+(`https://store.greentic.cloud`) — it is built in, so you do **not** need to
+`gtdx registries add` it first.
+
+```bash
+gtdx login                  # browser device login (OAuth 2.0 Device Grant)
+gtdx login --no-browser     # print the URL + code instead of opening a browser
+gtdx login --paste          # skip device login; paste a token manually
+gtdx login --token <TOKEN>  # non-interactive (also reads $GTDX_TOKEN) — for CI
+```
+
+By default `login` runs the **OAuth 2.0 Device Authorization Grant** (RFC 8628):
+it shows a short code, opens the store's `/device` page, and waits while you sign
+in and approve in the browser — then a fresh token is minted and stored in
+`~/.greentic/credentials.toml` (owner-only). No copy-pasting required. Against a
+store that does not implement device login, it transparently falls back to the
+manual token paste. To target a different store, configure it once and it
+overrides the built-in:
+
+```bash
+gtdx registries add greentic-store https://staging.store.example  # override URL
+gtdx login --registry <name>                                       # or a named registry
+```
+
 ### Sign and publish
 
 `keygen`, `sign`, and `publish --sign` all use one key format: **PKCS8 PEM**
@@ -163,9 +201,14 @@ ed25519.
 
 ```bash
 gtdx keygen --out my-key.pem            # PKCS8 PEM private key (mode 0600)
-gtdx login                              # auth to Greentic Store
+gtdx login                              # auth to the Greentic store (see above)
 gtdx publish --sign --key my-key.pem ./ # bind manifest, then sign — one step
 ```
+
+Prefer not to memorise the flags? `gtdx publish --wizard` walks you through
+registry, mode (real / dry-run / verify-only), signing + key source, trust
+policy and overwrite — using any flags you pass as defaults. The wizard is
+opt-in, so plain `gtdx publish` keeps its scripted, CI-friendly behaviour.
 
 `publish --sign` binds the whole-archive manifest into `describe.json` and then
 signs, so the embedded signature covers the entire pack. Key sources, in
