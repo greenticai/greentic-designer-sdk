@@ -124,7 +124,11 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     make_scripts_executable(&target)?;
     run_git_init(&target, resolved.no_git);
 
-    print_summary(resolved.kind.as_str(), &target, files_written);
+    // The OpenAPI path already printed its own "Next: gtdx publish …" line
+    // inside scaffold_from_openapi; skip the generic next-steps block there.
+    if resolved.from_openapi.is_none() {
+        print_summary(resolved.kind.as_str(), &target, files_written);
+    }
     Ok(())
 }
 
