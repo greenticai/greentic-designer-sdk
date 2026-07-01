@@ -98,6 +98,27 @@ flow-capable local-wasm MCPs. To make a design-extension MCP flow-capable:
 Old design-extension MCPs continue to work for agentic workers and do not need
 to be migrated unless flow-node addressability is needed.
 
+### Generate an MCP extension from OpenAPI
+
+```bash
+gtdx new --kind mcp --from-openapi ./api.yaml weatherapi
+```
+
+`gtdx` shells out to `greentic-mcp-gen` (from `greentic-mcp-generator`) to generate
+the `wasix:mcp/router` component, then auto-authors `describe.json` — including
+`runtime.permissions.network` (from the spec's servers) and `secret_requirements`.
+Install the generator once with `cargo binstall greentic-mcp-generator` (set
+`GITHUB_TOKEN` for the private repo) or point `GTDX_MCP_GEN_BIN` at the binary.
+
+The result is publish-ready:
+
+```bash
+gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml ./weatherapi
+```
+
+Running `gtdx new` with no flags starts an interactive wizard; for `--kind mcp`
+it offers to seed from an OpenAPI spec. Pass `-y` for non-interactive defaults.
+
 ### Lint before publish
 
 ```bash
