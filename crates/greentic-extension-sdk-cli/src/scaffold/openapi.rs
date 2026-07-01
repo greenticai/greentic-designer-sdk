@@ -106,9 +106,69 @@ fn newest_matching(dir: &Path, suffix: &str) -> anyhow::Result<Option<PathBuf>> 
     Ok(best.map(|(_, p)| p))
 }
 
+/// Patch a rendered mcp `describe.json` with network hosts + secret requirements
+/// taken from the generator's `component-meta.json`. Degrades to the rendered
+/// values (empty) with a warning when `meta` is absent.
+#[allow(dead_code)] // wired in Task 4
+pub fn author_describe_json(rendered: &str, meta: Option<&Path>) -> anyhow::Result<String> {
+    let mut doc: serde_json::Value =
+        serde_json::from_str(rendered).map_err(|e| anyhow::anyhow!("rendered describe.json is not valid JSON: {e}"))?;
+
+    let Some(meta_path) = meta else {
+        eprintln!(
+            "  ! component-meta.json not found — permissions.network and secret_requirements left empty. \
+             Update greentic-mcp-generator to auto-fill them, or edit describe.json."
+        );
+        return serde_json::to_string_pretty(&doc).map_err(Into::into);
+    };
+
+    let meta: serde_json::Value = serde_json::from_slice(&std::fs::read(meta_path)?)
+        .map_err(|e| anyhow::anyhow!("component-meta.json is not valid JSON: {e}"))?;
+
+    // network <= servers (verbatim origins the component calls)
+    if let Some(servers) = meta.get("servers").cloned() {
+        doc["runtime"]["permissions"]["network"] = servers;
+    }
+    // secret_requirements <= meta.secret_requirements (same greentic-types shape)
+    if let Some(secrets) = meta.get("secret_requirements").cloned() {
+        doc["secret_requirements"] = secrets;
+    }
+    serde_json::to_string_pretty(&doc).map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn author_describe_fills_network_and_secrets_from_meta() {
+        let rendered = r#"{
+  "kind": "wasix:mcp/router",
+  "runtime": { "permissions": { "network": [], "secrets": [] } },
+  "secret_requirements": []
+}"#;
+        let dir = tempfile::tempdir().unwrap();
+        let meta = dir.path().join("m.json");
+        std::fs::write(&meta, r#"{
+  "servers": ["https://api.example.com"],
+  "secret_requirements": [{"key":"EXAMPLE_KEY","required":true}],
+  "oauth_scopes": []
+}"#).unwrap();
+
+        let out = author_describe_json(rendered, Some(&meta)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["runtime"]["permissions"]["network"], serde_json::json!(["https://api.example.com"]));
+        assert_eq!(v["secret_requirements"][0]["key"], "EXAMPLE_KEY");
+    }
+
+    #[test]
+    fn author_describe_degrades_without_meta() {
+        let rendered = r#"{"runtime":{"permissions":{"network":[]}},"secret_requirements":[]}"#;
+        let out = author_describe_json(rendered, None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["runtime"]["permissions"]["network"], serde_json::json!([]));
+        assert_eq!(v["secret_requirements"], serde_json::json!([]));
+    }
 
     #[test]
     fn resolve_mcp_gen_reports_guided_error_when_absent() {
