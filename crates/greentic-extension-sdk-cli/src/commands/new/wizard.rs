@@ -98,7 +98,7 @@ fn prompt_kind(args: &Args) -> anyhow::Result<Kind> {
 }
 
 /// If kind is MCP and `--from-openapi` was not already supplied, ask whether
-/// the user wants to seed from an OpenAPI spec. Returns the spec path if yes.
+/// the user wants to seed from an `OpenAPI` spec. Returns the spec path if yes.
 fn prompt_openapi_seed(args: &Args, kind: Kind) -> anyhow::Result<Option<PathBuf>> {
     // Pass through whatever was on the command line.
     if args.from_openapi.is_some() || kind != Kind::Mcp {

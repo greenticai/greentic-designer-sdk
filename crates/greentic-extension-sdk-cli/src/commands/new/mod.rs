@@ -94,7 +94,7 @@ pub(super) struct Resolved {
     force: bool,
     node_type_id: Option<String>,
     label: Option<String>,
-    /// OpenAPI spec path for `--kind mcp` seeded scaffolds.
+    /// `OpenAPI` spec path for `--kind mcp` seeded scaffolds.
     from_openapi: Option<PathBuf>,
 }
 
