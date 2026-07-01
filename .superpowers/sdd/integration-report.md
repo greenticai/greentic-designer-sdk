@@ -95,3 +95,45 @@ Final re-run: **All checks passed**.
 ## Concerns
 
 None blocking. The `validate_from_openapi` check happens after `resolve()` (which includes the wizard), so a user who picks MCP in the wizard and enters an OpenAPI path that was incorrectly combined with a non-MCP kind would be caught at validation — but since `prompt_openapi_seed` only fires for `Kind::Mcp`, this path is unreachable in practice. The double-check is intentional defense-in-depth for the non-interactive (`-y`) path.
+
+---
+
+## Fix: double next-steps
+
+### Problem
+
+`scaffold_from_openapi` (line 281-285) printed its own authoritative next-step:
+```
+  Next: gtdx publish --wasm <wasm> --manifest ./Cargo.toml .
+```
+Then `run()` unconditionally called `print_summary(...)`, which printed a second block:
+```
+Next steps:
+  cd <target>
+  gtdx dev        # watch, rebuild, reinstall
+  gtdx publish    # pack to dist/
+```
+For the OpenAPI path this is misleading (`gtdx dev` does not apply — the Cargo.toml has `[lib] path = "/dev/null"`) and conflicts with the first message.
+
+### Solution
+
+In `run()` (line 127), wrapped `print_summary` in a guard:
+
+```rust
+if resolved.from_openapi.is_none() {
+    print_summary(resolved.kind.as_str(), &target, files_written);
+}
+```
+
+The OpenAPI path now emits only the one line from `scaffold_from_openapi`. All other scaffold kinds still call `print_summary` unchanged.
+
+### Test + Clippy
+
+| Check | Result |
+|-------|--------|
+| `cargo test -p greentic-extension-sdk-cli --test cli_new` | 16 passed, 0 failed, 1 ignored |
+| `cargo clippy -p greentic-extension-sdk-cli --all-targets -- -D warnings` | clean (no warnings) |
+
+### Commit
+
+`10ea4b7` — `fix(new): single next-steps message on the --from-openapi path`
