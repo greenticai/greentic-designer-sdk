@@ -41,26 +41,83 @@ pub struct GeneratedArtifacts {
     pub meta: Option<PathBuf>,
 }
 
-/// Run `greentic-mcp-gen --spec <spec> --output-dir <out_dir>` and locate the
-/// newest `*.component.wasm` + its paired `*.component-meta.json`.
+/// Run `greentic-mcp-gen` hermeticallyand locate the newest `*.component.wasm`
+/// + its paired `*.component-meta.json` in `out_dir`.
+///
+/// # Hermetic execution
+///
+/// The real `greentic-mcp-gen` binary creates bookkeeping directories
+/// (`input/`, `done/`, `error/`, `uploaded/`) in its working directory and
+/// **moves** the source spec file into `done/` after processing. Left
+/// unchecked, those side-effects would:
+///
+/// - litter the user's working directory with four unexpected directories, and
+/// - silently destroy the user's original `OpenAPI` spec file.
+///
+/// To prevent this we:
+///
+/// 1. Create a private temp directory (`scratch`) that is automatically
+///    cleaned up when this function returns.
+/// 2. Copy the spec file into `scratch/` so the generator's `mv` operates on
+///    our throwaway copy, not the original.
+/// 3. Pre-create `scratch/input/` (the generator expects it to exist).
+/// 4. Pass explicit absolute flags so all generator bookkeeping dirs land
+///    inside `scratch/`: `--input-dir`, `--done-dir`, `--error-dir`,
+///    `--uploaded-dir`.
+/// 5. Set the child process's working directory to `scratch/` as an
+///    additional belt-and-suspenders guard.
+/// 6. Pass `--output-dir <out_dir>` unchanged so artifacts still land in the
+///    caller's chosen location.
 pub fn run_generator(
     bin: &Path,
     spec: &Path,
     out_dir: &Path,
 ) -> anyhow::Result<GeneratedArtifacts> {
     std::fs::create_dir_all(out_dir)?;
+
+    // --- hermetic scratch space -----------------------------------------------
+    let scratch = tempfile::tempdir()
+        .map_err(|e| anyhow::anyhow!("failed to create scratch tempdir: {e}"))?;
+    let scratch_path = scratch.path();
+
+    // Pre-create the input dir the generator expects.
+    std::fs::create_dir_all(scratch_path.join("input"))?;
+
+    // Copy the user's spec into scratch so the generator's `mv` operates on
+    // our throwaway copy.
+    let spec_filename = spec
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("spec path has no filename: {}", spec.display()))?;
+    let spec_copy = scratch_path.join(spec_filename);
+    std::fs::copy(spec, &spec_copy)
+        .map_err(|e| anyhow::anyhow!("failed to copy spec to scratch dir: {e}"))?;
+
+    // --- invoke generator with explicit hermetic dirs -------------------------
     let status = Command::new(bin)
         .arg("--spec")
-        .arg(spec)
+        .arg(&spec_copy)
         .arg("--output-dir")
         .arg(out_dir)
+        .arg("--input-dir")
+        .arg(scratch_path.join("input"))
+        .arg("--done-dir")
+        .arg(scratch_path.join("done"))
+        .arg("--error-dir")
+        .arg(scratch_path.join("error"))
+        .arg("--uploaded-dir")
+        .arg(scratch_path.join("uploaded"))
+        .current_dir(scratch_path)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
         .map_err(|e| anyhow::anyhow!("failed to run greentic-mcp-gen: {e}"))?;
+
     if !status.success() {
         anyhow::bail!("greentic-mcp-gen failed (exit {status})");
     }
+    // scratch drops here, cleaning up the temp dir automatically.
+
+    // --- locate artifacts in out_dir ------------------------------------------
     let wasm = newest_matching(out_dir, ".component.wasm")?.ok_or_else(|| {
         anyhow::anyhow!(
             "greentic-mcp-gen produced no *.component.wasm in {}",
