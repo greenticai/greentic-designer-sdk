@@ -10,6 +10,7 @@ pub mod lint;
 pub mod list;
 pub mod login;
 pub mod new;
+pub mod openapi;
 pub mod outdated;
 pub mod publish;
 pub mod registries;

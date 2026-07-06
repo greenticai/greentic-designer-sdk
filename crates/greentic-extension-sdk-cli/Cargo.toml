@@ -38,12 +38,14 @@ greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", versi
 greentic-types = { workspace = true }
 include_dir = { workspace = true }
 notify-debouncer-full = { workspace = true }
+openapiv3 = "2"
 pkcs8 = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml_bw = "2"
 sha2 = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }

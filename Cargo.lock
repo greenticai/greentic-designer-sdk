@@ -106,6 +106,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1045,6 +1051,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "granit-parser"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e354bf0eb3279a16e8f92fc1ba6ddd4420953fc064140b010844d21874b58113"
+dependencies = [
+ "arraydeque",
+ "smallvec",
+]
+
+[[package]]
 name = "greentic-extension-sdk-cli"
 version = "1.2.19-research"
 dependencies = [
@@ -1064,12 +1080,14 @@ dependencies = [
  "include_dir",
  "jsonschema",
  "notify-debouncer-full",
+ "openapiv3",
  "pkcs8",
  "rand 0.8.6",
  "reqwest",
  "semver",
  "serde",
  "serde_json",
+ "serde_yaml_bw",
  "sha2 0.10.9",
  "tempfile",
  "time",
@@ -2013,6 +2031,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "openapiv3"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c8d427828b22ae1fff2833a03d8486c2c881367f1c336349f307f321e7f4d05"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2651,6 +2680,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml_bw"
+version = "2.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9559c696727e20fa0f661a1db638c7ae1be73419de8e1aed2642b796096ab53"
+dependencies = [
+ "base64 0.22.1",
+ "granit-parser",
+ "indexmap",
+ "itoa",
+ "num-traits",
+ "regex",
+ "serde",
+ "unsafe-libyaml-norway",
+ "zmij",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3198,6 +3244,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unsafe-libyaml-norway"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b39abd59bf32521c7f2301b52d05a6a2c975b6003521cbd0c6dc1582f0a22104"
 
 [[package]]
 name = "untrusted"

@@ -40,6 +40,8 @@ enum Command {
     Info(commands::info::Args),
     /// Scaffold a new extension project
     New(commands::new::Args),
+    /// Generate a `DesignExtension` connector from an `OpenAPI` 3.0 spec
+    Openapi(commands::openapi::Args),
     /// Run the developer inner-loop: rebuild, pack, and install on source change
     Dev(commands::dev::Args),
     /// Publish an extension to a registry
@@ -89,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Search(args) => commands::search::run(args, &home).await,
         Command::Info(args) => commands::info::run(&args, &home),
         Command::New(args) => commands::new::run(&args, &home),
+        Command::Openapi(args) => commands::openapi::run(&args),
         Command::Dev(args) => commands::dev::run(args, &home).await,
         Command::Publish(args) => commands::publish::run(args, &home).await,
         Command::Login(args) => commands::login::run_login(&args, &home).await,

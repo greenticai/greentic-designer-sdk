@@ -13,6 +13,8 @@ static TEMPLATES_WASM_COMPONENT: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/templates/wasm-component");
 static TEMPLATES_LLM: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/llm");
 static TEMPLATES_MCP: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/mcp");
+static TEMPLATES_OPENAPI_CONNECTOR: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/templates/openapi-connector");
 
 #[derive(Debug, Clone)]
 pub struct TemplateEntry {
@@ -72,6 +74,7 @@ pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
         "wasm-component" => collect(&TEMPLATES_WASM_COMPONENT),
         "llm" => collect(&TEMPLATES_LLM),
         "mcp" => collect(&TEMPLATES_MCP),
+        "openapi-connector" => collect(&TEMPLATES_OPENAPI_CONNECTOR),
         _ => Vec::new(),
     }
 }
