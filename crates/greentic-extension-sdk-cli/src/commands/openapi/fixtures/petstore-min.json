@@ -45,7 +45,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
+                  "name": {
+                    "type": "string",
+                    "description": "the pet's name, e.g. she said \"#winning\" once"
+                  },
                   "tag": { "type": "string" }
                 },
                 "required": ["name"]

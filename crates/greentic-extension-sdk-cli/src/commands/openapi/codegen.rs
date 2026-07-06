@@ -21,7 +21,7 @@ use serde_json::json;
 use super::model::{AuthScheme, ConnectorModel, ParamLoc};
 
 /// Generate `src/tool_meta.rs`: a `TOOLS: &[ToolDef]` table, one entry per
-/// tool, with the JSON Schema embedded as a raw string literal.
+/// tool, with the JSON Schema embedded as a Debug-escaped string literal.
 #[must_use]
 pub fn gen_tool_meta(model: &ConnectorModel) -> String {
     let mut out = String::new();
@@ -40,13 +40,18 @@ pub fn gen_tool_meta(model: &ConnectorModel) -> String {
     for tool in &model.tools {
         let schema_pretty =
             serde_json::to_string_pretty(&tool.input_schema).unwrap_or_else(|_| "{}".to_string());
-        // Raw string literal: schemas are plain JSON and never contain the
-        // `"#` delimiter sequence in practice (v1 scope has no free-form
-        // string properties containing it); using `r#"..."#` keeps the
-        // embedded schema human-readable in the generated source.
+        // Emitted as a normal Debug-escaped string literal (like `name` and
+        // `description` above), NOT a raw string (`r#"..."#`). Spec
+        // descriptions are free-form text pulled straight from real-world
+        // `OpenAPI` documents (Stripe/Shopify, etc.) and routinely contain a
+        // `"` immediately followed by a `#` — e.g. a description quoting a
+        // hashtag — which would prematurely close a `r#"..."#` literal and
+        // produce a generated crate that fails to compile. `{:?}` escapes
+        // quotes/backslashes/control characters, so it's always valid
+        // regardless of what the schema text contains.
         let _ = writeln!(
             out,
-            "    ToolDef {{\n        name: {name:?},\n        description: {description:?},\n        input_schema: r#\"{schema_pretty}\"#,\n    }},",
+            "    ToolDef {{\n        name: {name:?},\n        description: {description:?},\n        input_schema: {schema_pretty:?},\n    }},",
             name = tool.name,
             description = tool.description,
         );
@@ -71,7 +76,14 @@ pub fn gen_dispatch(model: &ConnectorModel) -> String {
         out.push_str("use crate::bindings::greentic::extension_host::secrets;\n");
     }
     out.push('\n');
-    let _ = writeln!(out, "const BASE_URL: &str = {:?};", model.base_url);
+    // Trimmed the same way `network_allowlist_json` trims the base URL used
+    // for the allow-list entry, so `https://api.example.com/` + `/pets`
+    // produces `.../pets`, not `.../<empty>/pets`.
+    let _ = writeln!(
+        out,
+        "const BASE_URL: &str = {:?};",
+        model.base_url.trim_end_matches('/')
+    );
     out.push('\n');
 
     write_requests_table(&mut out, model);
@@ -153,7 +165,10 @@ fn write_resolve_auth(out: &mut String, model: &ConnectorModel) {
 const DISPATCH_HELPERS: &str = r#"
 /// Dispatch a tool call by name: build the request from `args` per the
 /// matching `ToolRequest` entry, resolve auth, and call the host `http`
-/// capability. Returns the response body as a UTF-8 string (lossy).
+/// capability. Returns a JSON envelope string `{"status", "ok", "body"}` —
+/// mirrors `component-http-ext/src/output.rs::map_response` — so the caller
+/// can distinguish a 4xx/5xx response from a 2xx one; only transport /
+/// allow-list failures surface as `Err`.
 pub fn invoke(name: &str, args: &serde_json::Value) -> Result<String, String> {
     let (_, req) = REQUESTS
         .iter()
@@ -165,7 +180,10 @@ pub fn invoke(name: &str, args: &serde_json::Value) -> Result<String, String> {
         let value = args
             .get(*param)
             .ok_or_else(|| format!("missing required path param: {param}"))?;
-        url = url.replace(&format!("{{{param}}}"), &json_scalar_to_string(value));
+        url = url.replace(
+            &format!("{{{param}}}"),
+            &percent_encode(&json_scalar_to_string(value)),
+        );
     }
     let mut url = format!("{BASE_URL}{url}");
 
@@ -204,9 +222,32 @@ pub fn invoke(name: &str, args: &serde_json::Value) -> Result<String, String> {
         body,
     };
     // Transport / allow-list failures surface as the host `fetch` Err. A
-    // non-2xx status is a normal Ok(response) — the caller sees the raw body.
+    // non-2xx status is NOT an error — it is folded into the returned
+    // envelope's `status`/`ok` fields so the caller (an LLM tool-call site)
+    // can tell a 404 apart from a 200 without inspecting exception text.
     let response = http::fetch(&request).map_err(|error| format!("http fetch: {error}"))?;
-    Ok(String::from_utf8_lossy(&response.body).to_string())
+    Ok(map_response(response.status, &response.headers, &response.body).to_string())
+}
+
+/// Map a host HTTP response into the `{"status", "ok", "body"}` envelope
+/// returned by `invoke`. The body is parsed as JSON when the `content-type`
+/// header indicates JSON and parsing succeeds; otherwise it is returned as a
+/// UTF-8 string value. Mirrors `component-http-ext/src/output.rs::map_response`.
+fn map_response(status: u16, headers: &[(String, String)], body: &[u8]) -> serde_json::Value {
+    let is_json = headers.iter().any(|(key, value)| {
+        key.eq_ignore_ascii_case("content-type") && value.to_ascii_lowercase().contains("json")
+    });
+    let body_value = if is_json {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).into_owned()))
+    } else {
+        serde_json::Value::String(String::from_utf8_lossy(body).into_owned())
+    };
+    serde_json::json!({
+        "status": status,
+        "ok": (200..300).contains(&status),
+        "body": body_value,
+    })
 }
 
 fn json_scalar_to_string(value: &serde_json::Value) -> String {
@@ -306,18 +347,69 @@ mod tests {
             .expect("fixture parses")
     }
 
-    /// Extract the contents of every `r#"..."#` raw string literal in
-    /// generated source, in order of appearance.
-    fn extract_raw_string_literals(src: &str) -> Vec<&str> {
+    /// Extract the still-escaped contents of every `input_schema: "..."`
+    /// Debug string literal in generated `tool_meta.rs` source, in order of
+    /// appearance. Byte-wise scanning is safe here: it only ever compares
+    /// against the ASCII `\` and `"` bytes, and any multi-byte UTF-8
+    /// character has every byte >= 0x80, so it can never be mistaken for
+    /// either — the slice boundaries this returns always land on a byte that
+    /// was matched literally, which is always a valid char boundary.
+    fn extract_input_schema_literals(src: &str) -> Vec<String> {
+        const MARKER: &str = "input_schema: \"";
         let mut out = Vec::new();
         let mut rest = src;
-        while let Some(start) = rest.find("r#\"") {
-            let after_open = &rest[start + 3..];
-            let Some(end) = after_open.find("\"#") else {
-                break;
-            };
-            out.push(&after_open[..end]);
-            rest = &after_open[end + 2..];
+        while let Some(start) = rest.find(MARKER) {
+            let after_open = &rest[start + MARKER.len()..];
+            let bytes = after_open.as_bytes();
+            let mut i = 0usize;
+            let mut end = None;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'\\' => i += 2,
+                    b'"' => {
+                        end = Some(i);
+                        break;
+                    }
+                    _ => i += 1,
+                }
+            }
+            let Some(end) = end else { break };
+            out.push(after_open[..end].to_string());
+            rest = &after_open[end + 1..];
+        }
+        out
+    }
+
+    /// Reverse a Rust `Debug`-formatted (`{:?}`) string literal's contents
+    /// back to the original text, e.g. `she said \"#winning\"` -> `she said
+    /// "#winning"`. Only used in tests, to prove the embedded schema
+    /// round-trips through the generated source.
+    fn unescape_debug_string(escaped: &str) -> String {
+        let mut out = String::with_capacity(escaped.len());
+        let mut chars = escaped.chars();
+        while let Some(ch) = chars.next() {
+            if ch != '\\' {
+                out.push(ch);
+                continue;
+            }
+            match chars.next() {
+                Some('"') => out.push('"'),
+                Some('\\') => out.push('\\'),
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('0') => out.push('\0'),
+                Some('u') if chars.next() == Some('{') => {
+                    let hex: String = chars.by_ref().take_while(|c| *c != '}').collect();
+                    if let Ok(code) = u32::from_str_radix(&hex, 16)
+                        && let Some(decoded) = char::from_u32(code)
+                    {
+                        out.push(decoded);
+                    }
+                }
+                Some(other) => out.push(other),
+                None => {}
+            }
         }
         out
     }
@@ -336,17 +428,57 @@ mod tests {
     fn gen_tool_meta_input_schemas_are_all_valid_json() {
         let model = fixture_model();
         let src = gen_tool_meta(&model);
-        let literals = extract_raw_string_literals(&src);
+        assert!(
+            !src.contains("r#\""),
+            "input_schema must never be emitted as a raw string literal"
+        );
+        let literals = extract_input_schema_literals(&src);
         assert_eq!(
             literals.len(),
             model.tools.len(),
-            "expected one raw-string schema literal per tool"
+            "expected one input_schema string literal per tool"
         );
         for literal in literals {
+            let unescaped = unescape_debug_string(&literal);
             let parsed: serde_json::Value =
-                serde_json::from_str(literal).expect("embedded input_schema is valid JSON");
+                serde_json::from_str(&unescaped).expect("embedded input_schema is valid JSON");
             assert_eq!(parsed["type"], "object");
         }
+    }
+
+    /// FIX 1 regression test: a real-world spec description containing a
+    /// literal `"` immediately followed by `#` (e.g. quoting a hashtag) used
+    /// to prematurely terminate the `r#"..."#` raw string that embedded the
+    /// schema, producing a generated crate that fails to compile. The
+    /// `petstore-min.json` fixture's `createPet.name` property description
+    /// is exactly this case: `the pet's name, e.g. she said "#winning" once`.
+    #[test]
+    fn gen_tool_meta_survives_a_quote_hash_sequence_in_a_schema_description() {
+        let model = fixture_model();
+        let src = gen_tool_meta(&model);
+
+        // (a) no raw-string opener for the schema anywhere in the output.
+        assert!(!src.contains("input_schema: r#"));
+
+        // (b) the embedded schema, once unescaped, is valid JSON and the
+        // description round-trips byte-for-byte through the generated
+        // source.
+        let literals = extract_input_schema_literals(&src);
+        let create_pet_index = model
+            .tools
+            .iter()
+            .position(|tool| tool.name == "createPet")
+            .expect("fixture has a createPet tool");
+        let create_pet_literal = literals
+            .get(create_pet_index)
+            .expect("one input_schema literal per tool, in model.tools order");
+        let unescaped = unescape_debug_string(create_pet_literal);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&unescaped).expect("embedded input_schema is valid JSON");
+        assert_eq!(
+            parsed["properties"]["name"]["description"],
+            serde_json::json!("the pet's name, e.g. she said \"#winning\" once")
+        );
     }
 
     #[test]
@@ -382,6 +514,53 @@ mod tests {
         assert!(src.contains(
             "fn resolve_auth() -> Result<Option<(String, String)>, String> {\n    Ok(None)\n}"
         ));
+    }
+
+    /// FIX 2 regression test: `invoke` must return a structured envelope
+    /// (mirrors `component-http-ext/src/output.rs::map_response`) instead of
+    /// silently discarding the HTTP status, so a 4xx/5xx doesn't look
+    /// identical to a 2xx to the caller.
+    #[test]
+    fn gen_dispatch_invoke_returns_a_status_envelope_not_the_raw_body() {
+        let model = fixture_model();
+        let src = gen_dispatch(&model);
+        assert!(
+            !src.contains("Ok(String::from_utf8_lossy(&response.body).to_string())"),
+            "invoke must not return the raw body directly — the HTTP status would be lost"
+        );
+        assert!(src.contains("fn map_response("));
+        assert!(src.contains("\"status\": status"));
+        assert!(src.contains("\"ok\": (200..300).contains(&status)"));
+        assert!(src.contains("\"body\": body_value"));
+        assert!(src.contains(
+            "Ok(map_response(response.status, &response.headers, &response.body).to_string())"
+        ));
+    }
+
+    /// FIX 3a regression test: path parameter values must be percent-encoded
+    /// the same way query parameter values already are, so a value with
+    /// reserved characters (e.g. `/` or a space) doesn't produce a malformed
+    /// URL.
+    #[test]
+    fn gen_dispatch_percent_encodes_path_params() {
+        let model = fixture_model();
+        let src = gen_dispatch(&model);
+        assert!(
+            src.contains("&percent_encode(&json_scalar_to_string(value))"),
+            "path param substitution must reuse the same percent_encode helper as query params"
+        );
+    }
+
+    /// FIX 3b regression test: a `base_url` with a trailing slash must not
+    /// produce a double slash when joined with a path template that starts
+    /// with `/`.
+    #[test]
+    fn gen_dispatch_trims_a_trailing_slash_from_base_url() {
+        let mut model = fixture_model();
+        model.base_url = "https://api.example.com/v1/".to_string();
+        let src = gen_dispatch(&model);
+        assert!(src.contains("const BASE_URL: &str = \"https://api.example.com/v1\";"));
+        assert!(!src.contains("https://api.example.com/v1/\""));
     }
 
     #[test]
