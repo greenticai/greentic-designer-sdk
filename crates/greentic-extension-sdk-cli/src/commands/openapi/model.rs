@@ -14,6 +14,7 @@
 //! openapi` subcommand.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 use anyhow::{Context, Result, anyhow};
 use openapiv3::{Components, OpenAPI, Parameter, ReferenceOr, RequestBody, Schema, SecurityScheme};
@@ -99,6 +100,7 @@ pub fn parse_openapi(
     let security = build_security(&name, &spec);
 
     let mut tools = Vec::new();
+    let mut seen_operation_ids: HashSet<String> = HashSet::new();
     for (path, path_item) in spec.paths.iter() {
         let Some(path_item) = path_item.as_item() else {
             // A $ref pointing at an entire path item is a level of indirection
@@ -111,7 +113,18 @@ pub fn parse_openapi(
         };
         for (method, operation) in path_item.iter() {
             match build_tool(path, method, path_item, operation, spec.components.as_ref()) {
-                Ok(Some(tool)) => tools.push(tool),
+                Ok(Some(tool)) => {
+                    if !seen_operation_ids.insert(tool.name.clone()) {
+                        // Keep the first occurrence; a duplicate operationId
+                        // would otherwise clobber/shadow the earlier tool.
+                        eprintln!(
+                            "warning: skipping duplicate operationId '{}' ({} {})",
+                            tool.name, tool.method, tool.path_template
+                        );
+                        continue;
+                    }
+                    tools.push(tool);
+                }
                 Ok(None) => {
                     // Already warned inside build_tool for the specific skip reason.
                 }
@@ -172,7 +185,12 @@ fn build_tool(
         .or_else(|| non_empty(operation.description.as_deref()))
         .map_or_else(|| format!("{operation_id} operation."), str::to_string);
 
-    let params = collect_params(&path_item.parameters, &operation.parameters, components)?;
+    let params = collect_params(
+        &path_item.parameters,
+        &operation.parameters,
+        components,
+        &operation_id,
+    )?;
 
     let body = match &operation.request_body {
         None => None,
@@ -217,10 +235,14 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 /// overrides path-level by name+location), resolve one-level `$ref`s, and
 /// keep only `path`/`query` params — `header`/`cookie` params are deferred
 /// (v1 scope) and skipped with a warning.
+///
+/// `operation_id` is only used to name the operation in warnings (e.g. the
+/// non-scalar query parameter warning below).
 fn collect_params(
     path_params: &[ReferenceOr<Parameter>],
     op_params: &[ReferenceOr<Parameter>],
     components: Option<&Components>,
+    operation_id: &str,
 ) -> Result<Vec<Param>> {
     let mut resolved: Vec<Parameter> = Vec::new();
     for p in path_params {
@@ -285,6 +307,15 @@ fn collect_params(
             }
         };
 
+        if location == ParamLoc::Query
+            && let Some(schema_type) = schema_value.get("type").and_then(Value::as_str)
+            && (schema_type == "array" || schema_type == "object")
+        {
+            eprintln!(
+                "warning: query parameter '{name}' on '{operation_id}' is non-scalar; it will be serialized as-is"
+            );
+        }
+
         params.push(Param {
             name,
             location,
@@ -341,48 +372,56 @@ fn build_input_schema(params: &[Param], body: Option<&Value>) -> Value {
     ]))
 }
 
-/// Derive `security` from the first entry in `components.securitySchemes`
-/// (insertion order). Only `http bearer` and `apiKey` (header location) are
-/// supported in v1; anything else (basic auth, `OAuth2`, `OpenID` Connect,
-/// apiKey in query/cookie) is skipped with a warning and `security` stays
-/// `None`.
+/// Derive `security` from the first *supported* entry in
+/// `components.securitySchemes` (insertion order). Only `http bearer` and
+/// `apiKey` (header location) are supported in v1; anything else (basic auth,
+/// `OAuth2`, `OpenID` Connect, apiKey in query/cookie, `$ref`-to-`$ref`) is
+/// skipped with a warning and the scan continues to the next entry. If no
+/// entry is supported, `security` stays `None` (each skip already warned by
+/// name, so there is no separate summary warning).
 fn build_security(connector_name: &str, spec: &OpenAPI) -> Option<AuthScheme> {
     let schemes = &spec.components.as_ref()?.security_schemes;
-    let (scheme_key, scheme_ref) = schemes.iter().next()?;
-
-    let scheme = match scheme_ref {
-        ReferenceOr::Item(scheme) => scheme,
-        ReferenceOr::Reference { reference } => {
-            eprintln!(
-                "warning: skipping security scheme '{scheme_key}' — $ref-to-$ref ({reference}) is not supported"
-            );
-            return None;
-        }
-    };
-
     let slug = slugify(connector_name);
-    match scheme {
-        SecurityScheme::HTTP {
-            scheme: http_scheme,
-            ..
-        } if http_scheme.eq_ignore_ascii_case("bearer") => Some(AuthScheme::Bearer {
-            secret_ref: format!("secret://{slug}/{scheme_key}"),
-        }),
-        SecurityScheme::APIKey {
-            location: openapiv3::APIKeyLocation::Header,
-            name,
-            ..
-        } => Some(AuthScheme::ApiKey {
-            header_name: name.clone(),
-            secret_ref: format!("secret://{slug}/{scheme_key}"),
-        }),
-        other => {
-            eprintln!(
-                "warning: skipping security scheme '{scheme_key}' — {other:?} is deferred in v1 (only http-bearer and header apiKey are supported)"
-            );
-            None
+
+    for (scheme_key, scheme_ref) in schemes {
+        let scheme = match scheme_ref {
+            ReferenceOr::Item(scheme) => scheme,
+            ReferenceOr::Reference { reference } => {
+                eprintln!(
+                    "warning: skipping security scheme '{scheme_key}' — $ref-to-$ref ({reference}) is not supported"
+                );
+                continue;
+            }
+        };
+
+        match scheme {
+            SecurityScheme::HTTP {
+                scheme: http_scheme,
+                ..
+            } if http_scheme.eq_ignore_ascii_case("bearer") => {
+                return Some(AuthScheme::Bearer {
+                    secret_ref: format!("secret://{slug}/{scheme_key}"),
+                });
+            }
+            SecurityScheme::APIKey {
+                location: openapiv3::APIKeyLocation::Header,
+                name,
+                ..
+            } => {
+                return Some(AuthScheme::ApiKey {
+                    header_name: name.clone(),
+                    secret_ref: format!("secret://{slug}/{scheme_key}"),
+                });
+            }
+            other => {
+                eprintln!(
+                    "warning: skipping security scheme '{scheme_key}' — {other:?} is deferred in v1 (only http-bearer and header apiKey are supported)"
+                );
+            }
         }
     }
+
+    None
 }
 
 /// Turn a connector name (e.g. a spec `info.title`) into a lowercase,
@@ -565,5 +604,117 @@ mod tests {
     fn malformed_spec_returns_err_not_panic() {
         let err = parse_openapi(b"{ not json or yaml : ", None, None);
         assert!(err.is_err());
+    }
+
+    const DUP_ID_SPEC: &[u8] = br#"{
+        "openapi": "3.0.3",
+        "info": { "title": "Dup Id Spec", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+            "/things/{id}": {
+                "get": {
+                    "operationId": "getThing",
+                    "parameters": [
+                        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                    ],
+                    "responses": { "200": { "description": "OK" } }
+                }
+            },
+            "/things": {
+                "get": {
+                    "operationId": "getThing",
+                    "responses": { "200": { "description": "OK" } }
+                }
+            }
+        }
+    }"#;
+
+    #[test]
+    fn duplicate_operation_id_is_skipped_with_warning() {
+        let model = parse_openapi(DUP_ID_SPEC, None, None).expect("parse should succeed");
+
+        // Only the FIRST occurrence is kept; the duplicate is dropped rather
+        // than yielding two tools with the same name.
+        assert_eq!(
+            model.tools.iter().filter(|t| t.name == "getThing").count(),
+            1
+        );
+        let kept = model.tools.iter().find(|t| t.name == "getThing").unwrap();
+        assert_eq!(kept.path_template, "/things/{id}");
+    }
+
+    const OAUTH2_THEN_BEARER_SPEC: &[u8] = br#"{
+        "openapi": "3.0.3",
+        "info": { "title": "Oauth Then Bearer Spec", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+            "/thing": {
+                "get": {
+                    "operationId": "getThing",
+                    "responses": { "200": { "description": "OK" } }
+                }
+            }
+        },
+        "components": {
+            "securitySchemes": {
+                "oauth2Auth": {
+                    "type": "oauth2",
+                    "flows": {
+                        "clientCredentials": {
+                            "tokenUrl": "https://auth.example.com/token",
+                            "scopes": {}
+                        }
+                    }
+                },
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer"
+                }
+            }
+        }
+    }"#;
+
+    #[test]
+    fn security_picks_first_supported_scheme_skipping_oauth2() {
+        let model =
+            parse_openapi(OAUTH2_THEN_BEARER_SPEC, None, None).expect("parse should succeed");
+
+        assert!(matches!(model.security, Some(AuthScheme::Bearer { .. })));
+    }
+
+    const ARRAY_QUERY_SPEC: &[u8] = br#"{
+        "openapi": "3.0.3",
+        "info": { "title": "Array Query Spec", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+            "/things": {
+                "get": {
+                    "operationId": "listThings",
+                    "parameters": [
+                        {
+                            "name": "tags",
+                            "in": "query",
+                            "required": false,
+                            "schema": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            }
+                        }
+                    ],
+                    "responses": { "200": { "description": "OK" } }
+                }
+            }
+        }
+    }"#;
+
+    #[test]
+    fn non_scalar_query_param_warns_but_still_parses() {
+        let model = parse_openapi(ARRAY_QUERY_SPEC, None, None).expect("parse should succeed");
+
+        // Degrade, don't crash or skip the whole operation: the tool is still
+        // produced and the non-scalar param is kept as-is.
+        assert_eq!(model.tools.len(), 1);
+        let tool = &model.tools[0];
+        assert!(tool.params.iter().any(|p| p.name == "tags"));
     }
 }
