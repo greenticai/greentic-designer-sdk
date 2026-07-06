@@ -36,6 +36,17 @@ fn substitutions() -> BTreeMap<&'static str, &'static str> {
         ("node_type_id", "my-ext"),
         ("label", "My Ext"),
         ("contract_version", "0.1.0"),
+        // `openapi-connector`-only placeholders: `network_json`/`secrets_json`/
+        // `tools_contrib_json` are substituted as raw JSON (no surrounding
+        // quotes in the template), so their values must themselves be valid
+        // JSON array literals.
+        ("summary", "Generated connector for an OpenAPI spec."),
+        ("network_json", "[\"https://api.example.com/*\"]"),
+        ("secrets_json", "[\"secret://my-ext/bearerAuth\"]"),
+        (
+            "tools_contrib_json",
+            "[{\"name\":\"getPetById\",\"export\":\"greentic:extension-design/tools.invoke-tool\",\"runtime_ref\":\"my-ext\"}]",
+        ),
     ])
 }
 

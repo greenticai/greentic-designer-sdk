@@ -8,11 +8,10 @@
 //! of scope for v1 and causes the affected operation/parameter to be skipped
 //! with a warning rather than failing the whole parse.
 //!
-//! This is the pure parse layer only; nothing here is wired into the `gtdx`
-//! CLI yet (codegen + the `gtdx openapi` subcommand are a follow-up task),
-//! hence the module-wide `dead_code` allowance below.
-
-#![allow(dead_code)]
+//! This is the pure parse layer; [`crate::commands::openapi::codegen`] turns
+//! the resulting [`ConnectorModel`] into a generated `DesignExtension`
+//! connector, and [`crate::commands::openapi::run`] wires it into the `gtdx
+//! openapi` subcommand.
 
 use std::borrow::Cow;
 
@@ -386,7 +385,10 @@ fn build_security(connector_name: &str, spec: &OpenAPI) -> Option<AuthScheme> {
     }
 }
 
-fn slugify(name: &str) -> String {
+/// Turn a connector name (e.g. a spec `info.title`) into a lowercase,
+/// dash-separated slug suitable for a crate name / output directory / secret
+/// reference path segment.
+pub fn slugify(name: &str) -> String {
     let mut slug = String::with_capacity(name.len());
     let mut last_was_dash = false;
     for ch in name.chars() {

@@ -307,7 +307,11 @@ fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<
     Ok(files_written)
 }
 
-fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<usize> {
+/// Write the embedded WIT contract deps + `.gtdx-contract.lock` for `kind`
+/// into `target`. `pub(crate)` so `commands::openapi::run` can reuse it to
+/// scaffold the WIT side of a generated `DesignExtension` connector (the same
+/// contract files a `gtdx new --kind design` scaffold gets).
+pub(crate) fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<usize> {
     let mut files_written = 0usize;
     let mut lock_files = BTreeMap::new();
     for file in embedded::files_for_kind(kind) {
