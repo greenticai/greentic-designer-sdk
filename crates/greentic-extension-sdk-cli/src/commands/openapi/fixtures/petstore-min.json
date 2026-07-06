@@ -1,0 +1,76 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Petstore Mini",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://api.example.com/v1" }
+  ],
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "paths": {
+    "/pets/{id}": {
+      "get": {
+        "operationId": "getPetById",
+        "summary": "Get a pet by ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "verbose",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+    "/pets": {
+      "post": {
+        "operationId": "createPet",
+        "summary": "Create a pet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "tag": { "type": "string" }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created" }
+        }
+      },
+      "put": {
+        "summary": "Replace a pet (intentionally missing operationId, must be skipped)",
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
