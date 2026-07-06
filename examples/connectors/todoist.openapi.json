@@ -1,0 +1,143 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Todoist",
+    "version": "2.0.0",
+    "description": "Todoist REST API v2 — tasks and projects. A worked example of an OpenAPI 3.0 spec that fits the gtdx openapi generator's v1 scope (GET/POST, application/json, path+query params, bearer auth)."
+  },
+  "servers": [
+    { "url": "https://api.todoist.com/rest/v2" }
+  ],
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Todoist API token as a bearer credential."
+      }
+    }
+  },
+  "paths": {
+    "/tasks": {
+      "get": {
+        "operationId": "getTasks",
+        "summary": "List active tasks, optionally filtered by project or a filter query.",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter tasks by a project id.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "description": "A Todoist filter query, e.g. \"today | overdue\".",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "The list of active tasks." }
+        }
+      },
+      "post": {
+        "operationId": "createTask",
+        "summary": "Create a new task.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["content"],
+                "properties": {
+                  "content": { "type": "string", "description": "The task text (supports Markdown)." },
+                  "description": { "type": "string", "description": "A longer note on the task." },
+                  "project_id": { "type": "string", "description": "The project to add the task to." },
+                  "priority": { "type": "integer", "description": "1 (normal) to 4 (urgent)." },
+                  "due_string": { "type": "string", "description": "Human due date, e.g. \"tomorrow at 9am\"." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The created task." }
+        }
+      }
+    },
+    "/tasks/{task_id}": {
+      "get": {
+        "operationId": "getTask",
+        "summary": "Get a single active task by id.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "description": "The task id.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "The requested task." }
+        }
+      }
+    },
+    "/tasks/{task_id}/close": {
+      "post": {
+        "operationId": "closeTask",
+        "summary": "Close (complete) a task by id.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "description": "The task id to close.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "The task was closed." }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "operationId": "getProjects",
+        "summary": "List all projects.",
+        "responses": {
+          "200": { "description": "The list of projects." }
+        }
+      },
+      "post": {
+        "operationId": "createProject",
+        "summary": "Create a new project.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "description": "The project name." },
+                  "color": { "type": "string", "description": "A Todoist color name, e.g. \"berry_red\"." },
+                  "is_favorite": { "type": "boolean", "description": "Whether the project is a favorite." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "The created project." }
+        }
+      }
+    }
+  }
+}

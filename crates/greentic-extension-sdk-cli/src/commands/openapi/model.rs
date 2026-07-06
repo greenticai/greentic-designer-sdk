@@ -576,6 +576,53 @@ mod tests {
         assert!(model.base_url.starts_with("http"));
     }
 
+    /// Catalog entry: the Todoist REST v2 spec in `examples/connectors/` must
+    /// parse into its six tools with bearer auth and the Todoist base URL —
+    /// a realistic, multi-operation regression guard on top of the minimal
+    /// petstore fixture (proves the generator handles a real API spec offline).
+    #[test]
+    fn parses_todoist_catalog_spec_into_six_tools() {
+        let model = parse_openapi(
+            include_bytes!("../../../../../examples/connectors/todoist.openapi.json"),
+            None,
+            None,
+        )
+        .expect("todoist catalog spec should parse");
+
+        assert_eq!(model.tools.len(), 6);
+        for op in [
+            "getTasks",
+            "createTask",
+            "getTask",
+            "closeTask",
+            "getProjects",
+            "createProject",
+        ] {
+            assert!(
+                model.tools.iter().any(|t| t.name == op),
+                "expected a tool named {op}"
+            );
+        }
+
+        // Path parameter is captured on the by-id operation.
+        let get_task = model.tools.iter().find(|t| t.name == "getTask").unwrap();
+        assert_eq!(get_task.path_template, "/tasks/{task_id}");
+        assert!(
+            get_task
+                .params
+                .iter()
+                .any(|p| p.name == "task_id" && matches!(p.location, ParamLoc::Path) && p.required)
+        );
+
+        // Request body properties flow into the create-task input schema.
+        let create = model.tools.iter().find(|t| t.name == "createTask").unwrap();
+        assert!(create.input_schema["properties"]["content"].is_object());
+        assert!(create.body.is_some());
+
+        assert!(matches!(model.security, Some(AuthScheme::Bearer { .. })));
+        assert_eq!(model.base_url, "https://api.todoist.com/rest/v2");
+    }
+
     #[test]
     fn skips_operation_without_operation_id() {
         // The fixture's `PUT /pets` is intentionally missing `operationId` and
