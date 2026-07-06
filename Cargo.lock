@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-cli"
-version = "1.2.19-research"
+version = "1.1.2"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1086,7 +1086,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-contract"
-version = "1.2.19-research"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1108,7 +1108,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-registry"
-version = "1.2.19-research"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1139,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-state"
-version = "1.2.19-research"
+version = "1.1.2"
 dependencies = [
  "fs2",
  "semver",
@@ -1151,7 +1151,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-testing"
-version = "1.2.19-research"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "ciborium",
@@ -1166,9 +1166,9 @@ dependencies = [
 
 [[package]]
 name = "greentic-types"
-version = "1.2.0-research.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d2a079903dae4d40cff9b2627feea1b19c47343b1066b55d7335ddfb055f7ac"
+checksum = "2038742af85b1d3eb48cdb53095f8dee84d6ca9f858b6a5bfdaa832938d11585"
 dependencies = [
  "anyhow",
  "blake3",
