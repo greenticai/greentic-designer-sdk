@@ -90,6 +90,15 @@
               "runtime_ref": { "type": "string" }
             }
           }
+        },
+        "connection_test": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool"],
+          "properties": {
+            "tool": { "type": "string" },
+            "args": { "type": "object" }
+          }
         }
       }
     },
