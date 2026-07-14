@@ -7,20 +7,15 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 /// Max icon size (1 MiB) — matches the store-server icon cap.
-// Not yet called from `main` in this commit: `gtdx new`/`gtdx publish` wire
-// this in next (see plan Tasks 2-3).
-#[allow(dead_code)]
 pub const MAX_ICON_BYTES: u64 = 1024 * 1024;
 
 /// Icon file extensions the store + designer render.
-#[allow(dead_code)]
 const SUPPORTED_EXTS: &[&str] = &["svg", "png", "jpg", "jpeg", "webp"];
 
 /// Validate `icon_src` (type + size), copy it to `<project_dir>/assets/icon.<ext>`,
 /// and set `metadata.icon` in `<project_dir>/describe.json` to that pack-relative
 /// path. Idempotent (an existing `metadata.icon` is overwritten). Returns the
 /// relative icon path, e.g. `"assets/icon.svg"`.
-#[allow(dead_code)]
 pub fn apply_icon(project_dir: &Path, icon_src: &Path) -> Result<String> {
     let ext = icon_src
         .extension()

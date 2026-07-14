@@ -78,6 +78,11 @@ pub struct Args {
     /// router via greentic-mcp-gen instead of the empty echo skeleton).
     #[arg(long, value_name = "SPEC")]
     pub from_openapi: Option<PathBuf>,
+
+    /// Path to an icon file (svg/png/jpg/webp, <= 1 MiB) to attach as the
+    /// extension's `metadata.icon`. Copied into the scaffold's `assets/` dir.
+    #[arg(long)]
+    pub icon: Option<PathBuf>,
 }
 
 /// Fully-resolved scaffold inputs, produced either from CLI flags
@@ -120,6 +125,11 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
         n += write_wit_and_lock(resolved.kind.as_str(), &target)?;
         n
     };
+
+    if let Some(icon) = args.icon.as_deref() {
+        let rel = crate::icon::apply_icon(&target, icon)?;
+        println!("  icon: {rel}");
+    }
 
     make_scripts_executable(&target)?;
     run_git_init(&target, resolved.no_git);
