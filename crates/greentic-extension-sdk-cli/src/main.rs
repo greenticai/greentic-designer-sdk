@@ -2,6 +2,7 @@
 
 mod commands;
 mod dev;
+mod icon;
 mod publish;
 mod registry_security;
 mod scaffold;
