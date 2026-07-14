@@ -2,6 +2,7 @@
 //! files under the 500-line limit.
 
 mod fixtures;
+mod icon;
 mod openapi;
 mod scaffold_kinds;
 mod scaffold_validation;
