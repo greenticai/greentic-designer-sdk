@@ -44,6 +44,24 @@ pub fn apply_icon(project_dir: &Path, icon_src: &Path) -> Result<String> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
+
+    // Remove any pre-existing icon.<other-ext> so switching formats (e.g.
+    // svg -> png) doesn't leave a stale sibling that the packer would still
+    // ship alongside the new one.
+    for other_ext in SUPPORTED_EXTS {
+        if *other_ext == ext {
+            continue;
+        }
+        let stale = project_dir.join(format!("assets/icon.{other_ext}"));
+        match std::fs::remove_file(&stale) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| format!("remove stale {}", stale.display()));
+            }
+        }
+    }
+
     std::fs::write(&dst, &bytes).with_context(|| format!("write {}", dst.display()))?;
 
     let describe_path = project_dir.join("describe.json");
@@ -134,5 +152,59 @@ mod tests {
         )
         .unwrap();
         assert!(apply_icon(proj.path(), &src).is_err());
+    }
+
+    /// Regression for the describe.json key-reordering bug: without
+    /// `preserve_order` on `serde_json`, round-tripping through `Value`
+    /// re-emits all object keys alphabetically, turning `apply_icon` into a
+    /// whole-file reshuffle instead of a one-line diff. Assert the
+    /// pre-existing `metadata` keys keep their original relative order in
+    /// the raw output text, and that `icon` was added (not just sorted in).
+    #[test]
+    fn preserves_describe_key_order() {
+        let proj = tempfile::tempdir().unwrap();
+        seed_describe(proj.path());
+        let src = proj.path().join("logo.svg");
+        fs::write(&src, SVG).unwrap();
+
+        apply_icon(proj.path(), &src).unwrap();
+
+        let raw = fs::read_to_string(proj.path().join("describe.json")).unwrap();
+        let idx_id = raw.find("\"id\"").expect("id present");
+        let idx_name = raw.find("\"name\"").expect("name present");
+        let idx_version = raw.find("\"version\"").expect("version present");
+        let idx_keywords = raw.find("\"keywords\"").expect("keywords present");
+        assert!(idx_id < idx_name, "id should precede name");
+        assert!(idx_name < idx_version, "name should precede version");
+        assert!(
+            idx_version < idx_keywords,
+            "version should precede keywords"
+        );
+        assert!(raw.contains("\"icon\""), "icon key should be present");
+    }
+
+    /// Regression for stale icon files: applying a `.png` after an `.svg`
+    /// must remove the old `assets/icon.svg`, not just add `assets/icon.png`
+    /// alongside it.
+    #[test]
+    fn dedup_across_extensions() {
+        let proj = tempfile::tempdir().unwrap();
+        seed_describe(proj.path());
+
+        let svg_src = proj.path().join("logo.svg");
+        fs::write(&svg_src, SVG).unwrap();
+        apply_icon(proj.path(), &svg_src).unwrap();
+        assert!(proj.path().join("assets/icon.svg").exists());
+
+        let png_src = proj.path().join("logo.png");
+        fs::write(&png_src, b"\x89PNG\r\n").unwrap();
+        let rel = apply_icon(proj.path(), &png_src).unwrap();
+
+        assert_eq!(rel, "assets/icon.png");
+        assert!(!proj.path().join("assets/icon.svg").exists());
+        assert!(proj.path().join("assets/icon.png").exists());
+        let d: serde_json::Value =
+            serde_json::from_slice(&fs::read(proj.path().join("describe.json")).unwrap()).unwrap();
+        assert_eq!(d["metadata"]["icon"], "assets/icon.png");
     }
 }
