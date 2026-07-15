@@ -181,3 +181,71 @@ fn write_canonical_dist_removes_staging() {
         "staging pack must not linger in ./dist after publish"
     );
 }
+
+/// Empirical repro: `component-guardrail-topic`'s `describe.json` has
+/// `metadata.name = "Topic / scope guardrail"`. Previously the raw name was
+/// used verbatim as a filename component, so the write targeted a
+/// nonexistent nested directory (`dist/Topic /...`) and failed with a bare
+/// `No such file or directory (os error 2)`. A `/` in the name must still
+/// produce a real, single-segment `.gtxpack` written directly under `dist`.
+#[test]
+fn write_canonical_dist_sanitizes_slash_in_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dist = tmp.path().join("dist");
+    std::fs::create_dir_all(&dist).unwrap();
+    let staging = dist.join("publish-staging.gtxpack");
+    std::fs::write(&staging, b"pack-bytes").unwrap();
+
+    let final_dist = write_canonical_dist(
+        &staging,
+        &dist,
+        "Topic / scope guardrail",
+        "0.1.0",
+        b"pack-bytes",
+    )
+    .expect("publish must succeed despite '/' in metadata.name");
+
+    assert!(final_dist.is_file());
+    assert_eq!(
+        final_dist.parent().unwrap(),
+        dist,
+        "must land directly in dist_dir, not a nested dir"
+    );
+    assert_eq!(std::fs::read(&final_dist).unwrap(), b"pack-bytes");
+}
+
+#[test]
+fn write_canonical_dist_sanitizes_backslash_in_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dist = tmp.path().join("dist");
+    std::fs::create_dir_all(&dist).unwrap();
+    let staging = dist.join("publish-staging.gtxpack");
+    std::fs::write(&staging, b"pack-bytes").unwrap();
+
+    let final_dist = write_canonical_dist(&staging, &dist, r"weird\name", "0.1.0", b"pack-bytes")
+        .expect("publish must succeed despite '\\' in metadata.name");
+
+    assert!(final_dist.is_file());
+    assert_eq!(final_dist.parent().unwrap(), dist);
+}
+
+#[test]
+fn write_canonical_dist_sanitizes_degenerate_names() {
+    for bad in ["", ".", ".."] {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path().join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        let staging = dist.join("publish-staging.gtxpack");
+        std::fs::write(&staging, b"pack-bytes").unwrap();
+
+        let final_dist = write_canonical_dist(&staging, &dist, bad, "0.1.0", b"pack-bytes")
+            .unwrap_or_else(|e| panic!("name {bad:?} must still publish, got: {e}"));
+
+        assert!(final_dist.is_file());
+        assert_eq!(
+            final_dist.parent().unwrap(),
+            dist,
+            "name {bad:?} must not escape dist_dir"
+        );
+    }
+}
