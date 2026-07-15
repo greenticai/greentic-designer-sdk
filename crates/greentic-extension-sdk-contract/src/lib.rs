@@ -9,6 +9,7 @@ pub mod component_id;
 pub mod deprecated;
 pub mod describe;
 pub mod error;
+pub mod filename;
 pub mod hex;
 pub mod kind;
 pub mod localization;
@@ -32,6 +33,7 @@ pub use self::deprecated::Deprecated;
 pub use self::describe::provider::RuntimeGtpack;
 pub use self::describe::{DescribeJson, Signature, SignatureAlgorithm};
 pub use self::error::ContractError;
+pub use self::filename::{safe_pack_filename, sanitize_filename_component};
 pub use self::kind::ExtensionKind;
 pub use self::localization::{Locale, LocalizedString};
 pub use self::manifest::{

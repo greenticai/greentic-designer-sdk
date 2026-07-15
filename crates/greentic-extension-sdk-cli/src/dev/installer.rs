@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context as _;
 use greentic_extension_sdk_registry::lifecycle::{InstallOptions, Installer, TrustPolicy};
 use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
 use greentic_extension_sdk_registry::storage::Storage;
@@ -12,16 +13,28 @@ use super::packer::PackInfo;
 /// filesystem registry and invoking the standard `Installer`.
 pub async fn install_pack(home: &Path, pack: &PackInfo) -> anyhow::Result<InstallSummary> {
     let registry_dir = home.join("registries/dev-local");
-    std::fs::create_dir_all(&registry_dir)?;
-    let staged_pack = registry_dir.join(format!("{}-{}.gtxpack", pack.ext_name, pack.ext_version));
-    copy_atomic(&pack.pack_path, &staged_pack)?;
+    std::fs::create_dir_all(&registry_dir)
+        .with_context(|| format!("create registry dir {}", registry_dir.display()))?;
+    // `pack.ext_name` is free-form `describe.json` metadata (display text)
+    // and may contain characters unsafe as a path component (e.g. "/").
+    // Sanitize it once and use the *same* sanitized value both for the
+    // staged filename and as the lookup key passed to `Installer::install`
+    // below — this staging registry is a flat scratch dir keyed purely by
+    // filename, so writer and reader must agree on exactly the same string
+    // or the install would "succeed" at writing but then fail to find what
+    // it just wrote. `pack.ext_name` itself (unsanitized) is kept for the
+    // `InstallSummary.name` field, which is display-only.
+    let safe_name = greentic_extension_sdk_contract::sanitize_filename_component(&pack.ext_name);
+    let staged_pack = registry_dir.join(format!("{safe_name}-{}.gtxpack", pack.ext_version));
+    copy_atomic(&pack.pack_path, &staged_pack)
+        .with_context(|| format!("stage pack at {}", staged_pack.display()))?;
 
     let storage = Storage::new(home);
     let reg = LocalFilesystemRegistry::new("dev-local", registry_dir.clone());
     let installer = Installer::new(storage.clone_shallow(), &reg);
     installer
         .install(
-            &pack.ext_name,
+            &safe_name,
             &pack.ext_version,
             InstallOptions {
                 trust_policy: TrustPolicy::Loose,
@@ -78,7 +91,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn sample_pack(tmp: &Path) -> (PathBuf, PackInfo) {
+    fn sample_pack_named(tmp: &Path, ext_name: &str) -> (PathBuf, PackInfo) {
         let pack = tmp.join("demo-0.1.0.gtxpack");
         let file = std::fs::File::create(&pack).unwrap();
         let mut zip = zip::ZipWriter::new(file);
@@ -123,12 +136,16 @@ mod tests {
             pack_name: "demo-0.1.0.gtxpack".into(),
             size: std::fs::metadata(&pack).unwrap().len(),
             sha256: "dummy".into(),
-            ext_name: "demo".into(),
+            ext_name: ext_name.into(),
             ext_version: "0.1.0".into(),
             ext_kind: "design".into(),
             describe_bytes: desc.clone(),
         };
         (pack, info)
+    }
+
+    fn sample_pack(tmp: &Path) -> (PathBuf, PackInfo) {
+        sample_pack_named(tmp, "demo")
     }
 
     #[tokio::test]
@@ -149,5 +166,45 @@ mod tests {
         assert!(expected.exists(), "expected {}", expected.display());
         assert!(expected.join("describe.json").exists());
         assert!(expected.join("extension.wasm").exists());
+    }
+
+    /// Empirical repro (`gtdx dev` variant): `pack.ext_name` containing "/"
+    /// (e.g. "Topic / scope guardrail") must not crash the staging write,
+    /// AND the sanitized name used to write the staged file must be the
+    /// same one used to look it back up via `Installer::install` — otherwise
+    /// the write would silently "succeed" while install then fails to find
+    /// what it just staged.
+    #[tokio::test]
+    async fn install_pack_with_slash_in_name_succeeds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let src_dir = tmp.path().join("dist");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let (_src, info) = sample_pack_named(&src_dir, "Topic / scope guardrail");
+
+        let summary = install_pack(&home, &info)
+            .await
+            .expect("install must succeed despite '/' in ext_name");
+        assert_eq!(summary.version, "0.1.0");
+
+        let expected = home.join("extensions/design/com.example.demo-0.1.0");
+        assert!(expected.exists(), "expected {}", expected.display());
+        assert!(expected.join("describe.json").exists());
+        assert!(expected.join("extension.wasm").exists());
+
+        // The staged pack itself must be a single path component directly
+        // under the registry dir, not a nested "Topic " subdirectory.
+        let registry_dir = home.join("registries/dev-local");
+        let staged: Vec<_> = std::fs::read_dir(&registry_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .collect();
+        assert_eq!(
+            staged.len(),
+            1,
+            "expected exactly one staged file directly under {}",
+            registry_dir.display()
+        );
     }
 }
