@@ -16,6 +16,7 @@ fn default_compat() -> Compat {
 
 fn sample_describe(version: &str) -> DescribeJson {
     DescribeJson {
+        secret_requirements: Vec::new(),
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
@@ -47,6 +48,7 @@ fn sample_describe(version: &str) -> DescribeJson {
             required: vec![],
         },
         runtime: Runtime {
+            world: None,
             memory_limit_mb: 64,
             permissions: Permissions::default(),
             components: std::collections::BTreeMap::new(),

@@ -63,6 +63,7 @@ pub fn build_provider_fixture_gtxpack(
     components.insert(component_id, component);
 
     let mut describe = DescribeJson {
+        secret_requirements: Vec::new(),
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Provider,
@@ -98,6 +99,7 @@ pub fn build_provider_fixture_gtxpack(
             required: vec![],
         },
         runtime: Runtime {
+            world: None,
             memory_limit_mb: 64,
             permissions: Permissions::default(),
             components,
