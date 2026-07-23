@@ -206,6 +206,21 @@ On top of the contract gate, doctor also honours the range the extension itself
 declares — `compat.min_designer_version` on a v2 describe, or the equivalent
 `engine.greenticDesigner` on a v1 one.
 
+You do not have to remember to run doctor: `gtdx dev` and `gtdx install` run the
+same check right after installing, so a designer that will not load what you just
+built says so where you are already looking:
+
+```console
+$ gtdx dev --once
+✓ installed my-ext@0.1.0
+⚠ my-ext installed, but this designer cannot load it: declares greentic.ai/v2, …
+```
+
+Note what a scaffold declares: `min_designer_version` is the **contract floor**
+(`>=1.2.0`), not the version of the SDK that generated it. Those are different
+axes — an extension built by SDK 1.3.x still loads on any designer that speaks
+v2. `contract_version` is the one that tracks the SDK.
+
 There is deliberately no flag to emit a v1 describe from a v2 SDK. Downgrading
 the contract would mean maintaining two describe shapes forever while still
 lying about extensions that genuinely need v2 features; upgrading Designer is

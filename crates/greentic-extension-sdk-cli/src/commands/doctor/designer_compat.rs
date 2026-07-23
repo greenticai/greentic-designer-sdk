@@ -19,16 +19,49 @@
 //! `compat.min_designer_version` range (and a v1 describe the equivalent
 //! `engine.greenticDesigner`), which is checked second.
 
+use std::path::{Path, PathBuf};
+
 use semver::{Version, VersionReq};
 use serde_json::Value;
+
+/// Path to the designer binary to interrogate.
+///
+/// `GREENTIC_DESIGNER_BIN` takes priority so an author running designer out of
+/// a checkout (`target/release/greentic-designer`) can point the tooling at the
+/// build they actually launch, which is usually not the one on `PATH`.
+pub fn designer_binary() -> Option<PathBuf> {
+    if let Some(explicit) = std::env::var_os("GREENTIC_DESIGNER_BIN") {
+        let path = PathBuf::from(explicit);
+        return path.exists().then_some(path);
+    }
+    which::which("greentic-designer").ok()
+}
+
+/// Version reported by a designer binary, or `None` if it cannot be run or
+/// prints something unparseable.
+pub fn designer_version(binary: &Path) -> Option<Version> {
+    let output = std::process::Command::new(binary)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_version_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Version of the designer installed on this machine, if there is one.
+pub fn installed_designer_version() -> Option<Version> {
+    designer_version(&designer_binary()?)
+}
 
 /// First designer release whose extension loader understands the
 /// `greentic.ai/v2` describe contract.
 ///
-/// Grounded in the designer history rather than chosen: designer adopted
-/// `greentic-extension-sdk-contract` 1.2.x at package version `1.2.3-research`,
-/// and every SDK template since emits `min_designer_version: ">=1.2.0"`.
-pub const V2_MIN_DESIGNER: &str = "1.2.0";
+/// Re-exported from the contract crate so the floor doctor reports and the
+/// floor `gtdx new` stamps into every scaffold are the same value by
+/// construction, not by two comments agreeing with each other.
+pub use greentic_extension_sdk_contract::compat::MIN_DESIGNER_VERSION as V2_MIN_DESIGNER;
 
 /// The `apiVersion` a describe carries when it omits the field. The v1
 /// contract predates the field being mandatory.
@@ -156,10 +189,59 @@ pub fn parse_version_output(stdout: &str) -> Option<Version> {
         .find_map(|token| token.parse::<Version>().ok())
 }
 
+/// Warning to print immediately after installing an extension, or `None` when
+/// there is nothing to say.
+///
+/// `gtdx doctor` already reports this, but install is where the author is
+/// actually looking: `gtdx dev --once` otherwise reports a clean install of an
+/// extension the local designer will silently refuse to load. `designer` is
+/// `None` when no designer is installed locally — that is not a problem, so it
+/// warns about nothing.
+pub fn install_warning(designer: Option<&Version>, describe: &Value) -> Option<String> {
+    let designer = designer?;
+    let remedy = evaluate(designer, describe).remedy(designer)?;
+    Some(format!(
+        "installed, but this designer cannot load it: {remedy}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn v2_describe() -> Value {
+        json!({
+            "apiVersion": "greentic.ai/v2",
+            "compat": { "min_designer_version": ">=1.2.0" }
+        })
+    }
+
+    /// The reported inner-loop failure: `gtdx dev --once` says "installed" and
+    /// the extension then never appears in Designer.
+    #[test]
+    fn install_warns_when_local_designer_cannot_load_it() {
+        let warning = install_warning(Some(&v("1.1.7")), &v2_describe())
+            .expect("a pre-v2 designer must be warned about");
+
+        assert!(warning.contains("cannot load"), "{warning}");
+        assert!(warning.contains(">=1.2.0"), "names the fix: {warning}");
+    }
+
+    #[test]
+    fn install_is_quiet_when_designer_can_load_it() {
+        assert_eq!(
+            install_warning(Some(&v("1.3.2-research")), &v2_describe()),
+            None
+        );
+    }
+
+    /// No designer installed is a normal state for a CI box or a publish-only
+    /// machine — it must not produce a warning about compatibility.
+    #[test]
+    fn install_is_quiet_when_no_designer_is_installed() {
+        assert_eq!(install_warning(None, &v2_describe()), None);
+    }
 
     #[test]
     fn parses_clap_version_line() {
