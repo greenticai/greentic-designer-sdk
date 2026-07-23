@@ -251,30 +251,6 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
     Ok(bad)
 }
 
-/// Path to the designer binary doctor should interrogate.
-///
-/// `GREENTIC_DESIGNER_BIN` takes priority so an author running designer out of
-/// a checkout (`target/release/greentic-designer`) can point doctor at the
-/// build they actually launch, which is usually not the one on `PATH`.
-fn designer_binary() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("GREENTIC_DESIGNER_BIN") {
-        let path = PathBuf::from(explicit);
-        return path.exists().then_some(path);
-    }
-    which::which("greentic-designer").ok()
-}
-
-fn designer_version(binary: &Path) -> Option<semver::Version> {
-    let output = std::process::Command::new(binary)
-        .arg("--version")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    designer_compat::parse_version_output(&String::from_utf8_lossy(&output.stdout))
-}
-
 /// Human label for an extension directory: `<id> <version>` from the describe,
 /// falling back to the directory name.
 fn extension_label(ext_dir: &Path, describe: &serde_json::Value) -> String {
@@ -301,14 +277,14 @@ fn extension_label(ext_dir: &Path, describe: &serde_json::Value) -> String {
 /// so it never appears in `/api/extensions` and the author has nothing to go
 /// on. Naming the mismatch here is the whole point of the check.
 fn check_designer_compat(home: &Path) -> anyhow::Result<usize> {
-    let Some(binary) = designer_binary() else {
+    let Some(binary) = designer_compat::designer_binary() else {
         println!(
             "  \u{25C9} greentic-designer not found on PATH — skipping \
              (set GREENTIC_DESIGNER_BIN to check a build from a checkout)"
         );
         return Ok(0);
     };
-    let Some(version) = designer_version(&binary) else {
+    let Some(version) = designer_compat::designer_version(&binary) else {
         println!(
             "  \u{26A0} cannot read a version from {} --version — skipping",
             binary.display()

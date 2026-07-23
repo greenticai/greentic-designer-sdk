@@ -253,6 +253,14 @@ fn build_context(resolved: &Resolved) -> Context {
     // produced them, independent of the WIT contract `CONTRACT_VERSION`
     // (which tracks the wit-package @version, evolves slower).
     ctx.set("sdk_version", env!("CARGO_PKG_VERSION"));
+    // The minimum designer an extension needs is the describe-contract floor,
+    // NOT the SDK that generated it — see `compat::MIN_DESIGNER_VERSION`.
+    // Templates previously reused `sdk_version` here, which made every fresh
+    // scaffold declare itself incompatible with designers that can load it.
+    ctx.set(
+        "min_designer_version",
+        greentic_extension_sdk_contract::compat::MIN_DESIGNER_VERSION,
+    );
     // `runtime_ref_key` is the key used in v2 `runtime.components` map and
     // in every `nodeTypes[].runtime_ref` / `tools[].runtime_ref`. Default
     // is the last dotted segment of the extension id (matches the

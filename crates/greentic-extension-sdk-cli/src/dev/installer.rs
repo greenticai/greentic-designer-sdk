@@ -45,11 +45,32 @@ pub async fn install_pack(home: &Path, pack: &PackInfo) -> anyhow::Result<Instal
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
+    warn_if_designer_cannot_load(&pack.describe_bytes, &pack.ext_name);
+
     Ok(InstallSummary {
         registry: registry_dir,
         name: pack.ext_name.clone(),
         version: pack.ext_version.clone(),
     })
+}
+
+/// Tell the author straight after an install when the designer on this machine
+/// will not load what was just installed.
+///
+/// The inner loop otherwise reports a clean install and the extension then
+/// silently never appears in Designer — which is the failure this whole check
+/// exists for. Best-effort: an unparseable describe or no local designer says
+/// nothing, because neither is a compatibility problem.
+pub(crate) fn warn_if_designer_cannot_load(describe_bytes: &[u8], label: &str) {
+    let Ok(describe) = serde_json::from_slice::<serde_json::Value>(describe_bytes) else {
+        return;
+    };
+    let designer = crate::commands::doctor::designer_compat::installed_designer_version();
+    if let Some(warning) =
+        crate::commands::doctor::designer_compat::install_warning(designer.as_ref(), &describe)
+    {
+        eprintln!("⚠ {label} {warning}");
+    }
 }
 
 #[derive(Debug, Clone)]

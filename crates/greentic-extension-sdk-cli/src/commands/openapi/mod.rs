@@ -103,6 +103,12 @@ fn build_context(model: &ConnectorModel, slug: &str) -> Context {
     );
     ctx.set("runtime_ref_key", slug.to_string());
     ctx.set("sdk_version", env!("CARGO_PKG_VERSION"));
+    // The designer floor is the describe-contract floor, not the generating
+    // SDK version — see `compat::MIN_DESIGNER_VERSION`.
+    ctx.set(
+        "min_designer_version",
+        greentic_extension_sdk_contract::compat::MIN_DESIGNER_VERSION,
+    );
     // `extension-base`/`extension-host`/`extension-design` are versioned
     // independently (see `embedded::CONTRACT_VERSION`'s doc comment) —
     // `world.wit.tmpl` imports/exports each at its own real `@version`
