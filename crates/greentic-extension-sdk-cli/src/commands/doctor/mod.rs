@@ -1,4 +1,6 @@
-use std::path::Path;
+pub mod designer_compat;
+
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use clap::Args as ClapArgs;
@@ -26,6 +28,9 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     println!();
     println!("installed extensions");
     failures += check_installed(home)?;
+    println!();
+    println!("designer compatibility");
+    failures += check_designer_compat(home)?;
     println!();
     if failures > 0 {
         println!("{failures} problem(s) found");
@@ -181,48 +186,61 @@ fn jwt_exp(token: &str) -> Option<DateTime<Utc>> {
     DateTime::from_timestamp(exp, 0)
 }
 
-fn check_installed(home: &Path) -> anyhow::Result<usize> {
+/// Every installed extension directory across all kinds, in a stable order.
+///
+/// Shared by the describe-validity check and the designer-compatibility check
+/// so the two always report on the same set of extensions.
+fn installed_extension_dirs(home: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let storage = Storage::new(home);
-    let mut total = 0usize;
-    let mut bad = 0usize;
+    let mut dirs = Vec::new();
     for kind in [
         ExtensionKind::Design,
         ExtensionKind::Bundle,
         ExtensionKind::Deploy,
         ExtensionKind::WasixMcpRouter,
     ] {
-        let dir = storage.kind_dir(kind);
-        if !dir.exists() {
+        let kind_dir = storage.kind_dir(kind);
+        if !kind_dir.exists() {
             continue;
         }
-        for entry in std::fs::read_dir(&dir)? {
+        let mut of_kind = Vec::new();
+        for entry in std::fs::read_dir(&kind_dir)? {
             let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
+            if entry.file_type()?.is_dir() {
+                of_kind.push(entry.path());
             }
-            total += 1;
-            let describe_path = entry.path().join("describe.json");
-            if !describe_path.exists() {
-                println!("  \u{2717} {} (no describe.json)", entry.path().display());
+        }
+        of_kind.sort();
+        dirs.extend(of_kind);
+    }
+    Ok(dirs)
+}
+
+fn check_installed(home: &Path) -> anyhow::Result<usize> {
+    let dirs = installed_extension_dirs(home)?;
+    let total = dirs.len();
+    let mut bad = 0usize;
+    for ext_dir in dirs {
+        let describe_path = ext_dir.join("describe.json");
+        if !describe_path.exists() {
+            println!("  \u{2717} {} (no describe.json)", ext_dir.display());
+            bad += 1;
+            continue;
+        }
+        let bytes = std::fs::read(&describe_path)?;
+        let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("  \u{2717} {}: invalid JSON: {e}", describe_path.display());
                 bad += 1;
                 continue;
             }
-            let bytes = std::fs::read(&describe_path)?;
-            let value: serde_json::Value = match serde_json::from_slice(&bytes) {
-                Ok(v) => v,
-                Err(e) => {
-                    println!("  \u{2717} {}: invalid JSON: {e}", describe_path.display());
-                    bad += 1;
-                    continue;
-                }
-            };
-            if let Err(e) = greentic_extension_sdk_contract::schema::validate_describe_json(&value)
-            {
-                println!("  \u{2717} {}: {e}", describe_path.display());
-                bad += 1;
-            } else {
-                println!("  \u{2713} {}", describe_path.display());
-            }
+        };
+        if let Err(e) = greentic_extension_sdk_contract::schema::validate_describe_json(&value) {
+            println!("  \u{2717} {}: {e}", describe_path.display());
+            bad += 1;
+        } else {
+            println!("  \u{2713} {}", describe_path.display());
         }
     }
     if total == 0 {
@@ -231,4 +249,101 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
         println!("  {total} total, {bad} bad");
     }
     Ok(bad)
+}
+
+/// Path to the designer binary doctor should interrogate.
+///
+/// `GREENTIC_DESIGNER_BIN` takes priority so an author running designer out of
+/// a checkout (`target/release/greentic-designer`) can point doctor at the
+/// build they actually launch, which is usually not the one on `PATH`.
+fn designer_binary() -> Option<PathBuf> {
+    if let Some(explicit) = std::env::var_os("GREENTIC_DESIGNER_BIN") {
+        let path = PathBuf::from(explicit);
+        return path.exists().then_some(path);
+    }
+    which::which("greentic-designer").ok()
+}
+
+fn designer_version(binary: &Path) -> Option<semver::Version> {
+    let output = std::process::Command::new(binary)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    designer_compat::parse_version_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Human label for an extension directory: `<id> <version>` from the describe,
+/// falling back to the directory name.
+fn extension_label(ext_dir: &Path, describe: &serde_json::Value) -> String {
+    let metadata = describe.get("metadata");
+    let id = metadata
+        .and_then(|m| m.get("id"))
+        .and_then(serde_json::Value::as_str);
+    let version = metadata
+        .and_then(|m| m.get("version"))
+        .and_then(serde_json::Value::as_str);
+    match (id, version) {
+        (Some(id), Some(version)) => format!("{id} {version}"),
+        (Some(id), None) => id.to_string(),
+        _ => ext_dir.file_name().map_or_else(
+            || ext_dir.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        ),
+    }
+}
+
+/// Report which installed extensions the local designer build can actually
+/// load. An extension built against the current SDK emits a `greentic.ai/v2`
+/// describe, which a pre-1.2 designer skips at boot with no actionable hint —
+/// so it never appears in `/api/extensions` and the author has nothing to go
+/// on. Naming the mismatch here is the whole point of the check.
+fn check_designer_compat(home: &Path) -> anyhow::Result<usize> {
+    let Some(binary) = designer_binary() else {
+        println!(
+            "  \u{25C9} greentic-designer not found on PATH — skipping \
+             (set GREENTIC_DESIGNER_BIN to check a build from a checkout)"
+        );
+        return Ok(0);
+    };
+    let Some(version) = designer_version(&binary) else {
+        println!(
+            "  \u{26A0} cannot read a version from {} --version — skipping",
+            binary.display()
+        );
+        return Ok(0);
+    };
+    println!(
+        "  \u{2713} greentic-designer {version}  {}",
+        binary.display()
+    );
+
+    let dirs = installed_extension_dirs(home)?;
+    if dirs.is_empty() {
+        println!("  \u{25C9} no installed extensions to check");
+        return Ok(0);
+    }
+
+    let mut problems = 0usize;
+    for ext_dir in dirs {
+        let Ok(bytes) = std::fs::read(ext_dir.join("describe.json")) else {
+            // Already reported by `check_installed`; not a compat problem.
+            continue;
+        };
+        let Ok(describe) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        let label = extension_label(&ext_dir, &describe);
+        let verdict = designer_compat::evaluate(&version, &describe);
+        match verdict.remedy(&version) {
+            Some(remedy) => {
+                println!("  \u{2717} {label}: {remedy}");
+                problems += 1;
+            }
+            None => println!("  \u{2713} {label}"),
+        }
+    }
+    Ok(problems)
 }
