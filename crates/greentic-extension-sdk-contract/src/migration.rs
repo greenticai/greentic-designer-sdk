@@ -171,19 +171,102 @@ fn build_component_entry(rt: &Map<String, Value>, report: &mut MigrationReport) 
     Value::Object(entry)
 }
 
+/// Normalize a v1 node-type/recipe entry's `config_schema` to the single shape
+/// the v2 contract requires: a `String` under the ``snake_case`` key.
+///
+/// v1 authored it three inconsistent ways, all seen in the real bundled packs:
+/// an inline JSON **object** (http/webhook/llm-generic), the ``camelCase`` key
+/// **`configSchema`** (bundle-standard recipes), or **`null`**
+/// (platform-bootstrap). An object is serialized back to a JSON string; a null
+/// or missing schema becomes an empty object string; a string is kept as-is.
+fn normalize_config_schema(item: &Value) -> Value {
+    let Some(map) = item.as_object() else {
+        return item.clone();
+    };
+    let mut map = map.clone();
+
+    // Fold camelCase `configSchema` into snake_case `config_schema` (only when
+    // the `snake_case` key isn't already present, so an author who wrote both
+    // does not get the camelCase one silently win).
+    if let Some(v) = map.remove("configSchema") {
+        map.entry("config_schema").or_insert(v);
+    }
+
+    let normalized = match map.get("config_schema") {
+        Some(Value::String(s)) => Value::String(s.clone()),
+        Some(Value::Object(o)) => {
+            Value::String(serde_json::to_string(&Value::Object(o.clone())).unwrap_or_default())
+        }
+        // `null`, or any other non-string shape, and the absent case all
+        // collapse to an empty JSON object — a valid, no-op schema string.
+        _ => Value::String("{}".into()),
+    };
+    map.insert("config_schema".into(), normalized);
+    Value::Object(map)
+}
+
+/// Lower a `camelCase` key to `snake_case` (`displayName` → `display_name`), used
+/// to reconcile v1's `camelCase` contribution keys with the v2 structs'
+/// `snake_case` (`rename_all`) fields.
+fn camel_to_snake(key: &str) -> String {
+    let mut out = String::with_capacity(key.len() + 2);
+    for ch in key.chars() {
+        if ch.is_ascii_uppercase() {
+            out.push('_');
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Normalize a v1 recipe to the v2 `Recipe` shape: `snake_case` keys, only the
+/// fields v2 knows (`deny_unknown_fields` rejects the rest), and a
+/// string-valued `config_schema`.
+fn normalize_recipe(item: &Value) -> Value {
+    const KNOWN: [&str; 4] = ["id", "display_name", "description", "config_schema"];
+    let Some(map) = item.as_object() else {
+        return item.clone();
+    };
+    let mut out = Map::new();
+    for (key, value) in map {
+        let snake = camel_to_snake(key);
+        if KNOWN.contains(&snake.as_str()) {
+            out.insert(snake, value.clone());
+        }
+        // Unknown v1 fields (e.g. `supportedCapabilities`) have no v2 slot and
+        // are dropped.
+    }
+    normalize_config_schema(&Value::Object(out))
+}
+
 fn migrate_contributions(obj: &Map<String, Value>, report: &mut MigrationReport) -> Value {
     let empty = Value::Object(Map::new());
     let contributions_in = obj.get("contributions").unwrap_or(&empty);
     let mut out = Map::new();
 
     if let Some(arr) = contributions_in.get("nodeTypes").and_then(Value::as_array) {
-        // LocalizedString handles plain strings transparently; pass through as-is.
-        out.insert("nodeTypes".into(), Value::Array(arr.clone()));
+        // LocalizedString handles plain strings transparently. But v1 authored
+        // `config_schema` inconsistently — as an inline JSON object, as `null`,
+        // or under the `camelCase` key `configSchema` — while the v2 `NodeType`
+        // requires a single `config_schema: String`. Normalize each entry.
+        let normalized = arr.iter().map(normalize_config_schema).collect();
+        out.insert("nodeTypes".into(), Value::Array(normalized));
     }
-    for key in ["tools", "recipes"] {
-        if let Some(v) = contributions_in.get(key).cloned() {
-            out.insert(key.into(), v);
-        }
+    if let Some(v) = contributions_in.get("tools").cloned() {
+        out.insert("tools".into(), v);
+    }
+    if let Some(arr) = contributions_in.get("recipes").and_then(Value::as_array) {
+        // Recipes drifted further than node types: v1 authored their keys in
+        // camelCase (`displayName`, `configSchema`) and carried extra fields
+        // (`supportedCapabilities`) the v2 `Recipe` (deny_unknown_fields) has no
+        // slot for. Normalize keys to snake_case, keep only known fields, and
+        // fix `config_schema`.
+        let normalized = arr.iter().map(normalize_recipe).collect();
+        out.insert("recipes".into(), Value::Array(normalized));
+    } else if let Some(v) = contributions_in.get("recipes").cloned() {
+        out.insert("recipes".into(), v);
     }
     // knowledge / prompts / schemas: v1 allows plain path strings; v2 requires {path}.
     for key in ["knowledge", "prompts", "schemas"] {
