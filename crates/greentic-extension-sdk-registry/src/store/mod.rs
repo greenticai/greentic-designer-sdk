@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+mod yank;
+
 use crate::error::RegistryError;
 use crate::registry::ExtensionRegistry;
 use crate::types::{ExtensionArtifact, ExtensionMetadata, ExtensionSummary, SearchQuery};

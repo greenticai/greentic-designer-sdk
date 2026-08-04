@@ -69,6 +69,11 @@ enum Command {
     Outdated(commands::outdated::Args),
     /// Update installed extensions to the latest permitted version
     Update(commands::update::Args),
+    /// Withdraw a published version: hidden from the version list and never
+    /// selected as latest, but still downloadable for existing pins
+    Yank(commands::yank::Args),
+    /// Reverse a yank, putting a version back in circulation
+    Unyank(commands::yank::UnyankArgs),
     /// Print version
     Version,
 }
@@ -106,6 +111,8 @@ async fn main() -> anyhow::Result<()> {
         Command::Lint(args) => commands::lint::run(&args, &home),
         Command::Outdated(args) => commands::outdated::run(args, &home).await,
         Command::Update(args) => commands::update::run(args, &home).await,
+        Command::Yank(args) => commands::yank::run_yank(args, &home).await,
+        Command::Unyank(args) => commands::yank::run_unyank(args, &home).await,
         Command::Version => {
             println!("gtdx {}", env!("CARGO_PKG_VERSION"));
             Ok(())
