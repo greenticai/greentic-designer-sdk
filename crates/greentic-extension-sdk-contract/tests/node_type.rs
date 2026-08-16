@@ -102,3 +102,67 @@ fn output_port_label_localized() {
     assert_eq!(p.name, "yes");
     assert_eq!(p.label.default(), "Match");
 }
+
+/// A node type whose runtime component exposes several named operations names
+/// the one it invokes. Without it the designer emits a `component.exec` body
+/// with no `operation`, and the runner refuses the node at execution time
+/// ("expected node.component.operation to be set") — after the palette, the
+/// flow builder and the pack build have all reported success.
+#[test]
+fn parses_node_type_with_operation() {
+    let v = serde_json::json!({
+        "type_id": "notion.query_database",
+        "label": "Notion: Query Database",
+        "category": "data",
+        "icon": "database",
+        "color": "#0d9488",
+        "complexity": "simple",
+        "config_schema": "{}",
+        "output_ports": [],
+        "runtime_ref": "notion-node",
+        "operation": "query_database"
+    });
+    let nt: NodeType = serde_json::from_value(v).unwrap();
+    assert_eq!(nt.operation.as_deref(), Some("query_database"));
+}
+
+/// `operation` is optional: a single-operation component names nothing, and
+/// every describe.json written before this field existed must still parse.
+#[test]
+fn operation_is_optional_and_absent_by_default() {
+    let v = serde_json::json!({
+        "type_id": "trigger",
+        "label": "Webhook Trigger",
+        "category": "trigger",
+        "icon": "webhook",
+        "color": "#0ea5e9",
+        "complexity": "simple",
+        "config_schema": "{}",
+        "output_ports": []
+    });
+    let nt: NodeType = serde_json::from_value(v).unwrap();
+    assert!(nt.operation.is_none());
+}
+
+/// An absent `operation` must not appear in the serialized form — the field is
+/// `skip_serializing_if`, so a re-emitted describe.json stays byte-comparable
+/// with one written before the field existed.
+#[test]
+fn absent_operation_is_not_serialized() {
+    let v = serde_json::json!({
+        "type_id": "trigger",
+        "label": "Webhook Trigger",
+        "category": "trigger",
+        "icon": "webhook",
+        "color": "#0ea5e9",
+        "complexity": "simple",
+        "config_schema": "{}",
+        "output_ports": []
+    });
+    let nt: NodeType = serde_json::from_value(v).unwrap();
+    let out = serde_json::to_value(&nt).unwrap();
+    assert!(
+        out.get("operation").is_none(),
+        "absent operation must be skipped, got {out}"
+    );
+}
