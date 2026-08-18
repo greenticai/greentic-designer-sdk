@@ -65,7 +65,7 @@ pub(crate) fn post_install_provider(
         })?;
 
     // Step 2: Read staged bytes and verify sha256.
-    let staged_path = staging.join(&gtpack.file);
+    let staged_path = staged_pack_path(staging, &gtpack.file)?;
     let bytes = std::fs::read(&staged_path).map_err(|e| {
         RegistryError::ProviderInstall(format!(
             "cannot read staged gtpack at {}: {e}",
@@ -116,12 +116,62 @@ pub(crate) fn post_install_provider(
     Ok(dest)
 }
 
+/// Resolve `file` (from `describe.runtime.components.*.gtpack.file`) against
+/// the staging dir, rejecting anything that would escape it.
+///
+/// `file` is publisher-controlled: it arrives verbatim from a downloaded
+/// describe, and the v2 schema constrains `gtpack` only to `type: object`.
+/// Without this guard `staging.join(file)` reads, copies, and then *deletes*
+/// an arbitrary path — `Path::join` discards the base entirely when handed an
+/// absolute path, so `/etc/passwd` escapes without needing a single `..`.
+///
+/// This mirrors the check `gtdx`'s packer already applies on the author side
+/// (`dev/packer/mod.rs`); the consumer side is the one facing hostile input.
+fn staged_pack_path(staging: &Path, file: &str) -> Result<std::path::PathBuf, RegistryError> {
+    use std::path::Component;
+
+    let candidate = Path::new(file);
+    let bad = |why: &str| {
+        RegistryError::ProviderInstall(format!(
+            "describe runtime gtpack.file = {file:?} must be a staging-relative path \
+             with no `..` or absolute components ({why})"
+        ))
+    };
+
+    if file.is_empty() {
+        return Err(bad("empty"));
+    }
+    if candidate.is_absolute() {
+        return Err(bad("absolute"));
+    }
+    for component in candidate.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir => return Err(bad("contains `..`")),
+            Component::RootDir | Component::Prefix(_) => return Err(bad("rooted")),
+        }
+    }
+
+    let resolved = staging.join(candidate);
+    // Defence in depth: the component scan above should make this unreachable,
+    // but a lexical containment check costs nothing and fails closed.
+    if !resolved.starts_with(staging) {
+        return Err(bad("escapes the staging directory"));
+    }
+    Ok(resolved)
+}
+
 /// Walk upward from `removed_file`'s parent toward (but not including) `stop`
 /// and remove any empty directories encountered.
+///
+/// Every candidate must live under `stop`. The old `dir == stop` terminator
+/// alone was only correct while `removed_file` was known to be inside `stop`;
+/// if that ever stopped holding, the walk climbed toward `/` deleting empty
+/// directories it had no business touching.
 fn remove_empty_ancestors(removed_file: &Path, stop: &Path) {
     let mut current = removed_file.parent();
     while let Some(dir) = current {
-        if dir == stop {
+        if dir == stop || !dir.starts_with(stop) {
             break;
         }
         // `remove_dir` succeeds only if the directory is empty.
@@ -179,4 +229,78 @@ fn read_pack_id_from_gtpack(path: &Path) -> Result<String, RegistryError> {
     let head: ManifestHead = ciborium::from_reader(raw.as_slice())
         .map_err(|e| RegistryError::ProviderInstall(format!("cbor decode: {e}")))?;
     Ok(head.pack_id)
+}
+
+#[cfg(test)]
+mod path_guard_tests {
+    use super::*;
+
+    fn staging() -> &'static Path {
+        Path::new("/tmp/gtdx-staging")
+    }
+
+    /// The reason this guard has to exist at all: `Path::join` with an
+    /// absolute argument silently discards the base, so an unvalidated
+    /// `staging.join(&gtpack.file)` escapes staging without needing `..`.
+    #[test]
+    fn join_with_absolute_path_discards_the_base() {
+        assert_eq!(
+            staging().join("/etc/passwd"),
+            Path::new("/etc/passwd"),
+            "std behaviour changed; the guard's rationale needs revisiting"
+        );
+    }
+
+    #[test]
+    fn accepts_a_plain_relative_pack_path() {
+        let got = staged_pack_path(staging(), "packs/main.gtpack").unwrap();
+        assert_eq!(got, staging().join("packs/main.gtpack"));
+    }
+
+    #[test]
+    fn rejects_absolute_paths() {
+        let err = staged_pack_path(staging(), "/home/victim/.aws/credentials").unwrap_err();
+        assert!(
+            matches!(err, RegistryError::ProviderInstall(ref m) if m.contains("must be a staging-relative path")),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_parent_dir_traversal() {
+        for candidate in [
+            "../escape.gtpack",
+            "packs/../../escape.gtpack",
+            "./../escape.gtpack",
+        ] {
+            let err = staged_pack_path(staging(), candidate).unwrap_err();
+            assert!(
+                matches!(err, RegistryError::ProviderInstall(_)),
+                "{candidate} should have been rejected, got {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_empty_path() {
+        assert!(staged_pack_path(staging(), "").is_err());
+    }
+
+    /// `remove_empty_ancestors` must never climb above `stop`, even if it is
+    /// somehow handed a path outside it.
+    #[test]
+    fn remove_empty_ancestors_never_climbs_outside_stop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stop = tmp.path().join("staging");
+        let outside = tmp.path().join("outside/deep");
+        std::fs::create_dir_all(&stop).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        remove_empty_ancestors(&outside.join("victim.gtpack"), &stop);
+
+        assert!(
+            outside.exists(),
+            "walked outside `stop` and removed an unrelated empty directory"
+        );
+    }
 }
