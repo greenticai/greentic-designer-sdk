@@ -1,9 +1,7 @@
 use std::path::Path;
 
 use clap::Args as ClapArgs;
-use greentic_extension_sdk_registry::{
-    ExtensionRegistry, SearchQuery, store::GreenticStoreRegistry,
-};
+use greentic_extension_sdk_registry::{ExtensionRegistry, SearchQuery};
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -18,19 +16,12 @@ pub struct Args {
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
-    let cfg = super::load_config(home)?;
-    let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
-    let entry = cfg
-        .registries
-        .iter()
-        .find(|r| r.name == reg_name)
-        .ok_or_else(|| anyhow::anyhow!("no such registry: {reg_name}"))?;
-    let token = entry
-        .token_env
-        .as_deref()
-        .and_then(|e| std::env::var(e).ok());
-    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token)
-        .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
+    // Shared with publish/yank: reads the token_env variable AND
+    // ~/.greentic/credentials.toml, and falls back to the built-in
+    // greentic-store URL. Search previously did neither, so `gtdx login`
+    // did not authenticate a search and the canonical store 404'd as
+    // "no such registry" until someone ran `gtdx registries add`.
+    let reg = super::resolve_store_registry(args.registry.as_deref(), home)?;
 
     let kind = match args.kind.as_deref() {
         Some("design") => Some(greentic_extension_sdk_contract::ExtensionKind::Design),

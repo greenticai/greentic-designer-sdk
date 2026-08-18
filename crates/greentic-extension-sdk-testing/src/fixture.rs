@@ -97,6 +97,7 @@ impl ExtensionFixtureBuilder {
         };
 
         let mut describe = DescribeJson {
+            secret_requirements: Vec::new(),
             schema_ref: None,
             api_version: "greentic.ai/v2".into(),
             kind: self.kind,
@@ -132,6 +133,7 @@ impl ExtensionFixtureBuilder {
                 required,
             },
             runtime: greentic_extension_sdk_contract::describe::Runtime {
+                world: None,
                 memory_limit_mb: 64,
                 permissions: greentic_extension_sdk_contract::describe::Permissions::default(),
                 components: stub_components,

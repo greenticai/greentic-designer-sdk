@@ -73,6 +73,16 @@ pub struct Args {
     /// Display label for the node (defaults to humanized --name).
     #[arg(long)]
     pub label: Option<String>,
+
+    /// Seed a `--kind mcp` extension from an OpenAPI/Swagger spec (generates the
+    /// router via greentic-mcp-gen instead of the empty echo skeleton).
+    #[arg(long, value_name = "SPEC")]
+    pub from_openapi: Option<PathBuf>,
+
+    /// Path to an icon file (svg/png/jpg/webp, <= 1 MiB) to attach as the
+    /// extension's `metadata.icon`. Copied into the scaffold's `assets/` dir.
+    #[arg(long)]
+    pub icon: Option<PathBuf>,
 }
 
 /// Fully-resolved scaffold inputs, produced either from CLI flags
@@ -89,6 +99,8 @@ pub(super) struct Resolved {
     force: bool,
     node_type_id: Option<String>,
     label: Option<String>,
+    /// `OpenAPI` spec path for `--kind mcp` seeded scaffolds.
+    from_openapi: Option<PathBuf>,
 }
 
 pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
@@ -99,17 +111,34 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| PathBuf::from(&resolved.name));
 
+    validate_from_openapi(resolved.kind, resolved.from_openapi.as_deref())?;
+
     run_preflight(&target, resolved.force)?;
     prepare_target(&target, resolved.force)?;
 
     let ctx = build_context(&resolved);
-    let mut files_written = render_templates(&ctx, resolved.kind.as_str(), &target)?;
-    files_written += write_wit_and_lock(resolved.kind.as_str(), &target)?;
+
+    let files_written = if let Some(spec) = resolved.from_openapi.as_deref() {
+        scaffold_from_openapi(&ctx, spec, &target)?
+    } else {
+        let mut n = render_templates(&ctx, resolved.kind.as_str(), &target)?;
+        n += write_wit_and_lock(resolved.kind.as_str(), &target)?;
+        n
+    };
+
+    if let Some(icon) = args.icon.as_deref() {
+        let rel = crate::icon::apply_icon(&target, icon)?;
+        println!("  icon: {rel}");
+    }
 
     make_scripts_executable(&target)?;
     run_git_init(&target, resolved.no_git);
 
-    print_summary(resolved.kind.as_str(), &target, files_written);
+    // The OpenAPI path already printed its own "Next: gtdx publish …" line
+    // inside scaffold_from_openapi; skip the generic next-steps block there.
+    if resolved.from_openapi.is_none() {
+        print_summary(resolved.kind.as_str(), &target, files_written);
+    }
     Ok(())
 }
 
@@ -152,6 +181,7 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
         force: args.force,
         node_type_id: args.node_type_id.clone(),
         label: args.label.clone(),
+        from_openapi: args.from_openapi.clone(),
     })
 }
 
@@ -223,6 +253,14 @@ fn build_context(resolved: &Resolved) -> Context {
     // produced them, independent of the WIT contract `CONTRACT_VERSION`
     // (which tracks the wit-package @version, evolves slower).
     ctx.set("sdk_version", env!("CARGO_PKG_VERSION"));
+    // The minimum designer an extension needs is the describe-contract floor,
+    // NOT the SDK that generated it — see `compat::MIN_DESIGNER_VERSION`.
+    // Templates previously reused `sdk_version` here, which made every fresh
+    // scaffold declare itself incompatible with designers that can load it.
+    ctx.set(
+        "min_designer_version",
+        greentic_extension_sdk_contract::compat::MIN_DESIGNER_VERSION,
+    );
     // `runtime_ref_key` is the key used in v2 `runtime.components` map and
     // in every `nodeTypes[].runtime_ref` / `tools[].runtime_ref`. Default
     // is the last dotted segment of the extension id (matches the
@@ -230,6 +268,44 @@ fn build_context(resolved: &Resolved) -> Context {
     let runtime_ref_key = id.split('.').next_back().unwrap_or(id).to_string();
     ctx.set("runtime_ref_key", &runtime_ref_key);
     ctx
+}
+
+fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::Result<usize> {
+    use crate::scaffold::openapi;
+
+    let bin = openapi::resolve_mcp_gen()?;
+    let artifacts = openapi::run_generator(&bin, spec, target)?;
+
+    // Render the mcp describe.json template, then patch network + secrets.
+    let mut files = 1usize; // the generated wasm
+    let describe_tmpl = template::load_templates_kind("mcp")
+        .into_iter()
+        .find(|e| e.dst_rel.ends_with("describe.json"))
+        .ok_or_else(|| anyhow::anyhow!("mcp describe.json template missing"))?;
+    let rendered = ctx.render(std::str::from_utf8(describe_tmpl.src_bytes)?)?;
+    let authored = openapi::author_describe_json(&rendered, artifacts.meta.as_deref())?;
+    template::write_file(&target.join("describe.json"), authored.as_bytes())?;
+    files += 1;
+
+    // Minimal Cargo.toml anchor so `gtdx publish --manifest ./Cargo.toml` works.
+    let cargo_anchor = format!(
+        "# Anchor manifest for `gtdx publish --wasm`. The component is the\n\
+         # pre-built wasm generated from the OpenAPI spec; there is no crate to build here.\n\
+         [package]\nname = \"{}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[lib]\npath = \"/dev/null\"\n",
+        target
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("mcp-ext")
+    );
+    template::write_file(&target.join("Cargo.toml"), cargo_anchor.as_bytes())?;
+    files += 1;
+
+    println!(
+        "  Next: gtdx publish --wasm {} --manifest {} .",
+        artifacts.wasm.display(),
+        target.join("Cargo.toml").display()
+    );
+    Ok(files)
 }
 
 fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<usize> {
@@ -249,7 +325,11 @@ fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<
     Ok(files_written)
 }
 
-fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<usize> {
+/// Write the embedded WIT contract deps + `.gtdx-contract.lock` for `kind`
+/// into `target`. `pub(crate)` so `commands::openapi::run` can reuse it to
+/// scaffold the WIT side of a generated `DesignExtension` connector (the same
+/// contract files a `gtdx new --kind design` scaffold gets).
+pub(crate) fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<usize> {
     let mut files_written = 0usize;
     let mut lock_files = BTreeMap::new();
     for file in embedded::files_for_kind(kind) {
@@ -346,7 +426,7 @@ fn validate_id(id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn is_reverse_dns(id: &str) -> bool {
+pub(super) fn is_reverse_dns(id: &str) -> bool {
     // Reverse-DNS: [a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+
     let parts: Vec<&str> = id.split('.').collect();
     if parts.len() < 2 {
@@ -372,6 +452,13 @@ fn validate_version(version: &str) -> anyhow::Result<()> {
     semver::Version::parse(version)
         .map(|_| ())
         .map_err(|e| anyhow::anyhow!("version {version:?} is not valid semver: {e}"))
+}
+
+fn validate_from_openapi(kind: Kind, from_openapi: Option<&Path>) -> anyhow::Result<()> {
+    if from_openapi.is_some() && kind != Kind::Mcp {
+        anyhow::bail!("--from-openapi is only valid with --kind mcp");
+    }
+    Ok(())
 }
 
 fn id_to_wit_package(id: &str) -> String {

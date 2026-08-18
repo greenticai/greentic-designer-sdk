@@ -3,7 +3,7 @@
   "apiVersion": "greentic.ai/v2",
   "kind": "DeployExtension",
   "compat": {
-    "min_designer_version": ">={{sdk_version}}",
+    "min_designer_version": ">={{min_designer_version}}",
     "min_runner_version": "^{{sdk_version}}",
     "contract_version": "{{sdk_version}}"
   },
@@ -18,7 +18,7 @@
     "license": "{{license}}"
   },
   "engine": {
-    "greenticDesigner": ">={{sdk_version}}",
+    "greenticDesigner": ">={{min_designer_version}}",
     "extRuntime": "^{{sdk_version}}"
   },
   "capabilities": {

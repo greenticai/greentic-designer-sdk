@@ -75,6 +75,56 @@ fn guardrails_contribution_passes_schema_and_typed_parse() {
 }
 
 #[test]
+fn connection_test_contribution_passes_schema_and_roundtrips() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["connection_test"] = serde_json::json!({
+        "tool": "get_server_version",
+        "args": { "cluster": "default" }
+    });
+
+    // JSON-schema layer must allow the connection_test contribution.
+    validate_describe_v2(&v).expect("connection_test contribution should pass describe-v2 schema");
+
+    // Typed (deny_unknown_fields) layer must parse it into the struct.
+    let parsed: DescribeJson =
+        serde_json::from_value(v).expect("connection_test contribution should parse typed");
+    let connection_test = parsed
+        .contributions
+        .connection_test
+        .as_ref()
+        .expect("connection_test should be Some");
+    assert_eq!(connection_test.tool, "get_server_version");
+    assert_eq!(
+        connection_test.args,
+        serde_json::json!({ "cluster": "default" })
+    );
+
+    // Roundtrip: serialize back out and re-parse, no data loss, still snake_case on the wire.
+    let serialized = serde_json::to_string(&parsed).unwrap();
+    assert!(
+        serialized.contains("\"connection_test\":"),
+        "connection_test must serialize snake_case on the wire; got: {serialized}"
+    );
+    let reparsed: DescribeJson = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(
+        reparsed.contributions.connection_test,
+        parsed.contributions.connection_test
+    );
+}
+
+#[test]
+fn connection_test_missing_tool_fails_schema() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["connection_test"] = serde_json::json!({
+        "args": { "cluster": "default" }
+    });
+    assert!(
+        validate_describe_v2(&v).is_err(),
+        "connection_test without required `tool` should fail schema"
+    );
+}
+
+#[test]
 fn manifest_sha256_valid_hex_passes_schema() {
     let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
     let valid_sha256 = "a".repeat(64);

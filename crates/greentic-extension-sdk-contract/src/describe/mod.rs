@@ -36,6 +36,11 @@ pub struct DescribeJson {
     pub runtime: Runtime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<serde_json::Value>,
+    /// Defaulted rather than required because `kind: wasix:mcp/router`
+    /// artifacts carry no contributions — a router's tools are discovered at
+    /// runtime via `list-tools`. Design extensions still have it mandated, by
+    /// the v2 JSON Schema rather than by this struct.
+    #[serde(default)]
     pub contributions: contributions::Contributions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub localization: Option<localization_block::Localization>,
@@ -58,6 +63,16 @@ pub struct DescribeJson {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub required_secrets: Vec<SecretRequirement>,
+    /// Snake-case secret requirements emitted by `kind: wasix:mcp/router`
+    /// artifacts (the MCP schema types this only as an array of objects, so it
+    /// is carried through untyped rather than reinterpreted).
+    ///
+    /// Kept as an opaque passthrough because the describe is re-serialized and
+    /// then signed: a field this crate dropped would silently vanish from the
+    /// published artifact. Design extensions use `requiredSecrets` instead and
+    /// leave this empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_requirements: Vec<serde_json::Value>,
 }
 
 /// Private intermediate for deserialization — identical shape to `DescribeJson`.
@@ -78,6 +93,7 @@ struct DescribeJsonRaw {
     runtime: Runtime,
     #[serde(default)]
     execution: Option<serde_json::Value>,
+    #[serde(default)]
     contributions: contributions::Contributions,
     #[serde(default)]
     localization: Option<localization_block::Localization>,
@@ -87,6 +103,8 @@ struct DescribeJsonRaw {
     manifest_sha256: Option<String>,
     #[serde(rename = "requiredSecrets", default)]
     required_secrets: Vec<SecretRequirement>,
+    #[serde(default)]
+    secret_requirements: Vec<serde_json::Value>,
 }
 
 impl TryFrom<DescribeJsonRaw> for DescribeJson {
@@ -152,6 +170,7 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
             signature: raw.signature,
             manifest_sha256: raw.manifest_sha256,
             required_secrets: raw.required_secrets,
+            secret_requirements: raw.secret_requirements,
         })
     }
 }
@@ -223,6 +242,14 @@ pub struct Runtime {
     #[serde(rename = "memoryLimitMB", default = "default_memory")]
     pub memory_limit_mb: u32,
     pub permissions: Permissions,
+    /// WIT world the artifact exports, as a top-level runtime declaration.
+    ///
+    /// Only `kind: wasix:mcp/router` artifacts emit this (it names the router
+    /// world); design extensions declare their worlds per component instead and
+    /// leave this `None`. Optional so both shapes deserialize, since `Runtime`
+    /// is `deny_unknown_fields`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world: Option<String>,
     pub components: std::collections::BTreeMap<
         crate::component_id::ComponentId,
         crate::runtime_component::RuntimeComponent,

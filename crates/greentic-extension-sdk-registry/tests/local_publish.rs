@@ -16,6 +16,7 @@ fn default_compat() -> Compat {
 
 fn sample_describe(version: &str) -> DescribeJson {
     DescribeJson {
+        secret_requirements: Vec::new(),
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
@@ -47,6 +48,7 @@ fn sample_describe(version: &str) -> DescribeJson {
             required: vec![],
         },
         runtime: Runtime {
+            world: None,
             memory_limit_mb: 64,
             permissions: Permissions::default(),
             components: std::collections::BTreeMap::new(),
@@ -155,4 +157,57 @@ fn index_tracks_multiple_versions() {
     let versions = exts[0]["versions"].as_array().unwrap();
     assert_eq!(versions.len(), 2);
     assert_eq!(exts[0]["latest"], "0.1.1");
+}
+
+/// Empirical repro: `component-guardrail-topic`'s `describe.json` has
+/// `metadata.name = "Topic / scope guardrail"`. Used verbatim, the `/` is
+/// interpreted as a path separator when building the pack filename, so the
+/// write targets a nonexistent nested directory (`<ver_dir>/Topic /...`) and
+/// fails with a bare ENOENT. `ext_name` containing a slash must still
+/// publish successfully, writing a single-segment `.gtxpack` filename.
+#[test]
+fn ext_name_with_slash_publishes_successfully() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reg = LocalFilesystemRegistry::new("test", tmp.path().to_path_buf());
+    let mut req = sample_req("0.1.0", false);
+    req.ext_name = "Topic / scope guardrail".into();
+
+    let receipt = reg
+        .publish_local(&req)
+        .expect("publish must succeed despite '/' in ext_name");
+    assert!(receipt.url.starts_with("file://"));
+
+    let ver = tmp.path().join("com.example.demo/0.1.0");
+    assert!(ver.is_dir());
+    // Exactly one .gtxpack directly inside ver_dir (no nested subdirectory
+    // was created as a side effect of the unsanitized name).
+    let gtxpacks: Vec<_> = std::fs::read_dir(&ver)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "gtxpack"))
+        .collect();
+    assert_eq!(
+        gtxpacks.len(),
+        1,
+        "expected exactly one .gtxpack directly under {}",
+        ver.display()
+    );
+    let name = gtxpacks[0].file_name();
+    let name = name.to_string_lossy();
+    assert!(!name.contains('/'), "filename must not contain '/': {name}");
+}
+
+/// Same repro with a backslash, which is a path separator on Windows and
+/// legal-but-surprising on Unix.
+#[test]
+fn ext_name_with_backslash_publishes_successfully() {
+    let tmp = tempfile::tempdir().unwrap();
+    let reg = LocalFilesystemRegistry::new("test", tmp.path().to_path_buf());
+    let mut req = sample_req("0.1.0", false);
+    req.ext_name = r"weird\name".into();
+
+    let receipt = reg
+        .publish_local(&req)
+        .expect("publish must succeed despite '\\' in ext_name");
+    assert!(receipt.url.starts_with("file://"));
 }

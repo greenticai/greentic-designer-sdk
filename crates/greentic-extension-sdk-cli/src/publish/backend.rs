@@ -5,7 +5,6 @@
 use std::path::Path;
 
 use greentic_extension_sdk_registry::config::{GREENTIC_STORE_NAME, GREENTIC_STORE_URL};
-use greentic_extension_sdk_registry::credentials::Credentials;
 use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
 use greentic_extension_sdk_registry::oci::OciRegistry;
 use greentic_extension_sdk_registry::registry::ExtensionRegistry;
@@ -78,7 +77,7 @@ pub(super) fn resolve_backend(
         }
     };
 
-    let token = resolve_token(home, &name, token_env.as_deref());
+    let token = crate::commands::resolve_registry_token(home, &name, token_env.as_deref());
     let allow_insecure = crate::registry_security::insecure_registry_opt_in();
     Ok(Backend::Store(
         GreenticStoreRegistry::new(&name, &url, token).with_insecure_allowed(allow_insecure),
@@ -152,15 +151,4 @@ fn oci_basic_auth_for(host: &str, token: String) -> (String, String) {
         "token".to_string()
     };
     (user, token)
-}
-
-fn resolve_token(home: &Path, name: &str, token_env: Option<&str>) -> Option<String> {
-    if let Some(var) = token_env
-        && let Ok(v) = std::env::var(var)
-        && !v.is_empty()
-    {
-        return Some(v);
-    }
-    let creds = Credentials::load(&home.join("credentials.toml")).ok()?;
-    creds.get(name).map(str::to_string)
 }
