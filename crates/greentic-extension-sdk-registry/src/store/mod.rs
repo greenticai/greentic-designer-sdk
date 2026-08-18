@@ -91,6 +91,25 @@ struct SummaryDto {
     downloads: u64,
 }
 
+/// Decode a response body, keeping WHY it failed.
+///
+/// `reqwest`'s own `.json()` collapses every decode failure into
+/// `error decoding response body`, dropping the field name and the position —
+/// which is the whole content of the message when the cause is a
+/// `deny_unknown_fields` struct meeting a newer describe. Reading the body as
+/// text first costs one allocation and turns an unactionable error into one
+/// naming the field.
+async fn decode_json<T: serde::de::DeserializeOwned>(
+    resp: reqwest::Response,
+    endpoint: &str,
+) -> Result<T, RegistryError> {
+    let body = resp.text().await?;
+    serde_json::from_str(&body).map_err(|source| RegistryError::ResponseDecode {
+        endpoint: endpoint.to_string(),
+        source,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MetadataDto {
@@ -220,7 +239,7 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         req = req.query(&[("page", query.page), ("limit", query.limit)]);
 
         let resp = self.with_auth(req).send().await?.error_for_status()?;
-        let dtos: Vec<SummaryDto> = resp.json().await?;
+        let dtos: Vec<SummaryDto> = decode_json(resp, "GET /api/v1/extensions").await?;
         Ok(dtos
             .into_iter()
             .map(|d| ExtensionSummary {
@@ -252,7 +271,11 @@ impl ExtensionRegistry for GreenticStoreRegistry {
                 version: version.into(),
             });
         }
-        let dto: MetadataDto = resp.error_for_status()?.json().await?;
+        let dto: MetadataDto = decode_json(
+            resp.error_for_status()?,
+            &format!("GET /api/v1/extensions/{name}/{version}"),
+        )
+        .await?;
         Ok(ExtensionMetadata {
             name: dto.describe.metadata.id.clone(),
             version: dto.describe.metadata.version.clone(),
@@ -381,7 +404,7 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         // Propagate a decode error rather than `unwrap_or_default()`: a 2xx with
         // a malformed/empty body must not fabricate a success receipt from
         // client-side fallbacks (audit cycle-1 P1-5).
-        let dto: PublishResponseDto = resp.json().await?;
+        let dto: PublishResponseDto = decode_json(resp, "POST /api/v1/extensions").await?;
         Ok(crate::publish::PublishReceipt {
             url: dto.url.unwrap_or_else(|| {
                 format!(
@@ -415,7 +438,11 @@ impl ExtensionRegistry for GreenticStoreRegistry {
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(Vec::new());
         }
-        let dto: Dto = resp.error_for_status()?.json().await?;
+        let dto: Dto = decode_json(
+            resp.error_for_status()?,
+            &format!("GET /api/v1/extensions/{name}"),
+        )
+        .await?;
         Ok(dto.versions)
     }
 }
@@ -488,6 +515,79 @@ mod tests {
         assert!(
             matches!(err, RegistryError::InsecureRegistryUrl(_)),
             "expected InsecureRegistryUrl, got {err}"
+        );
+    }
+
+    /// The failure this exists for, in the shape it actually took: a describe
+    /// whose tool carries `agentic_worker_metadata` — a field added to a
+    /// `deny_unknown_fields` struct in contract v1.3.0-research.2 — read by a
+    /// build that predates it. Every gtdx older than that refused every
+    /// extension the store serves, and said only "error decoding response body".
+    #[tokio::test]
+    async fn an_unknown_field_names_itself_and_points_at_a_stale_build() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // `describe` is deliberately a shape this build CANNOT accept, so the
+        // assertion does not depend on which fields happen to be unknown today.
+        let body = serde_json::json!({
+            "describe": { "definitelyNotAField": true },
+            "artifactSha256": "abc",
+            "publishedAt": "2026-01-01T00:00:00Z",
+            "yanked": false
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/v1/extensions/greentic.x/1.0.0"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+
+        let reg = GreenticStoreRegistry::new("t", server.uri(), None).with_insecure_allowed(true);
+        let err = reg.metadata("greentic.x", "1.0.0").await.unwrap_err();
+
+        let rendered = err.to_string();
+        assert!(
+            matches!(err, RegistryError::ResponseDecode { .. }),
+            "expected ResponseDecode, got {rendered}"
+        );
+        assert!(
+            rendered.contains("/api/v1/extensions/greentic.x/1.0.0"),
+            "the message must name the endpoint: {rendered}"
+        );
+        assert!(
+            rendered.contains("upgrade gtdx"),
+            "the message must tell the operator what to do: {rendered}"
+        );
+        // The serde detail is the part reqwest's `.json()` threw away, and it
+        // is what turns "something is wrong" into a named field.
+        assert!(
+            rendered.contains("missing field") || rendered.contains("unknown field"),
+            "the serde detail must survive: {rendered}"
+        );
+    }
+
+    /// A well-formed body must still decode — the helper is a better error
+    /// path, not a stricter one.
+    #[tokio::test]
+    async fn a_well_formed_version_list_still_decodes() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/extensions/greentic.x"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "versions": ["1.0.0", "1.1.0"] })),
+            )
+            .mount(&server)
+            .await;
+
+        let reg = GreenticStoreRegistry::new("t", server.uri(), None).with_insecure_allowed(true);
+        assert_eq!(
+            reg.list_versions("greentic.x").await.unwrap(),
+            vec!["1.0.0".to_string(), "1.1.0".to_string()]
         );
     }
 }
