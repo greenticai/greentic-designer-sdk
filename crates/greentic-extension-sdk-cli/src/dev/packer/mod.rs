@@ -17,6 +17,10 @@ pub struct PackInfo {
     pub size: u64,
     pub sha256: String,
     pub ext_name: String,
+    /// `describe.metadata.id` — the extension's actual identity, and the key
+    /// the registry installs under. Distinct from `ext_name`, which is the
+    /// free-form display name.
+    pub ext_id: String,
     pub ext_version: String,
     #[allow(dead_code)] // Reserved for richer InstallOk events in Phase 2.
     pub ext_kind: String,
@@ -230,6 +234,10 @@ pub fn build_pack_with_key(
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("describe.metadata.name missing"))?
         .to_string();
+    let ext_id = describe["metadata"]["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("describe.metadata.id missing"))?
+        .to_string();
     let ext_version = describe["metadata"]["version"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("describe.metadata.version missing"))?
@@ -326,6 +334,7 @@ pub fn build_pack_with_key(
         size,
         sha256,
         ext_name,
+        ext_id,
         ext_version,
         ext_kind,
         describe_bytes: final_describe_bytes,

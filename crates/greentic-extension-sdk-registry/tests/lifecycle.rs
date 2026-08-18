@@ -229,3 +229,117 @@ async fn uninstall_removes_dir() {
         .unwrap();
     assert!(!final_dir.exists());
 }
+
+/// A registry that answers a request for one extension with a different one.
+///
+/// Modelled on a compromised store: the pack file sits at the path `fetch`
+/// resolves for `requested`, but the `describe.json` *inside* it declares a
+/// different id and version. Every integrity/authenticity check downstream
+/// validates the served describe against itself, so only an explicit
+/// request-vs-response comparison catches the substitution.
+fn plant_substituted_pack(root: &std::path::Path, requested: (&str, &str), served: (&str, &str)) {
+    let fixture = ExtensionFixtureBuilder::new(ExtensionKind::Design, served.0, served.1)
+        .offer("greentic:perm/x", "1.0.0")
+        .with_wasm(b"wasm".to_vec())
+        .build()
+        .unwrap();
+    std::fs::create_dir_all(root).unwrap();
+    let pack = root.join(format!("{}-{}.gtxpack", requested.0, requested.1));
+    pack_directory(fixture.root(), &pack).unwrap();
+}
+
+#[tokio::test]
+async fn install_refuses_an_extension_the_registry_substituted() {
+    let tmp_home = TempDir::new().unwrap();
+    let reg_root = tmp_home.path().join("registry");
+    plant_substituted_pack(
+        &reg_root,
+        ("greentic.safe-widget", "1.0.0"),
+        ("greentic.audit-logger", "9.9.9"),
+    );
+
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", &reg_root);
+    let installer = Installer::new(storage, &reg);
+
+    let result = installer
+        .install(
+            "greentic.safe-widget",
+            "1.0.0",
+            InstallOptions {
+                trust_policy: TrustPolicy::Loose,
+                accept_permissions: true,
+                force: false,
+            },
+        )
+        .await;
+
+    match result {
+        Err(greentic_extension_sdk_registry::error::RegistryError::IdentityMismatch {
+            requested_name,
+            requested_version,
+            served_name,
+            served_version,
+        }) => {
+            assert_eq!(requested_name, "greentic.safe-widget");
+            assert_eq!(requested_version, "1.0.0");
+            assert_eq!(served_name, "greentic.audit-logger");
+            assert_eq!(served_version, "9.9.9");
+        }
+        other => panic!("expected IdentityMismatch, got {other:?}"),
+    }
+
+    // The substituted extension must not be on disk under either identity.
+    for dir in [
+        "extensions/design/greentic.audit-logger-9.9.9",
+        "extensions/design/greentic.safe-widget-1.0.0",
+    ] {
+        assert!(
+            !tmp_home.path().join(dir).exists(),
+            "{dir} was installed despite the identity mismatch"
+        );
+    }
+    // Nothing may be pinned for the substituted publisher either — the check
+    // has to run before verify_authenticity for this to hold.
+    let trust = tmp_home.path().join("trust/publishers.json");
+    assert!(
+        !trust.exists(),
+        "a publisher key was pinned for a substituted artifact"
+    );
+}
+
+#[tokio::test]
+async fn install_accepts_a_pack_whose_identity_matches_the_request() {
+    let tmp_home = TempDir::new().unwrap();
+    let reg_root = tmp_home.path().join("registry");
+    plant_substituted_pack(
+        &reg_root,
+        ("greentic.honest", "1.0.0"),
+        ("greentic.honest", "1.0.0"),
+    );
+
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", &reg_root);
+    let installer = Installer::new(storage, &reg);
+
+    installer
+        .install(
+            "greentic.honest",
+            "1.0.0",
+            InstallOptions {
+                trust_policy: TrustPolicy::Loose,
+                accept_permissions: true,
+                force: false,
+            },
+        )
+        .await
+        .expect("a matching identity must still install");
+
+    assert!(
+        tmp_home
+            .path()
+            .join("extensions/design/greentic.honest-1.0.0")
+            .exists(),
+        "the guard rejected a legitimate install"
+    );
+}

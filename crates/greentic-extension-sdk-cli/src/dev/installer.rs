@@ -15,16 +15,16 @@ pub async fn install_pack(home: &Path, pack: &PackInfo) -> anyhow::Result<Instal
     let registry_dir = home.join("registries/dev-local");
     std::fs::create_dir_all(&registry_dir)
         .with_context(|| format!("create registry dir {}", registry_dir.display()))?;
-    // `pack.ext_name` is free-form `describe.json` metadata (display text)
-    // and may contain characters unsafe as a path component (e.g. "/").
-    // Sanitize it once and use the *same* sanitized value both for the
-    // staged filename and as the lookup key passed to `Installer::install`
-    // below — this staging registry is a flat scratch dir keyed purely by
-    // filename, so writer and reader must agree on exactly the same string
-    // or the install would "succeed" at writing but then fail to find what
-    // it just wrote. `pack.ext_name` itself (unsanitized) is kept for the
-    // `InstallSummary.name` field, which is display-only.
-    let safe_name = greentic_extension_sdk_contract::sanitize_filename_component(&pack.ext_name);
+    // Key the staged pack by `describe.metadata.id`, not the display name.
+    // This staging registry is a flat scratch dir keyed purely by filename, so
+    // writer and reader must agree on the same string — and `Installer::install`
+    // takes an extension *id*, which it now checks against the id in the served
+    // describe. Passing `metadata.name` here (free-form display text) used to
+    // work only because nothing compared the two. The id is schema-constrained
+    // to a safe single path component; it is sanitized anyway as belt and
+    // braces, since the staging path is derived from it.
+    // `pack.ext_name` is kept for `InstallSummary.name`, which is display-only.
+    let safe_name = greentic_extension_sdk_contract::sanitize_filename_component(&pack.ext_id);
     let staged_pack = registry_dir.join(format!("{safe_name}-{}.gtxpack", pack.ext_version));
     copy_atomic(&pack.pack_path, &staged_pack)
         .with_context(|| format!("stage pack at {}", staged_pack.display()))?;
@@ -158,6 +158,9 @@ mod tests {
             size: std::fs::metadata(&pack).unwrap().len(),
             sha256: "dummy".into(),
             ext_name: ext_name.into(),
+            // Identity comes from describe.metadata.id, independent of the
+            // display name the caller passed in.
+            ext_id: "com.example.demo".into(),
             ext_version: "0.1.0".into(),
             ext_kind: "design".into(),
             describe_bytes: desc.clone(),

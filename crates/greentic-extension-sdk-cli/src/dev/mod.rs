@@ -323,6 +323,7 @@ mod tests {
             size: 11,
             sha256: "dummy".into(),
             ext_name: ext_name.into(),
+            ext_id: "com.example.demo".into(),
             ext_version: "0.1.0".into(),
             ext_kind: "design".into(),
             describe_bytes: Vec::new(),
