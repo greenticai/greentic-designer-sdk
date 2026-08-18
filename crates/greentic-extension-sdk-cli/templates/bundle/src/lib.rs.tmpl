@@ -50,18 +50,14 @@ impl recipes::Guest for Component {
         Vec::new()
     }
 
-    fn recipe_config_schema(
-        recipe_id: String,
-    ) -> Result<String, types::ExtensionError> {
+    fn recipe_config_schema(recipe_id: String) -> Result<String, types::ExtensionError> {
         // TODO: return a JSON Schema for the recipe's config.
         Err(types::ExtensionError::InvalidInput(format!(
             "unknown recipe: {recipe_id}"
         )))
     }
 
-    fn supported_capabilities(
-        recipe_id: String,
-    ) -> Result<Vec<String>, types::ExtensionError> {
+    fn supported_capabilities(recipe_id: String) -> Result<Vec<String>, types::ExtensionError> {
         // TODO: list capabilities the recipe can satisfy.
         Err(types::ExtensionError::InvalidInput(format!(
             "unknown recipe: {recipe_id}"
@@ -71,10 +67,7 @@ impl recipes::Guest for Component {
 
 // ---- extension-bundle/bundling ----
 impl bundling::Guest for Component {
-    fn validate_config(
-        _recipe_id: String,
-        _config_json: String,
-    ) -> Vec<types::Diagnostic> {
+    fn validate_config(_recipe_id: String, _config_json: String) -> Vec<types::Diagnostic> {
         // TODO: emit configuration diagnostics.
         Vec::new()
     }

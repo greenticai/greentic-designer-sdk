@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cargo component build --release
+
+# `--target` is explicit: cargo-component defaults to wasm32-wasip1, which
+# would put the artifact somewhere this script does not look, and the Greentic
+# runtime expects a wasip2 component.
+cargo component build --release --target wasm32-wasip2
+
 mkdir -p dist
 cd target/wasm32-wasip2/release
 # Additional packaging done by `gtdx publish`; this script just builds the wasm.

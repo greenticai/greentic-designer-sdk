@@ -126,3 +126,156 @@ mod greentic_extension_sdk_cli_for_tests {
         Box::leak(SRC[start..end].to_string().into_boxed_str())
     }
 }
+
+/// Canonical placeholder for each vendored WIT package's version.
+///
+/// Kept next to the assertion that enforces it so the two cannot drift.
+const PACKAGE_PLACEHOLDER: &[(&str, &str)] = &[
+    ("extension-base", "{{v_base}}"),
+    ("extension-host", "{{v_host}}"),
+    ("extension-design", "{{v_design}}"),
+    ("extension-bundle", "{{v_bundle}}"),
+    ("extension-deploy", "{{v_deploy}}"),
+    ("extension-provider", "{{v_provider}}"),
+];
+
+/// Read `<package>.wit`'s declared `@version` from the copy embedded in the
+/// binary — the same source `gtdx new` fills its placeholders from.
+fn embedded_package_version(package: &str) -> Option<String> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("embedded-wit")
+        .join(env!("CARGO_PKG_VERSION"));
+    let text = std::fs::read_to_string(dir.join(format!("{package}.wit"))).ok()?;
+    let first = text.lines().next()?;
+    let at = first.find('@')?;
+    let after = &first[at + 1..];
+    let end = after.find(';').unwrap_or(after.len());
+    Some(after[..end].trim().to_string())
+}
+
+fn templates_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates")
+}
+
+fn world_wit_templates() -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.file_name().and_then(|s| s.to_str()) == Some("world.wit.tmpl") {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&templates_root(), &mut out);
+    out.sort();
+    assert!(!out.is_empty(), "no world.wit.tmpl files found");
+    out
+}
+
+/// Every `greentic:<pkg>/<iface>@<ver>` in a scaffold world must carry the
+/// placeholder for *that* package — never a literal, and never another
+/// package's placeholder.
+///
+/// This is the guard that was missing. The suite already asserted each WIT
+/// file's own `@version`, which made the divergence (`extension-host@0.1.0`,
+/// `extension-design@0.3.0`, everything else `@0.2.0`) look accounted for —
+/// while the templates stamped a single `{{contract_version}}` onto all of
+/// them. Scaffolds therefore imported packages that do not exist and no test
+/// noticed, because none of them ran `cargo component build`.
+#[test]
+fn scaffold_worlds_reference_each_package_by_its_own_placeholder() {
+    let expected: std::collections::BTreeMap<&str, &str> =
+        PACKAGE_PLACEHOLDER.iter().copied().collect();
+    let mut problems = Vec::new();
+
+    for path in world_wit_templates() {
+        let text = std::fs::read_to_string(&path).expect("read world.wit.tmpl");
+        let rel = path
+            .strip_prefix(templates_root())
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+
+        for line in text.lines() {
+            // Match `greentic:<pkg>/<iface>@<token>` up to the statement end.
+            let Some(at) = line.find("greentic:") else {
+                continue;
+            };
+            let rest = &line[at + "greentic:".len()..];
+            let Some(slash) = rest.find('/') else {
+                continue;
+            };
+            let pkg = &rest[..slash];
+            let Some(version_at) = rest.find('@') else {
+                problems.push(format!(
+                    "{rel}: `greentic:{pkg}` reference carries no @version"
+                ));
+                continue;
+            };
+            let token: String = rest[version_at + 1..]
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != ';')
+                .collect();
+
+            let Some(want) = expected.get(pkg) else {
+                continue; // not a vendored greentic package (e.g. wasix:mcp)
+            };
+            if token != *want {
+                problems.push(format!(
+                    "{rel}: greentic:{pkg} is pinned to `{token}`, expected `{want}`"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "scaffold worlds must use the per-package version placeholder:\n  {}",
+        problems.join("\n  ")
+    );
+}
+
+/// The placeholders above must actually resolve, and resolve to the version
+/// the corresponding `wit/*.wit` file declares.
+#[test]
+fn every_package_placeholder_resolves_to_the_vendored_wit_version() {
+    let wit_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root")
+        .join("wit");
+    if !wit_root.exists() {
+        eprintln!("workspace wit/ not present (packaged tarball) — skipping");
+        return;
+    }
+
+    for (pkg, placeholder) in PACKAGE_PLACEHOLDER {
+        let key = placeholder
+            .trim_start_matches("{{")
+            .trim_end_matches("}}")
+            .to_string();
+        let declared = {
+            let text = std::fs::read_to_string(wit_root.join(format!("{pkg}.wit")))
+                .unwrap_or_else(|e| panic!("read wit/{pkg}.wit: {e}"));
+            let first = text.lines().next().unwrap_or_default().to_string();
+            let at = first
+                .find('@')
+                .unwrap_or_else(|| panic!("wit/{pkg}.wit declares no @version"));
+            let after = &first[at + 1..];
+            let end = after.find(';').unwrap_or(after.len());
+            after[..end].trim().to_string()
+        };
+        let resolved = embedded_package_version(pkg)
+            .unwrap_or_else(|| panic!("no embedded version exposed for `{pkg}` (key `{key}`)"));
+        assert_eq!(
+            resolved, declared,
+            "placeholder `{placeholder}` resolves to {resolved}, but wit/{pkg}.wit declares {declared}"
+        );
+    }
+}

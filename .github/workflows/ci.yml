@@ -43,3 +43,31 @@ jobs:
         run: |
           cargo publish --dry-run --allow-dirty -p greentic-extension-sdk-contract
           cargo publish --dry-run --allow-dirty -p greentic-extension-sdk-state
+
+  scaffold-compiles:
+    name: scaffolds compile (cargo component)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-component
+        run: cargo install cargo-component --locked
+
+      - name: Build gtdx
+        run: cargo build -p greentic-extension-sdk-cli --locked
+
+      # The suite's compile smoke tests are #[ignore]d: they need
+      # cargo-component, the wasm32-wasip2 target, and network for dependency
+      # resolution, so they cannot run in the default `cargo test`. Without this
+      # job they never run at all — which is how six of seven `gtdx new` kinds
+      # shipped unable to build while CI stayed green.
+      - name: cargo test -- --ignored
+        run: cargo test -p greentic-extension-sdk-cli --locked -- --ignored

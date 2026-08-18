@@ -20,7 +20,6 @@ use anyhow::Context as _;
 use clap::Args as ClapArgs;
 
 use crate::commands::new::write_wit_and_lock;
-use crate::scaffold::embedded;
 use crate::scaffold::template::{self, Context};
 use codegen::{
     gen_dispatch, gen_tool_meta, network_allowlist_json, secrets_json, tools_contrib_json,
@@ -116,18 +115,13 @@ fn build_context(model: &ConnectorModel, slug: &str) -> Context {
     // `cargo component` fails to resolve the scaffolded `wit/deps/` (the
     // package it finds on disk doesn't match the version the world asks
     // for).
-    ctx.set(
-        "base_version",
-        embedded_package_version("extension-base.wit"),
-    );
-    ctx.set(
-        "host_version",
-        embedded_package_version("extension-host.wit"),
-    );
-    ctx.set(
-        "design_version",
-        embedded_package_version("extension-design.wit"),
-    );
+    // Same per-package version keys `gtdx new` uses, from the same source of
+    // truth. This module already read the real per-file versions correctly; it
+    // just named them differently, and two names for one value is how these
+    // drift. `crate::commands::new::set_wit_version_keys` is now the only
+    // place that mapping lives.
+    crate::commands::new::set_wit_version_keys(&mut ctx)
+        .expect("embedded contract must expose every WIT package version");
     ctx.set("network_json", network_allowlist_json(model));
     ctx.set("secrets_json", secrets_json(model));
     ctx.set("tools_contrib_json", tools_contrib_json(model, slug));
@@ -225,20 +219,6 @@ fn json_string_body(s: &str) -> String {
         .and_then(|s| s.strip_suffix('"'))
         .unwrap_or(&quoted)
         .to_string()
-}
-
-/// The real `@version` an embedded WIT file (e.g. `extension-host.wit`)
-/// declares on its `package greentic:<name>@X.Y.Z;` line — see
-/// [`embedded::package_version`]. Panics if the named file isn't embedded or
-/// declares no parseable version: both are scaffolding bugs, not user input
-/// errors, and should fail loudly rather than silently emit a mismatched
-/// `world.wit`.
-fn embedded_package_version(file_name: &str) -> String {
-    embedded::wit_files()
-        .into_iter()
-        .find(|f| f.name == file_name)
-        .and_then(|f| embedded::package_version(f.bytes))
-        .unwrap_or_else(|| panic!("embedded {file_name} missing or declares no @version"))
 }
 
 fn id_to_wit_package(id: &str) -> String {

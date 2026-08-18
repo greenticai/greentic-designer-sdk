@@ -55,14 +55,14 @@ fn target_dir_conflict_with_force_succeeds() {
 }
 
 /// Slow smoke test: generate a project and confirm `cargo check --quiet`
-/// succeeds. Gated behind `GTDX_RUN_CARGO_CHECK=1` because it needs network
-/// for dep resolution (unless an offline lockfile exists).
+/// succeeds. Needs network for dep resolution.
+///
+/// `#[ignore]` rather than an env-var gate: the gate returned early and the
+/// test reported **PASS**, so the suite looked green while executing nothing.
+/// An ignored test is reported as ignored. Run with `cargo test -- --ignored`.
 #[test]
+#[ignore = "needs network for dep resolution; run with `cargo test -- --ignored`"]
 fn generated_project_passes_cargo_check() {
-    if std::env::var("GTDX_RUN_CARGO_CHECK").ok().as_deref() != Some("1") {
-        eprintln!("skip: set GTDX_RUN_CARGO_CHECK=1 to run this test");
-        return;
-    }
     let tmp = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("demo");
     let (ok, _o, e) = run(Command::new(gtdx_bin())
@@ -74,13 +74,18 @@ fn generated_project_passes_cargo_check() {
         .arg("--no-git"));
     assert!(ok, "gtdx new failed: {e}");
 
+    // `cargo component check`: the scaffold declares `mod bindings;` and only
+    // cargo-component generates `src/bindings.rs` from the WIT world. Plain
+    // `cargo check` cannot succeed here — a defect the env-var gate hid,
+    // because a skipped gate reported PASS.
     let (ok, stdout, stderr) = run(Command::new("cargo")
+        .arg("component")
         .arg("check")
         .arg("--quiet")
         .current_dir(&proj));
     assert!(
         ok,
-        "cargo check failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        "cargo component check failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
 }
 

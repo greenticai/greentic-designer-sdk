@@ -90,6 +90,19 @@ pub fn package_version(bytes: &[u8]) -> Option<String> {
     Some(after[..semi].trim().to_string())
 }
 
+/// The `@version` declared by the embedded `<package>.wit`, e.g.
+/// `package_version_for("extension-host") == Some("0.1.0")`.
+///
+/// Convenience over [`package_version`] for callers that have a package name
+/// rather than the bytes — notably the `gtdx new` template context, which
+/// pins every scaffold import to the version its package really declares.
+#[must_use]
+pub fn package_version_for(package: &str) -> Option<String> {
+    let file_name = format!("{package}.wit");
+    let file = wit_files().into_iter().find(|f| f.name == file_name)?;
+    package_version(file.bytes)
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(bytes);
