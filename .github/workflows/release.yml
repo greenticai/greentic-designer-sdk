@@ -16,9 +16,15 @@ concurrency:
 jobs:
   release-binaries:
     name: Build gtdx binaries (6 platforms)
-    # Pinned to greenticai/.github@main (7fd49c4) instead of floating @main so a
+    # Pinned to greenticai/.github (7fd49c4) instead of floating @main so a
     # force-push/compromise of that repo can't run with our release secrets.
     # Bump this SHA deliberately when adopting upstream workflow changes.
+    #
+    # Held at 7fd49c4 on purpose: this is the commit that built the v1.2.0
+    # binaries for all six platforms. Upstream has since rewritten
+    # release-binaries.yml substantially, which is worth adopting only after
+    # a deliberate review — not as a side effect of picking up an unrelated
+    # fix in crates-publish.yml below.
     uses: greenticai/.github/.github/workflows/release-binaries.yml@7fd49c401689eed4e26e19bd5ea9b8bb5a7a823d
     with:
       package: greentic-extension-sdk-cli
@@ -34,7 +40,14 @@ jobs:
     if: ${{ !contains(github.ref_name, 'research') }}
     permissions:
       contents: read
-    uses: greenticai/.github/.github/workflows/crates-publish.yml@7fd49c401689eed4e26e19bd5ea9b8bb5a7a823d
+    # Pinned to greenticai/.github (e5ac78e) — ahead of the release-binaries
+    # pin above, deliberately. e5ac78e adds `save-if: false` to the job's
+    # rust-cache step (greenticai/.github#254), which stops rust-cache's
+    # post-job cleanup from probing target/package/<crate>-<ver>/tests/target
+    # and tests/trybuild — paths cargo publish never creates — and logging
+    # eight ##[error] lines after an already-successful publish (seen on
+    # v1.2.0, run 32134327057).
+    uses: greenticai/.github/.github/workflows/crates-publish.yml@e5ac78e8998a5d5bde25789a576d3fb29d05de66
     with:
       # Order matters: testing is a dev-dep of registry + cli, so it must be
       # published before them or the verification step can't resolve it from
