@@ -76,6 +76,32 @@ pub enum RegistryError {
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
 
+    /// A response the registry served could not be decoded into this build's
+    /// types.
+    ///
+    /// Separate from [`RegistryError::Json`] because the overwhelmingly common
+    /// cause is not malformed JSON but a VERSION SKEW: `DescribeJson`'s nested
+    /// types are `deny_unknown_fields`, so a describe carrying a field this
+    /// build has never heard of fails the WHOLE parse. `agentic_worker_metadata`
+    /// (contract v1.3.0-research.2) and `operation` (v1.3.0-research.3) each did
+    /// exactly that, and every gtdx older than them refuses every extension the
+    /// store serves.
+    ///
+    /// The hint is part of the message rather than a doc comment because the
+    /// operator reading it is at a terminal, and the previous message —
+    /// reqwest's `error decoding response body`, which drops the field name and
+    /// the position — sent them looking at the network.
+    #[error(
+        "{endpoint} returned a body this build cannot decode: {source}\n\
+         hint: an `unknown field` here means this gtdx predates the extension it \
+         is reading — upgrade gtdx and retry"
+    )]
+    ResponseDecode {
+        endpoint: String,
+        #[source]
+        source: serde_json::Error,
+    },
+
     #[error("toml: {0}")]
     Toml(#[from] toml::de::Error),
 
