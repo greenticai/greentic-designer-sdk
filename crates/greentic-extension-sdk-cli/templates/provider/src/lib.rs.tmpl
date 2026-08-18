@@ -16,7 +16,6 @@ mod bindings;
 use bindings::exports::greentic::extension_base::{lifecycle, manifest};
 use bindings::exports::greentic::extension_provider::messaging;
 use bindings::greentic::extension_base::types;
-use bindings::greentic::extension_provider::types as provider_types;
 
 struct Component;
 
@@ -58,29 +57,24 @@ impl messaging::Guest for Component {
         Vec::new()
     }
 
-    fn describe_channel(
-        id: String,
-    ) -> Result<messaging::ChannelProfile, provider_types::Error> {
+    fn describe_channel(id: String) -> Result<messaging::ChannelProfile, types::ExtensionError> {
         // TODO: look up and return the channel profile.
-        Err(provider_types::Error::NotFound(id))
+        Err(types::ExtensionError::NotFound(id))
     }
 
-    fn secret_schema(id: String) -> Result<String, provider_types::Error> {
+    fn secret_schema(id: String) -> Result<String, types::ExtensionError> {
         // TODO: return a JSON Schema for the channel's credentials.
-        Err(provider_types::Error::NotFound(id))
+        Err(types::ExtensionError::NotFound(id))
     }
 
-    fn config_schema(id: String) -> Result<String, provider_types::Error> {
+    fn config_schema(id: String) -> Result<String, types::ExtensionError> {
         // TODO: return a JSON Schema for per-channel configuration.
-        Err(provider_types::Error::NotFound(id))
+        Err(types::ExtensionError::NotFound(id))
     }
 
-    fn dry_run_encode(
-        id: String,
-        _sample: Vec<u8>,
-    ) -> Result<Vec<u8>, provider_types::Error> {
+    fn dry_run_encode(id: String, _sample: Vec<u8>) -> Result<Vec<u8>, types::ExtensionError> {
         // TODO: encode the sample as this channel's outbound envelope.
-        Err(provider_types::Error::NotFound(id))
+        Err(types::ExtensionError::NotFound(id))
     }
 }
 

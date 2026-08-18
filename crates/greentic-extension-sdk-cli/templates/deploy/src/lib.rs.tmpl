@@ -50,9 +50,7 @@ impl targets::Guest for Component {
         Vec::new()
     }
 
-    fn credential_schema(
-        target_id: String,
-    ) -> Result<String, types::ExtensionError> {
+    fn credential_schema(target_id: String) -> Result<String, types::ExtensionError> {
         // TODO: return the JSON Schema describing required credentials.
         Err(types::ExtensionError::InvalidInput(format!(
             "unknown target: {target_id}"
@@ -81,7 +79,9 @@ impl deployment::Guest for Component {
         _req: deployment::DeployRequest,
     ) -> Result<deployment::DeployJob, types::ExtensionError> {
         // TODO: launch the deployment and return a job handle.
-        Err(types::ExtensionError::Internal("deploy not implemented".into()))
+        Err(types::ExtensionError::Internal(
+            "deploy not implemented".into(),
+        ))
     }
 
     fn poll(job_id: String) -> Result<deployment::DeployJob, types::ExtensionError> {
@@ -93,7 +93,9 @@ impl deployment::Guest for Component {
 
     fn rollback(_job_id: String) -> Result<(), types::ExtensionError> {
         // TODO: roll back the deployment.
-        Err(types::ExtensionError::Internal("rollback not implemented".into()))
+        Err(types::ExtensionError::Internal(
+            "rollback not implemented".into(),
+        ))
     }
 }
 

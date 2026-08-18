@@ -9,10 +9,22 @@ authors = ["{{author}}"]
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = "0.36"
+wit-bindgen-rt = { version = "0.41", features = ["bitflags"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [package.metadata.component]
 package = "{{id_wit}}"
-target = { path = "wit", world = "extension" }
+
+[package.metadata.component.target]
+path = "wit"
+world = "extension"
+
+# Without these, cargo-component never registers `wit/deps/greentic/*` and the
+# world's imports resolve against an empty package set. Every other kind
+# declares them; this one did not, which is why it failed independently of the
+# contract-version fix.
+[package.metadata.component.target.dependencies]
+"greentic:extension-base" = { path = "wit/deps/greentic/extension-base" }
+"greentic:extension-host" = { path = "wit/deps/greentic/extension-host" }
+"greentic:extension-design" = { path = "wit/deps/greentic/extension-design" }
