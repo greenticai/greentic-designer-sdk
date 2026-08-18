@@ -15,3 +15,6 @@ credentials.toml
 /.claude/
 
 .worktrees/
+
+# SDD scratch (ledgers, briefs, reports)
+.superpowers/

@@ -110,6 +110,27 @@ flow-capable local-wasm MCPs. To make a design-extension MCP flow-capable:
 Old design-extension MCPs continue to work for agentic workers and do not need
 to be migrated unless flow-node addressability is needed.
 
+### Generate an MCP extension from OpenAPI
+
+```bash
+gtdx new --kind mcp --from-openapi ./api.yaml weatherapi
+```
+
+`gtdx` shells out to `greentic-mcp-gen` (from `greentic-mcp-generator`) to generate
+the `wasix:mcp/router` component, then auto-authors `describe.json` — including
+`runtime.permissions.network` (from the spec's servers) and `secret_requirements`.
+Install the generator once with `cargo binstall greentic-mcp-generator` (set
+`GITHUB_TOKEN` for the private repo) or point `GTDX_MCP_GEN_BIN` at the binary.
+
+The result is publish-ready:
+
+```bash
+gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml ./weatherapi
+```
+
+Running `gtdx new` with no flags starts an interactive wizard; for `--kind mcp`
+it offers to seed from an OpenAPI spec. Pass `-y` for non-interactive defaults.
+
 ### Lint before publish
 
 ```bash
@@ -146,6 +167,64 @@ gtdx dev --mount ./path/to/built/ext
 One-shot strict-parity install — build + pack + install the same way
 production install would, but for an already-built source dir (no
 watcher loop).
+
+### Designer compatibility
+
+`gtdx` scaffolds against the current describe contract, `greentic.ai/v2`. A
+designer older than **1.2.0** does not understand that contract: it screens the
+extension out at boot with a terse `built for a newer designer` line, so the
+extension never shows up in `/api/extensions` and there is nothing in the logs
+pointing at the version. If a freshly built extension is simply invisible in
+Designer, this is almost always why.
+
+| Designer | `greentic.ai/v1` | `greentic.ai/v2` | SDK / `gtdx` |
+|----------|------------------|------------------|--------------|
+| `< 1.2.0` | loads | **skipped at boot** | `0.4.x` |
+| `>= 1.2.0` | loads (migrated on read) | loads | `1.2.x` and newer |
+
+`gtdx doctor` checks this for you against the designer you actually have
+installed, and names the fix:
+
+```console
+$ gtdx doctor
+designer compatibility
+  ✓ greentic-designer 1.1.7  /usr/local/bin/greentic-designer
+  ✗ greentic.telco-x-designer 0.1.0: declares greentic.ai/v2, which designer
+    1.1.7 cannot load (it is skipped at boot as "built for a newer designer")
+    — upgrade greentic-designer to >=1.2.0
+```
+
+The version comes from `greentic-designer --version`, which every lineage back
+to 1.1.x supports. Running Designer from a checkout instead of `PATH`? Point
+doctor at that build:
+
+```bash
+GREENTIC_DESIGNER_BIN=../greentic-designer/target/release/greentic-designer gtdx doctor
+```
+
+On top of the contract gate, doctor also honours the range the extension itself
+declares — `compat.min_designer_version` on a v2 describe, or the equivalent
+`engine.greenticDesigner` on a v1 one.
+
+You do not have to remember to run doctor: `gtdx dev` and `gtdx install` run the
+same check right after installing, so a designer that will not load what you just
+built says so where you are already looking:
+
+```console
+$ gtdx dev --once
+✓ installed my-ext@0.1.0
+⚠ my-ext installed, but this designer cannot load it: declares greentic.ai/v2, …
+```
+
+Note what a scaffold declares: `min_designer_version` is the **contract floor**
+(`>=1.2.0`), not the version of the SDK that generated it. Those are different
+axes — an extension built by SDK 1.3.x still loads on any designer that speaks
+v2. `contract_version` is the one that tracks the SDK.
+
+There is deliberately no flag to emit a v1 describe from a v2 SDK. Downgrading
+the contract would mean maintaining two describe shapes forever while still
+lying about extensions that genuinely need v2 features; upgrading Designer is
+the supported path.
 
 ### Log in to the store
 
@@ -220,6 +299,49 @@ manifest binding (`manifestSha256`), and the whole-archive integrity ledger
 not just a tampered descriptor. Without `--trusted-key` the signature is only
 checked for self-consistency (the describe is unmodified); pass `--trusted-key`
 to additionally anchor *who* signed it.
+
+## End-to-end: scaffold → Designer
+
+The full first-time loop, from an empty directory to a tool the agent can call.
+
+```bash
+# 0. Confirm the machine is ready — and that your Designer can load what
+#    gtdx is about to build. Do this FIRST; it is the step that saves the day.
+gtdx doctor
+
+# 1. Scaffold. --kind design is the right pick for authoring tools the
+#    Designer/agent calls; see the kind table under "Scaffold and build".
+gtdx new my-ext --kind design
+cd my-ext
+
+# 2. Implement your tools, then build + pack + install in one shot.
+gtdx dev --once
+#    → dist/my-ext-0.1.0.gtxpack
+#    → installed into ~/.greentic/extensions/design/my-ext-<version>/
+
+# 3. Re-run doctor now that it is installed: this is where a designer/contract
+#    mismatch shows up by name instead of as a silently missing extension.
+gtdx doctor
+
+# 4. Start Designer and confirm it loaded.
+greentic-designer                                    # binds :8080 by default
+curl -s localhost:8080/api/extensions | jq '.[].id'
+
+#    From a Designer checkout instead, the dev loop binds :4000:
+#      make dev-rust  →  curl -s localhost:4000/api/extensions | jq '.[].id'
+```
+
+Your extension id should appear in step 4. If it does not:
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Not in `/api/extensions`, boot log says `built for a newer designer` | Designer `< 1.2.0` cannot read a `greentic.ai/v2` describe | Upgrade Designer — see [Designer compatibility](#designer-compatibility) |
+| Not in `/api/extensions`, no boot log line at all | Not installed where Designer looks | Check `~/.greentic/extensions/design/`; re-run `gtdx dev --once` |
+| Boot log says `incomplete install` / `runtime artifact unavailable` | `extension.wasm` missing or not a WASM component | Rebuild: `gtdx dev --once --release` |
+| Loads, but the agent never calls it | Tool descriptions too vague to route on | Sharpen `description` on each tool in `describe.json` |
+
+`gtdx dev` without `--once` keeps watching and reinstalling on every save,
+which is the loop to stay in once step 4 has worked once.
 
 ## Audit + roadmap
 

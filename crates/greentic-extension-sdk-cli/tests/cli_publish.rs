@@ -217,3 +217,55 @@ fn publish_to_local_then_install_round_trip() {
     assert!(installed.join("describe.json").exists());
     assert!(installed.join("extension.wasm").exists());
 }
+
+#[test]
+fn publish_help_lists_icon_flag() {
+    let (ok, out, err) = run(Command::new(gtdx_bin()).arg("publish").arg("--help"));
+    assert!(ok, "publish --help failed: {err}");
+    assert!(
+        out.contains("--icon"),
+        "publish --help missing --icon:\n{out}"
+    );
+}
+
+#[test]
+fn publish_icon_patches_describe() {
+    if !gate() {
+        eprintln!("skipped: set GTDX_RUN_BUILD=1 to enable (requires cargo-component)");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("demo");
+    let home = tmp.path().join("home");
+
+    // scaffold a design extension
+    let (ok, o, e) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("demo")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("--author")
+        .arg("tester")
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "scaffold failed: {o}\n{e}");
+
+    let icon = tmp.path().join("logo.svg");
+    std::fs::write(&icon, b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>").unwrap();
+
+    // publish --dry-run --icon: apply_icon runs before packing; the publish
+    // itself may fail later (no registry), but describe.json is patched first.
+    let _ = run(Command::new(gtdx_bin())
+        .env("GREENTIC_HOME", &home)
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--manifest")
+        .arg(proj.join("Cargo.toml"))
+        .arg("--icon")
+        .arg(&icon));
+
+    assert!(proj.join("assets/icon.svg").exists());
+    let d: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
+    assert_eq!(d["metadata"]["icon"], "assets/icon.svg");
+}

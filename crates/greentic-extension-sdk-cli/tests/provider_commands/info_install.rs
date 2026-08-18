@@ -40,6 +40,7 @@ fn write_provider_fixture_with_capabilities(
         .collect();
 
     let describe = DescribeJson {
+        secret_requirements: Vec::new(),
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Provider,
@@ -73,6 +74,7 @@ fn write_provider_fixture_with_capabilities(
             required: vec![],
         },
         runtime: Runtime {
+            world: None,
             memory_limit_mb: 256,
             permissions: Permissions::default(),
             components: {

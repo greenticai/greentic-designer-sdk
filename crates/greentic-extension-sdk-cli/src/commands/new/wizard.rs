@@ -4,6 +4,8 @@
 //! new extension can be scaffolded without memorising the full command. Any
 //! flags already supplied on the command line are used as prompt defaults.
 
+use std::path::PathBuf;
+
 use dialoguer::{Confirm, Input, Select};
 
 use super::{Args, Resolved, detect_git_author, is_reverse_dns};
@@ -36,6 +38,9 @@ pub(super) fn run(args: &Args) -> anyhow::Result<Resolved> {
 
     let name = prompt_name(args)?;
     let kind = prompt_kind(args)?;
+    // If the user chose MCP and hasn't already provided --from-openapi, offer
+    // the OpenAPI seed prompt.
+    let from_openapi = prompt_openapi_seed(args, kind)?;
     let id = prompt_id(args, &name)?;
     let version = prompt_version(args)?;
     let author = prompt_author(args)?;
@@ -62,6 +67,7 @@ pub(super) fn run(args: &Args) -> anyhow::Result<Resolved> {
         force: args.force,
         node_type_id: args.node_type_id.clone(),
         label: args.label.clone(),
+        from_openapi,
     })
 }
 
@@ -89,6 +95,26 @@ fn prompt_kind(args: &Args) -> anyhow::Result<Kind> {
         .default(default_index)
         .interact()?;
     Ok(KIND_CHOICES[selected].0)
+}
+
+/// If kind is MCP and `--from-openapi` was not already supplied, ask whether
+/// the user wants to seed from an `OpenAPI` spec. Returns the spec path if yes.
+fn prompt_openapi_seed(args: &Args, kind: Kind) -> anyhow::Result<Option<PathBuf>> {
+    // Pass through whatever was on the command line.
+    if args.from_openapi.is_some() || kind != Kind::Mcp {
+        return Ok(args.from_openapi.clone());
+    }
+    let seed = Confirm::new()
+        .with_prompt("Seed this MCP extension from an OpenAPI spec?")
+        .default(false)
+        .interact()?;
+    if !seed {
+        return Ok(None);
+    }
+    let path: String = Input::new()
+        .with_prompt("OpenAPI spec path")
+        .interact_text()?;
+    Ok(Some(PathBuf::from(path)))
 }
 
 fn prompt_id(args: &Args, name: &str) -> anyhow::Result<String> {

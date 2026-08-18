@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+cd "$HERE"
+
+echo "==> cargo component build"
+# cargo-component 0.21 defaults to wasm32-wasip1 even when rust-toolchain.toml
+# lists wasip2 in `targets`; pin wasip2 explicitly.
+cargo component build --release --target wasm32-wasip2
+
+WASM_PATH="target/wasm32-wasip2/release/{{name_underscore}}.wasm"
+if [ ! -f "$WASM_PATH" ]; then
+  echo "ERROR: wasm not found at $WASM_PATH" >&2
+  exit 1
+fi
+
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+
+cp describe.json "$STAGE/"
+cp "$WASM_PATH" "$STAGE/extension.wasm"
+
+# v2 contract: substitute the sha256 placeholders in describe.json with the
+# real extension.wasm digest (two occurrences: gtpack.sha256 and the
+# component-level sha256), so use the global flag.
+WASM_SHA256="$(shasum -a 256 "$STAGE/extension.wasm" | cut -d' ' -f1)"
+sed "s/0000000000000000000000000000000000000000000000000000000000000000/${WASM_SHA256}/g" \
+  "$STAGE/describe.json" > "$STAGE/describe.json.tmp"
+mv "$STAGE/describe.json.tmp" "$STAGE/describe.json"
+
+EXT_ID="$(jq -r .metadata.id "$STAGE/describe.json")"
+EXT_VERSION="$(jq -r .metadata.version "$STAGE/describe.json")"
+OUT="$HERE/${EXT_ID}-${EXT_VERSION}.gtxpack"
+# zip appends .zip when the destination has no .zip extension; use a temp name.
+TMP_ZIP="$STAGE/../gtdx_openapi_$$.zip"
+(cd "$STAGE" && zip -r "$TMP_ZIP" .) > /dev/null
+mv "$TMP_ZIP" "$OUT"
+
+echo "==> built $OUT"
+echo "==> size: $(du -h "$OUT" | cut -f1)"
