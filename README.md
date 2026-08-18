@@ -37,30 +37,36 @@ cargo binstall greentic-extension-sdk-cli
 
 Resolves to the latest stable release from crates.io; binstall reads
 `[package.metadata.binstall]` to find the matching GitHub Release asset.
-Add `--version 1.2.0` to pin.
+Add `--version <x.y.z>` to pin.
 
 **Build from source (slowest, needs the full toolchain):**
 
 ```bash
-cargo install greentic-extension-sdk-cli --version 1.2.0
+cargo install greentic-extension-sdk-cli
 ```
 
 **Manual download:**
 
+Grab the asset for your platform from the
+[latest release](https://github.com/greenticai/greentic-designer-sdk/releases/latest)
+— the tag is embedded in the filename:
+
 ```bash
-# macOS Apple Silicon example — swap target for your platform
+# macOS Apple Silicon example — swap TAG and target for your platform
+TAG=v1.2.0
 curl -L -o gtdx.tgz \
-  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.0/gtdx-v1.2.0-aarch64-apple-darwin.tgz
+  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-aarch64-apple-darwin.tgz"
 tar -xzf gtdx.tgz
 chmod +x gtdx && mv gtdx ~/.cargo/bin/
 ```
 
 **Research line** — not on crates.io, so install it from the repo at a
-research tag:
+research tag. Pick the newest `v*-research*` tag from
+[Releases](https://github.com/greenticai/greentic-designer-sdk/releases):
 
 ```bash
 cargo install --git https://github.com/greenticai/greentic-designer-sdk \
-  --tag v1.3.0-research.3 \
+  --tag <v-research-tag> \
   greentic-extension-sdk-cli
 ```
 
