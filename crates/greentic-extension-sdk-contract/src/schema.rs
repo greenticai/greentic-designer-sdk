@@ -5,6 +5,10 @@ use jsonschema::{Draft, Validator};
 use crate::error::ContractError;
 
 const SCHEMA_V2: &str = include_str!("../schemas/describe-v2.json");
+const SCHEMA_MCP_V1: &str = include_str!("../schemas/describe-mcp-v1.json");
+
+/// `kind` value identifying a local-WASM MCP component.
+const WASIX_MCP_ROUTER_KIND: &str = "wasix:mcp/router";
 
 static VALIDATOR_V2: LazyLock<Validator> = LazyLock::new(|| {
     let schema: serde_json::Value =
@@ -13,6 +17,15 @@ static VALIDATOR_V2: LazyLock<Validator> = LazyLock::new(|| {
         .with_draft(Draft::Draft202012)
         .build(&schema)
         .expect("embedded v2 schema must compile")
+});
+
+static VALIDATOR_MCP_V1: LazyLock<Validator> = LazyLock::new(|| {
+    let schema: serde_json::Value =
+        serde_json::from_str(SCHEMA_MCP_V1).expect("embedded mcp v1 schema must parse");
+    jsonschema::options()
+        .with_draft(Draft::Draft202012)
+        .build(&schema)
+        .expect("embedded mcp v1 schema must compile")
 });
 
 /// Validate a raw describe.json `Value` for the publish / dev-install path.
@@ -24,6 +37,16 @@ static VALIDATOR_V2: LazyLock<Validator> = LazyLock::new(|| {
 /// schema reports a false success and then dies with a confusing serde error.
 /// Authors of legacy documents must run the v1->v2 migration first.
 pub fn validate_describe_json(value: &serde_json::Value) -> Result<(), ContractError> {
+    // `wasix:mcp/router` artifacts share `apiVersion: greentic.ai/v2` with
+    // designer extensions but are a distinct artifact shape, so they are
+    // dispatched by `kind` BEFORE the apiVersion routing — otherwise they would
+    // be (wrongly) validated against the design-extension v2 schema and
+    // rejected for lacking `engine`/`contributions`. This mirrors the store's
+    // own dispatch (greentic-store-server publish/schema.rs), so the CLI and
+    // the server agree on what is publishable.
+    if value.get("kind").and_then(|v| v.as_str()) == Some(WASIX_MCP_ROUTER_KIND) {
+        return validate_describe_mcp_v1(value);
+    }
     match value.get("apiVersion").and_then(|v| v.as_str()) {
         Some("greentic.ai/v2") => validate_describe_v2(value),
         Some(other) => Err(ContractError::UnsupportedApiVersion(format!(
@@ -41,6 +64,25 @@ pub fn validate_describe_json(value: &serde_json::Value) -> Result<(), ContractE
 /// validate directly against the v2 schema, regardless of the `apiVersion` field.
 pub fn validate_describe_v2(value: &serde_json::Value) -> Result<(), ContractError> {
     let errors: Vec<String> = VALIDATOR_V2
+        .iter_errors(value)
+        .map(|e| format!("{}: {}", e.instance_path, e))
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ContractError::SchemaInvalid(errors.join("; ")))
+    }
+}
+
+/// Validate a `kind: wasix:mcp/router` describe against the MCP schema.
+///
+/// Local-WASM MCP components are not designer extensions: their tools are
+/// discovered at runtime through the router's `list-tools`, so they carry no
+/// `engine`/`contributions` blocks and only `apiVersion`/`kind`/`metadata`/
+/// `runtime` are mandated. The embedded schema is a copy of the store's
+/// `describe-mcp-v1.json`; keep the two in sync.
+pub fn validate_describe_mcp_v1(value: &serde_json::Value) -> Result<(), ContractError> {
+    let errors: Vec<String> = VALIDATOR_MCP_V1
         .iter_errors(value)
         .map(|e| format!("{}: {}", e.instance_path, e))
         .collect();

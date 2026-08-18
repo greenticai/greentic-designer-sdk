@@ -2,6 +2,7 @@
 
 pub mod contract_lock;
 pub mod embedded;
+pub mod openapi;
 pub mod preflight;
 pub mod template;
 

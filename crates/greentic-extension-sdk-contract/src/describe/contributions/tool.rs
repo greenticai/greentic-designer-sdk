@@ -33,4 +33,23 @@ pub struct Tool {
     /// cannot infer its arguments). Additive: older describes decode to `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<String>,
+    /// JSON Schema (serialized as a string) describing what the tool returns.
+    /// Absent → the runtime surfaces `None`. Additive: older describes decode
+    /// to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<String>,
+    /// Serialized [`AgenticWorkerMetadata`](crate::AgenticWorkerMetadata) —
+    /// `usage_hint`, `examples`, `side_effects`, `cost`,
+    /// `confirmation_required`. This is what the agentic worker's planning
+    /// layer reads to decide whether and how to call the tool.
+    ///
+    /// Kept as an opaque `String` rather than the typed struct so the field
+    /// mirrors the WIT `tool-definition.agentic-worker-metadata` wire shape
+    /// exactly, and so a describe carrying metadata this crate cannot yet
+    /// decode still round-trips instead of failing the whole parse.
+    ///
+    /// Absent → the runtime surfaces `None`. Additive: older describes decode
+    /// to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agentic_worker_metadata: Option<String>,
 }

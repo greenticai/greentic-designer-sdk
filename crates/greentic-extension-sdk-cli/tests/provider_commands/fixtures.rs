@@ -33,6 +33,7 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
     std::fs::create_dir_all(&design_dir).unwrap();
 
     let design_describe = DescribeJson {
+        secret_requirements: Vec::new(),
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
@@ -66,6 +67,7 @@ fn write_design_fixture(extensions_root: &std::path::Path) {
             required: vec![],
         },
         runtime: Runtime {
+            world: None,
             memory_limit_mb: 64,
             permissions: Permissions::default(),
             components: {
@@ -110,6 +112,7 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
     let sha256 = sha256_hex(&gtpack_bytes);
 
     let provider_describe = DescribeJson {
+        secret_requirements: Vec::new(),
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Provider,
@@ -143,6 +146,7 @@ fn write_provider_fixture(extensions_root: &std::path::Path) {
             required: vec![],
         },
         runtime: Runtime {
+            world: None,
             memory_limit_mb: 256,
             permissions: Permissions::default(),
             components: {

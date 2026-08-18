@@ -55,7 +55,14 @@ impl LocalFilesystemRegistry {
         }
         fs::create_dir_all(&ver_dir)?;
 
-        let pack_name = format!("{}-{}.gtxpack", req.ext_name, req.version);
+        // `req.ext_name` is free-form `describe.json` metadata (display
+        // text) — it may contain a `/` or other characters that are unsafe
+        // as a path component (e.g. "Topic / scope guardrail"). Sanitize it
+        // for this filesystem write only; `req.ext_name` itself is left
+        // untouched everywhere else (index.json, metadata.json) so those
+        // continue to show the author's real name.
+        let pack_name =
+            greentic_extension_sdk_contract::safe_pack_filename(&req.ext_name, &req.version);
         let pack_path = ver_dir.join(&pack_name);
         atomic_write(&pack_path, &req.artifact_bytes)?;
 
@@ -103,11 +110,24 @@ fn atomic_write(dest: &Path, bytes: &[u8]) -> Result<(), RegistryError> {
             .map_or_else(|| "tmp".into(), |e| format!("{}.tmp", e.to_string_lossy())),
     );
     {
-        let mut f = File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
+        // Named explicitly rather than propagated via `#[from] io::Error` —
+        // a bare ENOENT with no path is unactionable (this is exactly how
+        // an unsanitized filename-with-'/' used to fail: see
+        // `safe_pack_filename` at the call site above).
+        let mut f = File::create(&tmp)
+            .map_err(|e| RegistryError::Storage(format!("create {}: {e}", tmp.display())))?;
+        f.write_all(bytes)
+            .map_err(|e| RegistryError::Storage(format!("write {}: {e}", tmp.display())))?;
+        f.sync_all()
+            .map_err(|e| RegistryError::Storage(format!("sync {}: {e}", tmp.display())))?;
     }
-    fs::rename(&tmp, dest)?;
+    fs::rename(&tmp, dest).map_err(|e| {
+        RegistryError::Storage(format!(
+            "rename {} -> {}: {e}",
+            tmp.display(),
+            dest.display()
+        ))
+    })?;
     Ok(())
 }
 

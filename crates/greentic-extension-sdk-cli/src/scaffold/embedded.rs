@@ -69,6 +69,27 @@ pub fn files_for_kind(kind: &str) -> Vec<WitFile> {
         .collect()
 }
 
+/// Extract the `@X.Y.Z` package version declared on the first
+/// `package greentic:<name>@X.Y.Z;` line of an embedded WIT file's bytes.
+///
+/// Each embedded package (`extension-base`, `extension-host`,
+/// `extension-design`, ...) is versioned independently — see
+/// [`CONTRACT_VERSION`]'s doc comment — so callers that render a `world.wit`
+/// importing/exporting from more than one package must read the real
+/// per-file version here rather than assuming they all match
+/// `CONTRACT_VERSION`. `tests/contract_version_consistency.rs` pins the
+/// expected value per file; this function is the runtime counterpart used by
+/// codegen that needs the same numbers.
+#[must_use]
+pub fn package_version(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let first_line = text.lines().next()?;
+    let at = first_line.find('@')?;
+    let after = &first_line[at + 1..];
+    let semi = after.find(';').unwrap_or(after.len());
+    Some(after[..semi].trim().to_string())
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(bytes);
@@ -156,6 +177,37 @@ mod tests {
             "mcp (wasix:mcp/router) must not bundle greentic WIT deps, got: {:?}",
             files.iter().map(|f| f.name).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn package_version_reads_the_declared_at_version() {
+        assert_eq!(
+            package_version(b"package greentic:extension-host@0.1.0;\n"),
+            Some("0.1.0".to_string())
+        );
+        assert_eq!(
+            package_version(b"package greentic:extension-design@0.3.0;\n\ninterface tools {}"),
+            Some("0.3.0".to_string())
+        );
+    }
+
+    #[test]
+    fn package_version_matches_the_pinned_embedded_files() {
+        // Cross-check against the same pins `tests/contract_version_consistency.rs`
+        // asserts, so a template that reads `package_version` at runtime gets the
+        // exact numbers other tests already guard.
+        let expected: &[(&str, &str)] = &[
+            ("extension-base.wit", "0.2.0"),
+            ("extension-host.wit", "0.1.0"),
+            ("extension-design.wit", "0.3.0"),
+        ];
+        for (name, want) in expected {
+            let file = wit_files()
+                .into_iter()
+                .find(|f| f.name == *name)
+                .unwrap_or_else(|| panic!("embedded {name} missing"));
+            assert_eq!(package_version(file.bytes).as_deref(), Some(*want));
+        }
     }
 
     #[test]
