@@ -27,22 +27,22 @@ matches your setup:
 **Recommended — `cargo binstall` (no compile, fetches the release binary):**
 
 ```bash
-cargo binstall greentic-extension-sdk-cli \
-  --version 1.2.2-research \
-  --git https://github.com/greenticai/greentic-designer-sdk
+cargo binstall greentic-extension-sdk-cli
 ```
 
-`--git` is required because this crate is not published to crates.io —
-binstall reads the `[package.metadata.binstall]` section directly from
-the repo at the requested tag. Drop the `--version` flag once a stable
-release is cut.
+This resolves to the latest stable release (currently 1.2.0) from
+crates.io; binstall reads `[package.metadata.binstall]` to find the
+matching GitHub Release asset. Pass `--version 1.2.0` to pin.
+
+Note that `-research` versions are also on crates.io. They are
+in-progress integration builds, and because they are pre-releases of a
+*higher* patch number they can sort above the current stable — do not
+opt into pre-releases here unless you specifically want that line.
 
 **Build from source (slowest, needs the full toolchain):**
 
 ```bash
-cargo install --git https://github.com/greenticai/greentic-designer-sdk \
-  --tag v1.2.2-research \
-  greentic-extension-sdk-cli
+cargo install greentic-extension-sdk-cli --version 1.2.0
 ```
 
 **Manual download:**
@@ -50,7 +50,7 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 ```bash
 # macOS Apple Silicon example — swap target for your platform
 curl -L -o gtdx.tgz \
-  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.2-research/gtdx-v1.2.2-research-aarch64-apple-darwin.tgz
+  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.0/gtdx-v1.2.0-aarch64-apple-darwin.tgz
 tar -xzf gtdx.tgz
 chmod +x gtdx && mv gtdx ~/.cargo/bin/
 ```
