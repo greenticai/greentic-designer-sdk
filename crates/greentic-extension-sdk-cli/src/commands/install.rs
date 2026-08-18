@@ -72,6 +72,7 @@ async fn install_from_local_file(
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("✓ installed {name}@{version}");
+    warn_if_designer_cannot_load(storage, &name, &version);
     Ok(())
 }
 
@@ -109,6 +110,7 @@ async fn install_from_registry(
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("✓ installed {}@{version}", args.target);
+    warn_if_designer_cannot_load(storage, &args.target, version);
     Ok(())
 }
 
@@ -137,6 +139,33 @@ fn parse_pack_name(filename: &str) -> anyhow::Result<(String, String)> {
         }
     }
     Err(anyhow::anyhow!("no semver version in filename: {filename}"))
+}
+
+/// Warn when the designer on this machine cannot load what was just installed.
+///
+/// Reads the describe back out of the install location rather than trusting
+/// registry metadata, so the check runs against the bytes that actually landed
+/// on disk. Best-effort throughout: a missing install dir, an unreadable
+/// describe, or no local designer all say nothing.
+fn warn_if_designer_cannot_load(storage: &Storage, name: &str, version: &str) {
+    use greentic_extension_sdk_contract::ExtensionKind;
+
+    let dir_name = format!("{name}-{version}");
+    let describe_bytes = [
+        ExtensionKind::Design,
+        ExtensionKind::Bundle,
+        ExtensionKind::Deploy,
+        ExtensionKind::WasixMcpRouter,
+    ]
+    .into_iter()
+    .find_map(|kind| {
+        std::fs::read(storage.kind_dir(kind).join(&dir_name).join("describe.json")).ok()
+    });
+
+    let Some(bytes) = describe_bytes else {
+        return;
+    };
+    crate::dev::installer::warn_if_designer_cannot_load(&bytes, name);
 }
 
 #[cfg(test)]

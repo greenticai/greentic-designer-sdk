@@ -30,6 +30,7 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
     std::fs::create_dir_all(&dir).unwrap();
 
     let describe = DescribeJson {
+        secret_requirements: Vec::new(),
         schema_ref: None,
         api_version: "greentic.ai/v2".into(),
         kind: ExtensionKind::Design,
@@ -63,6 +64,7 @@ fn write_design_fixture(home: &std::path::Path, id: &str, version: &str) {
             required: vec![],
         },
         runtime: Runtime {
+            world: None,
             memory_limit_mb: 64,
             permissions: Permissions::default(),
             components: {

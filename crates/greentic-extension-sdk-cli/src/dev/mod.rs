@@ -11,6 +11,7 @@ pub mod watcher;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use anyhow::Context as _;
 use tokio_util::sync::CancellationToken;
 
 use self::builder::{Profile, run_build};
@@ -18,6 +19,38 @@ use self::event::{DevEvent, Emitter};
 use self::installer::install_pack;
 use self::packer::build_pack;
 use self::watcher::spawn_watcher;
+
+/// Rename the just-built `dist/dev.gtxpack` to its canonical
+/// `<name>-<version>.gtxpack` display name. `info.ext_name` is free-form
+/// `describe.json` metadata (an author can put a `/` in it, e.g.
+/// "Topic / scope guardrail") and is sanitized via
+/// [`greentic_extension_sdk_contract::safe_pack_filename`] before it becomes
+/// a path component — an unsanitized `/` would otherwise be read as a path
+/// separator and target a nonexistent nested directory.
+fn rename_to_canonical(dist: &Path, info: packer::PackInfo) -> anyhow::Result<packer::PackInfo> {
+    let pack_name =
+        greentic_extension_sdk_contract::safe_pack_filename(&info.ext_name, &info.ext_version);
+    let final_pack = dist.join(&pack_name);
+    if final_pack == info.pack_path {
+        return Ok(info);
+    }
+    if final_pack.exists() {
+        std::fs::remove_file(&final_pack)
+            .with_context(|| format!("remove stale {}", final_pack.display()))?;
+    }
+    std::fs::rename(&info.pack_path, &final_pack).with_context(|| {
+        format!(
+            "rename {} -> {}",
+            info.pack_path.display(),
+            final_pack.display()
+        )
+    })?;
+    Ok(packer::PackInfo {
+        pack_path: final_pack,
+        pack_name,
+        ..info
+    })
+}
 
 /// Runtime parameters, resolved from `commands::dev::Args`.
 #[derive(Debug, Clone)]
@@ -60,20 +93,7 @@ pub async fn run_once(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result<
     std::fs::create_dir_all(&dist)?;
     let out_pack = dist.join("dev.gtxpack");
     let info = build_pack(&cfg.project_dir, &build.wasm_path, &out_pack)?;
-    let final_pack = dist.join(format!("{}-{}.gtxpack", info.ext_name, info.ext_version));
-    let info = if final_pack == info.pack_path {
-        info
-    } else {
-        if final_pack.exists() {
-            std::fs::remove_file(&final_pack)?;
-        }
-        std::fs::rename(&info.pack_path, &final_pack)?;
-        packer::PackInfo {
-            pack_path: final_pack,
-            pack_name: format!("{}-{}.gtxpack", info.ext_name, info.ext_version),
-            ..info
-        }
-    };
+    let info = rename_to_canonical(&dist, info)?;
     out.emit(&DevEvent::PackOk {
         pack_name: info.pack_name.clone(),
         size: info.size,
@@ -190,20 +210,7 @@ async fn run_once_cached(
     std::fs::create_dir_all(&dist)?;
     let out_pack = dist.join("dev.gtxpack");
     let info = build_pack(&cfg.project_dir, &build.wasm_path, &out_pack)?;
-    let final_pack = dist.join(format!("{}-{}.gtxpack", info.ext_name, info.ext_version));
-    let info = if final_pack == info.pack_path {
-        info
-    } else {
-        if final_pack.exists() {
-            std::fs::remove_file(&final_pack)?;
-        }
-        std::fs::rename(&info.pack_path, &final_pack)?;
-        packer::PackInfo {
-            pack_path: final_pack,
-            pack_name: format!("{}-{}.gtxpack", info.ext_name, info.ext_version),
-            ..info
-        }
-    };
+    let info = rename_to_canonical(&dist, info)?;
     out.emit(&DevEvent::PackOk {
         pack_name: info.pack_name.clone(),
         size: info.size,
@@ -303,4 +310,67 @@ fn probe_describe_version(project_dir: &Path) -> Option<String> {
 
 fn probe_describe_kind(project_dir: &Path) -> Option<String> {
     probe_describe_field(project_dir, "kind")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pack_info(pack_path: PathBuf, ext_name: &str) -> packer::PackInfo {
+        packer::PackInfo {
+            pack_path,
+            pack_name: "dev.gtxpack".into(),
+            size: 11,
+            sha256: "dummy".into(),
+            ext_name: ext_name.into(),
+            ext_version: "0.1.0".into(),
+            ext_kind: "design".into(),
+            describe_bytes: Vec::new(),
+        }
+    }
+
+    /// Empirical repro (`gtdx dev`/`gtdx dev --mount` variant): `ext_name`
+    /// containing "/" (e.g. "Topic / scope guardrail") must not crash the
+    /// rename to the canonical `<name>-<version>.gtxpack` display name —
+    /// the raw name would otherwise be read as a path separator and target
+    /// a nonexistent nested directory (`dist/Topic /...`).
+    #[test]
+    fn rename_to_canonical_sanitizes_slash_in_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path().join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        let out_pack = dist.join("dev.gtxpack");
+        std::fs::write(&out_pack, b"pack-bytes").unwrap();
+
+        let info = rename_to_canonical(&dist, pack_info(out_pack, "Topic / scope guardrail"))
+            .expect("rename must succeed despite '/' in ext_name");
+
+        assert!(info.pack_path.is_file());
+        assert_eq!(info.pack_path.parent().unwrap(), dist);
+        assert!(
+            !info
+                .pack_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains('/'),
+            "canonical filename must not contain '/': {}",
+            info.pack_path.display()
+        );
+        assert_eq!(std::fs::read(&info.pack_path).unwrap(), b"pack-bytes");
+    }
+
+    #[test]
+    fn rename_to_canonical_leaves_safe_names_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path().join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        let out_pack = dist.join("dev.gtxpack");
+        std::fs::write(&out_pack, b"pack-bytes").unwrap();
+
+        let info = rename_to_canonical(&dist, pack_info(out_pack, "demo")).unwrap();
+
+        assert_eq!(info.pack_path, dist.join("demo-0.1.0.gtxpack"));
+        assert_eq!(info.pack_name, "demo-0.1.0.gtxpack");
+    }
 }
