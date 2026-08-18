@@ -200,6 +200,7 @@ mod tests {
 
     fn sample_describe() -> DescribeJson {
         DescribeJson {
+            secret_requirements: Vec::new(),
             schema_ref: None,
             api_version: "greentic.ai/v2".into(),
             kind: ExtensionKind::Design,
@@ -235,6 +236,7 @@ mod tests {
                 required: vec![],
             },
             runtime: Runtime {
+                world: None,
                 memory_limit_mb: 64,
                 permissions: Permissions::default(),
                 components: std::collections::BTreeMap::new(),

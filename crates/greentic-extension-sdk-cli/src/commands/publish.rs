@@ -118,6 +118,12 @@ pub struct Args {
     /// scripted defaults unless this is set).
     #[arg(short = 'w', long)]
     pub wizard: bool,
+
+    /// Path to an icon file (svg/png/jpg/webp, <= 1 MiB). Copied into the
+    /// project's `assets/` dir and written to `metadata.icon` in describe.json
+    /// before packing (updates describe.json on disk — commit the change).
+    #[arg(long)]
+    pub icon: Option<PathBuf>,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
@@ -136,6 +142,10 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         );
     }
     let project_dir = project_dir_from_manifest(&args.manifest)?;
+    if let Some(icon) = args.icon.as_deref() {
+        let rel = crate::icon::apply_icon(&project_dir, icon)?;
+        eprintln!("note: wrote {rel} and set metadata.icon in describe.json (commit this)");
+    }
     let profile = if args.release {
         Profile::Release
     } else {

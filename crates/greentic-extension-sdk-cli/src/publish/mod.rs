@@ -9,6 +9,7 @@ pub mod validator;
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context as _;
 use greentic_extension_sdk_contract::DescribeJson;
 use greentic_extension_sdk_registry::RegistryError;
 use greentic_extension_sdk_registry::publish::{PublishRequest, SignatureBlob};
@@ -327,16 +328,25 @@ fn backend_registry_label(backend: &Backend) -> String {
 
 /// Write the published bytes to `<dist_dir>/<name>-<version>.gtxpack` and remove
 /// the transient `staging` pack so it doesn't linger in `./dist` after publish.
+///
+/// `name` is free-form `describe.json` metadata (display text — an author
+/// can put a `/` in it, e.g. "Topic / scope guardrail") and is sanitized via
+/// [`greentic_extension_sdk_contract::safe_pack_filename`] before it becomes
+/// a path component; an unsanitized `/` would otherwise be read as a path
+/// separator and target a nonexistent nested directory.
 fn write_canonical_dist(
     staging: &Path,
     dist_dir: &Path,
     name: &str,
     version: &str,
     bytes: &[u8],
-) -> std::io::Result<PathBuf> {
-    std::fs::create_dir_all(dist_dir)?;
-    let final_dist = dist_dir.join(format!("{name}-{version}.gtxpack"));
-    std::fs::write(&final_dist, bytes)?;
+) -> anyhow::Result<PathBuf> {
+    std::fs::create_dir_all(dist_dir)
+        .with_context(|| format!("create dist dir {}", dist_dir.display()))?;
+    let pack_name = greentic_extension_sdk_contract::safe_pack_filename(name, version);
+    let final_dist = dist_dir.join(&pack_name);
+    std::fs::write(&final_dist, bytes)
+        .with_context(|| format!("write {}", final_dist.display()))?;
     let _ = std::fs::remove_file(staging);
     Ok(final_dist)
 }
