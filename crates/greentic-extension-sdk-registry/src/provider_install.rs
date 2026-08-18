@@ -236,13 +236,16 @@ mod path_guard_tests {
     use super::*;
 
     fn staging() -> &'static Path {
-        Path::new("/tmp/gtdx-staging")
+        Path::new("gtdx-staging-root")
     }
 
     /// The reason this guard has to exist at all: `Path::join` with an
     /// absolute argument silently discards the base, so an unvalidated
     /// `staging.join(&gtpack.file)` escapes staging without needing `..`.
     #[test]
+    // Joining an absolute path is exactly what this test documents: the lint
+    // fires on the very footgun the guard above exists to prevent.
+    #[allow(clippy::join_absolute_paths)]
     fn join_with_absolute_path_discards_the_base() {
         assert_eq!(
             staging().join("/etc/passwd"),

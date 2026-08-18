@@ -161,6 +161,15 @@ fn default_directive(verbose: u8) -> tracing_subscriber::filter::LevelFilter {
     }
 }
 
+fn resolve_home(override_path: Option<std::path::PathBuf>) -> anyhow::Result<std::path::PathBuf> {
+    if let Some(p) = override_path {
+        return Ok(p);
+    }
+    directories::BaseDirs::new()
+        .map(|d| d.home_dir().join(".greentic"))
+        .ok_or_else(|| anyhow::anyhow!("no home directory"))
+}
+
 #[cfg(test)]
 mod tracing_tests {
     use super::default_directive;
@@ -185,13 +194,4 @@ mod tracing_tests {
         assert_eq!(default_directive(2), LevelFilter::DEBUG);
         assert_eq!(default_directive(9), LevelFilter::DEBUG);
     }
-}
-
-fn resolve_home(override_path: Option<std::path::PathBuf>) -> anyhow::Result<std::path::PathBuf> {
-    if let Some(p) = override_path {
-        return Ok(p);
-    }
-    directories::BaseDirs::new()
-        .map(|d| d.home_dir().join(".greentic"))
-        .ok_or_else(|| anyhow::anyhow!("no home directory"))
 }

@@ -133,7 +133,13 @@ fn new_wasm_component_compiles_to_wasi_p2() {
         "extension/Cargo.toml missing after scaffold"
     );
 
+    // `cargo component build`, not plain `cargo build`: the scaffold declares
+    // `mod bindings;` and cargo-component is what generates `src/bindings.rs`
+    // from the WIT world. It is also what `gtdx dev` shells out to, so this is
+    // the build path a user actually takes. Plain `cargo build` cannot succeed
+    // here and testing it proved nothing.
     let (ok, build_stdout, build_stderr) = run(Command::new("cargo")
+        .arg("component")
         .arg("build")
         .arg("--target")
         .arg("wasm32-wasip2")
@@ -141,6 +147,6 @@ fn new_wasm_component_compiles_to_wasi_p2() {
         .arg(&manifest));
     assert!(
         ok,
-        "cargo build --target wasm32-wasip2 failed\nstdout:\n{build_stdout}\nstderr:\n{build_stderr}"
+        "cargo component build --target wasm32-wasip2 failed\nstdout:\n{build_stdout}\nstderr:\n{build_stderr}"
     );
 }

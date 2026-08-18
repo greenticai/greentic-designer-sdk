@@ -290,3 +290,73 @@ fn scaffolds_llm_extension_as_design_extension_with_tool() {
         );
     }
 }
+
+/// Every scaffoldable kind must actually compile.
+///
+/// This is the test whose absence let `gtdx new` ship six of seven kinds that
+/// could not build. The suite asserted file-tree shape — files present, no
+/// `{{placeholder}}` left, describe kind strings correct — all of which passed
+/// while the generated worlds imported WIT packages that did not exist.
+///
+/// `#[ignore]` because it needs cargo-component, the `wasm32-wasip2` target,
+/// and network for dependency resolution. CI runs it via `cargo test -- --ignored`.
+#[test]
+#[ignore = "needs cargo-component + wasm32-wasip2 + network; run with `cargo test -- --ignored`"]
+fn every_kind_compiles() {
+    // (kind, crate subdirectory relative to the scaffold root)
+    const KINDS: &[(&str, &str)] = &[
+        ("design", "."),
+        ("bundle", "."),
+        ("deploy", "."),
+        ("provider", "."),
+        ("llm", "."),
+        ("mcp", "."),
+        ("wasm-component", "extension"),
+    ];
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+
+    for (kind, crate_dir) in KINDS {
+        let slug = kind.replace('-', "");
+        let proj = tmp.path().join(format!("t-{kind}"));
+        let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+            .arg("new")
+            .arg(format!("t-{kind}"))
+            .arg("--kind")
+            .arg(kind)
+            .arg("--id")
+            .arg(format!("greentic.t{slug}"))
+            .arg("--dir")
+            .arg(&proj)
+            .arg("--no-git")
+            .arg("--yes"));
+        assert!(
+            ok,
+            "gtdx new {kind} failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+
+        let manifest = proj.join(crate_dir).join("Cargo.toml");
+        let (built, _out, err) = run(Command::new("cargo")
+            .arg("component")
+            .arg("build")
+            .arg("--target")
+            .arg("wasm32-wasip2")
+            .arg("--manifest-path")
+            .arg(&manifest));
+        if !built {
+            let detail: Vec<&str> = err
+                .lines()
+                .filter(|l| l.trim_start().starts_with("error"))
+                .take(3)
+                .collect();
+            failures.push(format!("{kind}: {}", detail.join(" | ")));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "scaffolded kinds failed to compile:\n  {}",
+        failures.join("\n  ")
+    );
+}

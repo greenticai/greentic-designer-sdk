@@ -2,12 +2,13 @@
 
 use std::process::Command;
 
+/// Path to the `gtdx` binary under test.
+///
+/// `CARGO_BIN_EXE_*` resolves to the binary cargo built for *this* test run.
+/// The previous hardcoded `target/debug/gtdx` silently tested a stale binary
+/// under `--release` or a custom `CARGO_TARGET_DIR`.
 pub fn gtdx_bin() -> std::path::PathBuf {
-    let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop();
-    p.pop();
-    p.push("target/debug/gtdx");
-    p
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_gtdx"))
 }
 
 pub fn run(cmd: &mut Command) -> (bool, String, String) {
