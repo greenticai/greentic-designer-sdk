@@ -24,25 +24,25 @@ Prebuilt binaries are published to GitHub Releases for every tagged
 version (Linux / macOS / Windows, x86_64 + aarch64). Pick whichever
 matches your setup:
 
+There are two channels. **Stable** is cut from `main` and published to
+crates.io. **Research** is the active integration line: it ships tagged
+binaries to GitHub Releases but is deliberately never published to
+crates.io (`release.yml` skips any tag containing `research`).
+
 **Recommended — `cargo binstall` (no compile, fetches the release binary):**
 
 ```bash
-cargo binstall greentic-extension-sdk-cli \
-  --version 1.2.2-research \
-  --git https://github.com/greenticai/greentic-designer-sdk
+cargo binstall greentic-extension-sdk-cli
 ```
 
-`--git` is required because this crate is not published to crates.io —
-binstall reads the `[package.metadata.binstall]` section directly from
-the repo at the requested tag. Drop the `--version` flag once a stable
-release is cut.
+Resolves to the latest stable release from crates.io; binstall reads
+`[package.metadata.binstall]` to find the matching GitHub Release asset.
+Add `--version 1.2.0` to pin.
 
 **Build from source (slowest, needs the full toolchain):**
 
 ```bash
-cargo install --git https://github.com/greenticai/greentic-designer-sdk \
-  --tag v1.2.2-research \
-  greentic-extension-sdk-cli
+cargo install greentic-extension-sdk-cli --version 1.2.0
 ```
 
 **Manual download:**
@@ -50,10 +50,24 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 ```bash
 # macOS Apple Silicon example — swap target for your platform
 curl -L -o gtdx.tgz \
-  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.2-research/gtdx-v1.2.2-research-aarch64-apple-darwin.tgz
+  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.0/gtdx-v1.2.0-aarch64-apple-darwin.tgz
 tar -xzf gtdx.tgz
 chmod +x gtdx && mv gtdx ~/.cargo/bin/
 ```
+
+**Research line** — not on crates.io, so install it from the repo at a
+research tag:
+
+```bash
+cargo install --git https://github.com/greenticai/greentic-designer-sdk \
+  --tag v1.3.0-research.3 \
+  greentic-extension-sdk-cli
+```
+
+Older `-research` versions do sit on crates.io from before the skip rule
+landed. Avoid opting into pre-releases there: `1.2.3-research` is a
+pre-release of a *higher* patch, so it sorts above the 1.2.0 stable while
+containing older code.
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
