@@ -17,6 +17,16 @@ struct Cli {
     #[arg(long, env = "GREENTIC_HOME", global = true)]
     home: Option<std::path::PathBuf>,
 
+    /// Increase log verbosity: --verbose for info, repeat for debug.
+    /// Warnings are shown by default; `RUST_LOG` overrides both.
+    ///
+    /// Long-only deliberately: `gtdx new -v <VERSION>` already claims `-v`, so a
+    /// global short form fails clap's uniqueness assert at startup. Reclaiming
+    /// `-v` for verbosity means changing `new -v`, which is a user-facing break
+    /// and belongs with the wider flag-consistency cleanup, not here.
+    #[arg(long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -80,11 +90,11 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
+    // Parse before initialising logging so `-v` can set the level. `parse`
+    // itself never logs, and exits directly on a usage error.
     let cli = Cli::parse();
+    init_tracing(cli.verbose);
+
     let home = resolve_home(cli.home)?;
 
     match cli.command {
@@ -117,6 +127,63 @@ async fn main() -> anyhow::Result<()> {
             println!("gtdx {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+    }
+}
+
+/// Install the tracing subscriber with a WARN floor.
+///
+/// The previous form used a bare `EnvFilter::from_default_env()`, which with
+/// `RUST_LOG` unset — the normal case — resolves to ERROR only. That silenced
+/// every `tracing::warn!` in the workspace, including the two notices in
+/// `registry::verify` that exist specifically to tell the user a signature
+/// check was bypassed or that `--trust strict` is anchored only by a
+/// trust-on-first-use pin. Security notices a user never sees are not notices.
+///
+/// `RUST_LOG` still wins when set, so existing debugging workflows are intact.
+fn init_tracing(verbose: u8) {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(default_directive(verbose).into())
+                .from_env_lossy(),
+        )
+        .init();
+}
+
+/// Map `-v` occurrences to the log level used when `RUST_LOG` is unset.
+fn default_directive(verbose: u8) -> tracing_subscriber::filter::LevelFilter {
+    use tracing_subscriber::filter::LevelFilter;
+    match verbose {
+        0 => LevelFilter::WARN,
+        1 => LevelFilter::INFO,
+        _ => LevelFilter::DEBUG,
+    }
+}
+
+#[cfg(test)]
+mod tracing_tests {
+    use super::default_directive;
+    use tracing_subscriber::filter::LevelFilter;
+
+    /// The regression guard. A default of ERROR (what `from_default_env()`
+    /// resolves to on its own) silently drops every `tracing::warn!` in the
+    /// workspace — including `registry::verify`'s notices that a signature
+    /// check was bypassed, or that `--trust strict` is only TOFU-anchored.
+    #[test]
+    fn warnings_are_visible_without_rust_log() {
+        assert_eq!(default_directive(0), LevelFilter::WARN);
+        assert!(
+            default_directive(0) >= LevelFilter::WARN,
+            "default level must not sit below WARN"
+        );
+    }
+
+    #[test]
+    fn verbosity_flags_step_up_the_level() {
+        assert_eq!(default_directive(1), LevelFilter::INFO);
+        assert_eq!(default_directive(2), LevelFilter::DEBUG);
+        assert_eq!(default_directive(9), LevelFilter::DEBUG);
     }
 }
 
