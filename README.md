@@ -24,36 +24,56 @@ Prebuilt binaries are published to GitHub Releases for every tagged
 version (Linux / macOS / Windows, x86_64 + aarch64). Pick whichever
 matches your setup:
 
+There are two channels. **Stable** is cut from `main` and published to
+crates.io. **Research** is the active integration line: it ships tagged
+binaries to GitHub Releases but is deliberately never published to
+crates.io (`release.yml` skips any tag containing `research`).
+
 **Recommended — `cargo binstall` (no compile, fetches the release binary):**
 
 ```bash
 cargo binstall greentic-extension-sdk-cli
 ```
 
-This resolves to the latest stable release (currently 1.2.0) from
-crates.io; binstall reads `[package.metadata.binstall]` to find the
-matching GitHub Release asset. Pass `--version 1.2.0` to pin.
-
-Note that `-research` versions are also on crates.io. They are
-in-progress integration builds, and because they are pre-releases of a
-*higher* patch number they can sort above the current stable — do not
-opt into pre-releases here unless you specifically want that line.
+Resolves to the latest stable release from crates.io; binstall reads
+`[package.metadata.binstall]` to find the matching GitHub Release asset.
+Add `--version <x.y.z>` to pin.
 
 **Build from source (slowest, needs the full toolchain):**
 
 ```bash
-cargo install greentic-extension-sdk-cli --version 1.2.0
+cargo install greentic-extension-sdk-cli
 ```
 
 **Manual download:**
 
+Grab the asset for your platform from the
+[latest release](https://github.com/greenticai/greentic-designer-sdk/releases/latest)
+— the tag is embedded in the filename:
+
 ```bash
-# macOS Apple Silicon example — swap target for your platform
+# macOS Apple Silicon example — swap TAG and target for your platform
+TAG=v1.2.0
 curl -L -o gtdx.tgz \
-  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.0/gtdx-v1.2.0-aarch64-apple-darwin.tgz
+  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-aarch64-apple-darwin.tgz"
 tar -xzf gtdx.tgz
 chmod +x gtdx && mv gtdx ~/.cargo/bin/
 ```
+
+**Research line** — not on crates.io, so install it from the repo at a
+research tag. Pick the newest `v*-research*` tag from
+[Releases](https://github.com/greenticai/greentic-designer-sdk/releases):
+
+```bash
+cargo install --git https://github.com/greenticai/greentic-designer-sdk \
+  --tag <v-research-tag> \
+  greentic-extension-sdk-cli
+```
+
+Older `-research` versions do sit on crates.io from before the skip rule
+landed. Avoid opting into pre-releases there: `1.2.3-research` is a
+pre-release of a *higher* patch, so it sorts above the 1.2.0 stable while
+containing older code.
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
