@@ -67,6 +67,13 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
             });
         }
         let artifact = self.registry.fetch(name, version).await?;
+        // Every check below this line is self-referential to the served
+        // describe: integrity binds the archive to it, authenticity binds a
+        // signature to it. None of them notice if the registry answered with a
+        // *different* extension than the one requested. Bind the served
+        // identity to the request first, and do it before `verify_authenticity`
+        // so a substituted publisher key is never TOFU-pinned.
+        assert_served_identity(name, version, &artifact)?;
         verify_integrity(&artifact, opts.trust_policy)?;
         verify_authenticity(self.storage.root(), &artifact.describe, opts.trust_policy)?;
         self.install_artifact(&artifact, opts)
@@ -164,4 +171,30 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
     ) -> Result<(), RegistryError> {
         self.storage.remove_extension(kind, name, version)
     }
+}
+
+/// Reject an artifact whose identity does not match what the caller asked for.
+///
+/// `fetch` implementations build `ExtensionArtifact::{name, version}` from the
+/// *served* `describe.metadata`, discarding the requested coordinates. A
+/// registry can therefore answer a request for `a@1.0.0` with `b@9.9.9`: every
+/// downstream check still passes, because they all validate the served
+/// describe against itself. The install would land under `b`, pin `b`'s
+/// publisher key, and — in `update::upgrade` — delete `a` on the way out.
+fn assert_served_identity(
+    requested_name: &str,
+    requested_version: &str,
+    artifact: &ExtensionArtifact,
+) -> Result<(), RegistryError> {
+    let served_name = artifact.describe.metadata.id.as_str();
+    let served_version = artifact.describe.metadata.version.as_str();
+    if served_name == requested_name && served_version == requested_version {
+        return Ok(());
+    }
+    Err(RegistryError::IdentityMismatch {
+        requested_name: requested_name.to_string(),
+        requested_version: requested_version.to_string(),
+        served_name: served_name.to_string(),
+        served_version: served_version.to_string(),
+    })
 }

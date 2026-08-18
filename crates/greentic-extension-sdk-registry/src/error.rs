@@ -19,6 +19,18 @@ pub enum RegistryError {
     DescribeMissing,
 
     #[error(
+        "registry served {served_name}@{served_version} for a request for \
+         {requested_name}@{requested_version}; refusing install — the registry may be \
+         substituting a different extension for the one you asked for"
+    )]
+    IdentityMismatch {
+        requested_name: String,
+        requested_version: String,
+        served_name: String,
+        served_version: String,
+    },
+
+    #[error(
         "artifact sha256 mismatch: registry advertised {expected}, downloaded bytes hash to {computed}"
     )]
     ArtifactHashMismatch { expected: String, computed: String },
