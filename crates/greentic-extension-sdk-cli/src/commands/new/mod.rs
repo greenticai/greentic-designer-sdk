@@ -116,7 +116,7 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     run_preflight(&target, resolved.force)?;
     prepare_target(&target, resolved.force)?;
 
-    let ctx = build_context(&resolved);
+    let ctx = build_context(&resolved)?;
 
     let files_written = if let Some(spec) = resolved.from_openapi.as_deref() {
         scaffold_from_openapi(&ctx, spec, &target)?
@@ -207,7 +207,7 @@ fn prepare_target(target: &Path, force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_context(resolved: &Resolved) -> Context {
+fn build_context(resolved: &Resolved) -> anyhow::Result<Context> {
     let mut ctx = Context::new();
     ctx.set("name", resolved.name.clone());
     let name_cargo = resolved.name.replace('.', "-");
@@ -247,6 +247,14 @@ fn build_context(resolved: &Resolved) -> Context {
     ctx.set("author", &resolved.author);
     ctx.set("license", &resolved.license);
     ctx.set("contract_version", CONTRACT_VERSION);
+    // Per-package WIT versions, read from the embedded contract files.
+    //
+    // `contract_version` names the contract *generation* and is still used for
+    // `.gtdx-contract.lock` and prose. It must not be stamped onto individual
+    // package imports: within generation 0.2.0 the packages carry different
+    // versions, so a single value produced worlds importing packages that do
+    // not exist. Sourcing each from its own file makes drift impossible.
+    set_wit_version_keys(&mut ctx)?;
     // `sdk_version` is the gtdx CLI / SDK crate version (the toolchain that
     // generated this scaffold). v2 describe.json templates use it for
     // `engine.*` + `compat.*` so scaffolds pin to the same SDK line that
@@ -267,8 +275,43 @@ fn build_context(resolved: &Resolved) -> Context {
     // dw-canvas + dw-composers convention we shipped in #7 / #21).
     let runtime_ref_key = id.split('.').next_back().unwrap_or(id).to_string();
     ctx.set("runtime_ref_key", &runtime_ref_key);
-    ctx
+    Ok(ctx)
 }
+
+/// Template placeholder → vendored WIT package whose `@version` fills it.
+///
+/// Scaffold worlds must pin each import to the version that package actually
+/// declares. Enforced by `tests/contract_version_consistency.rs`, which fails
+/// on any literal version or mismatched placeholder in a `world.wit.tmpl`.
+/// Populate `ctx` with every `v_*` WIT version placeholder.
+///
+/// Shared with `gtdx openapi`, which renders the same worlds — keeping one
+/// implementation means the two cannot disagree about which version a package
+/// is pinned to.
+pub(crate) fn set_wit_version_keys(ctx: &mut Context) -> anyhow::Result<()> {
+    for (key, package) in WIT_VERSION_KEYS {
+        // No fallback: a missing package version is a packaging fault, and
+        // silently substituting the generation is exactly what broke scaffolds
+        // before. Fail where it is diagnosable.
+        let version = embedded::package_version_for(package).ok_or_else(|| {
+            anyhow::anyhow!(
+                "embedded contract is missing {package}.wit or its @version; \
+                 cannot pin scaffold imports (reinstall gtdx)"
+            )
+        })?;
+        ctx.set(key, version);
+    }
+    Ok(())
+}
+
+const WIT_VERSION_KEYS: &[(&str, &str)] = &[
+    ("v_base", "extension-base"),
+    ("v_host", "extension-host"),
+    ("v_design", "extension-design"),
+    ("v_bundle", "extension-bundle"),
+    ("v_deploy", "extension-deploy"),
+    ("v_provider", "extension-provider"),
+];
 
 fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::Result<usize> {
     use crate::scaffold::openapi;
@@ -329,12 +372,26 @@ fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<
 /// into `target`. `pub(crate)` so `commands::openapi::run` can reuse it to
 /// scaffold the WIT side of a generated `DesignExtension` connector (the same
 /// contract files a `gtdx new --kind design` scaffold gets).
+/// Directory holding the crate whose `wit/` the vendored deps must land in.
+///
+/// Most kinds put the component crate at the scaffold root. `wasm-component`
+/// splits it into `extension/` and `runtime/`, and its manifest points at
+/// `extension/wit` — so vendoring into `<target>/wit/deps` left the crate with
+/// no greentic packages at all and no amount of version-pinning could fix it.
+fn wit_root_for_kind(kind: &str) -> &'static str {
+    match kind {
+        "wasm-component" => "extension",
+        _ => ".",
+    }
+}
+
 pub(crate) fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<usize> {
     let mut files_written = 0usize;
     let mut lock_files = BTreeMap::new();
+    let wit_root = target.join(wit_root_for_kind(kind));
     for file in embedded::files_for_kind(kind) {
         let pkg_dir = wit_package_subdir_for(file.name);
-        let dst = target
+        let dst = wit_root
             .join("wit/deps/greentic")
             .join(pkg_dir)
             .join("world.wit");
