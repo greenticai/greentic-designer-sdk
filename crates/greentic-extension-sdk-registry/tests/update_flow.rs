@@ -103,3 +103,58 @@ async fn upgrade_installs_target_and_removes_old() {
             .exists()
     );
 }
+
+/// `upgrade` had no ordering guard: a lower target installed and then deleted
+/// the newer install on the way out.
+#[tokio::test]
+async fn upgrade_refuses_a_downgrade() {
+    use greentic_extension_sdk_contract::ExtensionKind;
+    use greentic_extension_sdk_registry::lifecycle::InstallOptions;
+    use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
+    use greentic_extension_sdk_registry::storage::Storage;
+    use greentic_extension_sdk_registry::update::upgrade;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let storage = Storage::new(tmp.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp.path());
+
+    let result = upgrade(
+        &storage,
+        &reg,
+        ExtensionKind::Design,
+        "greentic.foo",
+        "2.0.0",
+        "1.0.0",
+        InstallOptions::default(),
+    )
+    .await;
+    assert!(result.is_err(), "a downgrade was allowed");
+}
+
+/// `1.0.0+build.1` and `1.0.0` are the same version. The old string compare
+/// treated them as different, so `upgrade` installed over itself and then
+/// removed what it had just written.
+#[tokio::test]
+async fn upgrade_treats_build_metadata_as_the_same_version() {
+    use greentic_extension_sdk_contract::ExtensionKind;
+    use greentic_extension_sdk_registry::lifecycle::InstallOptions;
+    use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
+    use greentic_extension_sdk_registry::storage::Storage;
+    use greentic_extension_sdk_registry::update::upgrade;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let storage = Storage::new(tmp.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp.path());
+
+    upgrade(
+        &storage,
+        &reg,
+        ExtensionKind::Design,
+        "greentic.foo",
+        "1.0.0+build.1",
+        "1.0.0",
+        InstallOptions::default(),
+    )
+    .await
+    .expect("same version must be a no-op, not an install-then-delete");
+}

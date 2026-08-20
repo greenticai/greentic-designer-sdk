@@ -26,6 +26,26 @@ impl MigrationReport {
 /// suitable for `serde_json::from_value::<DescribeJson>()`.
 ///
 /// Returns the converted value + a non-fatal report. Hard errors return `Err`.
+/// Top-level v1 keys the migration copies or deliberately transforms.
+///
+/// Anything absent from this list is reported via `MigrationReport::dropped`
+/// rather than vanishing: silent loss used to be the default and explicit
+/// reporting the exception, which is how `execution` disappeared unnoticed.
+const HANDLED_TOP_LEVEL_KEYS: &[&str] = &[
+    "$schema",
+    "apiVersion",
+    "kind",
+    "metadata",
+    "engine",
+    "capabilities",
+    "execution",
+    "localization",
+    // transformed rather than copied
+    "runtime",
+    "contributions",
+    "signature",
+];
+
 pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), ContractError> {
     let mut report = MigrationReport::default();
     let obj = raw
@@ -49,9 +69,27 @@ pub fn migrate_v0_4_x_value(raw: &Value) -> Result<(Value, MigrationReport), Con
         Value::String("https://store.greentic.cloud/schemas/describe-v2.json".into()),
     );
 
-    for key in ["kind", "metadata", "engine", "capabilities"] {
+    // Keys carried straight through. `execution` and `localization` were
+    // missing here: both are declared v1 *and* v2 properties, so a v1
+    // BundleExtension migrated into a document that passed the v2 schema and
+    // deserialized cleanly while having silently lost its dispatch
+    // configuration — surfacing at runtime, with `dropped_keys` empty.
+    for key in [
+        "kind",
+        "metadata",
+        "engine",
+        "capabilities",
+        "execution",
+        "localization",
+    ] {
         if let Some(v) = obj.get(key).cloned() {
             out.insert(key.into(), v);
+        }
+    }
+
+    for key in obj.keys() {
+        if !HANDLED_TOP_LEVEL_KEYS.contains(&key.as_str()) {
+            report.dropped(key.clone());
         }
     }
 

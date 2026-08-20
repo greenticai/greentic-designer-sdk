@@ -9,13 +9,18 @@ use std::time::Duration;
 
 use crate::StateError;
 
-const MAX_LOCK_RETRIES: u32 = 3;
-const LOCK_BACKOFF_MS: u64 = 50;
+/// Attempts before giving up. With the exponential backoff below this spans
+/// roughly 5 seconds, up from the previous 3 × 50 ms — 150 ms was short enough
+/// that two concurrent `gtdx enable` runs, or one slow NFS/antivirus stall,
+/// became a user-visible failure.
+const MAX_LOCK_RETRIES: u32 = 8;
+const LOCK_BACKOFF_MS: u64 = 25;
 
 /// Run `f` while holding the exclusive advisory lock on `target`'s sibling
 /// `.lock` file. The lock gates concurrent writers (and read-modify-write
 /// cycles) so they serialize. Acquisition retries up to `MAX_LOCK_RETRIES`
-/// times with `LOCK_BACKOFF_MS` delay, then returns `StateError::LockContention`.
+/// times with exponential backoff from `LOCK_BACKOFF_MS`, then returns
+/// `StateError::LockContention`.
 ///
 /// The `.lock` file is created once and **left in place**. Removing it on
 /// release is a classic flock anti-pattern: another process can be holding a
@@ -91,11 +96,16 @@ pub(crate) fn write_atomic(target: &Path, content: &[u8]) -> Result<(), StateErr
 }
 
 fn acquire_lock(file: &File) -> Result<(), StateError> {
-    for _ in 0..MAX_LOCK_RETRIES {
+    for attempt in 0..MAX_LOCK_RETRIES {
         if file.try_lock_exclusive().is_ok() {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(LOCK_BACKOFF_MS));
+        // No sleep after the final attempt — the old loop always slept once
+        // more than it needed to before reporting failure.
+        if attempt + 1 == MAX_LOCK_RETRIES {
+            break;
+        }
+        thread::sleep(Duration::from_millis(LOCK_BACKOFF_MS << attempt));
     }
     Err(StateError::LockContention(MAX_LOCK_RETRIES))
 }

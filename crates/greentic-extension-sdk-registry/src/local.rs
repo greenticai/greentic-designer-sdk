@@ -23,9 +23,19 @@ impl LocalFilesystemRegistry {
         }
     }
 
+    /// Split `<name>-<version>.gtxpack`.
+    ///
+    /// `rfind('-')` split inside a prerelease: `foo-1.2.4-research` parsed as
+    /// version `research`, which no semver parser accepts — so `list_versions`
+    /// returned garbage and every prerelease install reported "no parsable
+    /// versions from registry". This repo publishes `-research` builds, so
+    /// that was the common case, not an edge case. Take the first `-` whose
+    /// remainder is a full semver instead; a name segment never is.
     fn parse_pack_filename(filename: &str) -> Option<(String, String)> {
         let stem = filename.strip_suffix(".gtxpack")?;
-        let idx = stem.rfind('-')?;
+        let (idx, _) = stem
+            .match_indices('-')
+            .find(|(i, _)| semver::Version::parse(&stem[i + 1..]).is_ok())?;
         let (name, version) = stem.split_at(idx);
         let version = version.strip_prefix('-')?.to_string();
         if !name.is_empty() && !version.is_empty() {

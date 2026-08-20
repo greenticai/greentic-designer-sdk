@@ -130,3 +130,53 @@ fn concurrent_writers_do_not_corrupt_file() {
     // File must parse cleanly after the dust settles.
     let _final_state = ExtensionState::load(tmp.path()).unwrap();
 }
+
+/// A newer client's fields must survive an older client's read-modify-write.
+///
+/// `update` parses, mutates, and re-serializes. Anything serde did not
+/// recognise used to vanish — while `schema` was preserved verbatim, so the
+/// file kept claiming a version it no longer conformed to.
+#[test]
+fn update_preserves_fields_written_by_a_newer_client() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("extensions-state.json");
+    std::fs::write(
+        &path,
+        r#"{
+  "schema": "1.2",
+  "default": {
+    "enabled": { "greentic.a@1.0.0": false },
+    "policies": {},
+    "pinned": ["greentic.b"]
+  },
+  "tenants": {},
+  "futureField": { "x": 1 }
+}"#,
+    )
+    .unwrap();
+
+    // Exercise the real read-modify-write path used by `gtdx enable`.
+    greentic_extension_sdk_state::ExtensionState::update(tmp.path(), |s| {
+        s.set_enabled("greentic.c", "2.0.0", true);
+    })
+    .unwrap();
+
+    let raw: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+    assert_eq!(
+        raw.get("futureField"),
+        Some(&serde_json::json!({ "x": 1 })),
+        "a top-level field from a newer client was dropped"
+    );
+    assert_eq!(
+        raw.pointer("/default/pinned"),
+        Some(&serde_json::json!(["greentic.b"])),
+        "a scope-level field from a newer client was dropped"
+    );
+    // And the edit still landed.
+    assert_eq!(
+        raw.pointer("/default/enabled/greentic.c@2.0.0"),
+        Some(&serde_json::json!(true))
+    );
+}
