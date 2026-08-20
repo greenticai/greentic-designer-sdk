@@ -209,3 +209,61 @@ fn scaffolded_describe_json_deserializes_into_v2_contract_types() {
         );
     }
 }
+
+/// A freshly scaffolded project must pass the CLI's own gates.
+///
+/// It did not: five templates emitted the `engine` block their own
+/// `E_ENGINE_DEPRECATED` rule forbids, and the `llm` describe carried a `tools[].id`
+/// the contract does not define plus an `export` in the wrong form. `gtdx publish`
+/// runs validation, so this failed later regardless — and the generated
+/// `AGENTS.md` tells authors to run these commands before every commit.
+///
+/// Fast (no cargo build), so it runs in the default suite.
+#[test]
+fn every_kind_passes_validate_and_lint() {
+    const KINDS: &[&str] = &[
+        "design",
+        "bundle",
+        "deploy",
+        "provider",
+        "llm",
+        "mcp",
+        "wasm-component",
+    ];
+    let tmp = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+
+    for kind in KINDS {
+        let slug = kind.replace('-', "");
+        let proj = tmp.path().join(format!("v-{kind}"));
+        let (ok, _o, e) = run(Command::new(gtdx_bin())
+            .arg("new")
+            .arg(format!("v-{kind}"))
+            .arg("--kind")
+            .arg(kind)
+            .arg("--id")
+            .arg(format!("greentic.v{slug}"))
+            .arg("--dir")
+            .arg(&proj)
+            .arg("--no-git")
+            .arg("--yes"));
+        assert!(ok, "gtdx new {kind} failed: {e}");
+
+        let (valid, _o, verr) = run(Command::new(gtdx_bin()).arg("validate").arg(&proj));
+        if !valid {
+            failures.push(format!("{kind}: validate — {}", verr.trim()));
+        }
+        let (linted, lout, lerr) =
+            run(Command::new(gtdx_bin()).arg("lint").arg("--dir").arg(&proj));
+        if !linted {
+            let detail = if lerr.trim().is_empty() { lout } else { lerr };
+            failures.push(format!("{kind}: lint — {}", detail.trim()));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "scaffolded projects fail the CLI's own gates:\n  {}",
+        failures.join("\n  ")
+    );
+}
