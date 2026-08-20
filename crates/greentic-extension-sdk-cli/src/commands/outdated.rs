@@ -40,18 +40,11 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     // config.toml), synthesise Unknown rows rather than returning an error so
     // the command always exits 0.
     let updates: Vec<ExtensionUpdate> = {
-        let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
-        if let Some(entry) = cfg.registries.iter().find(|r| r.name == reg_name) {
-            let token = entry
-                .token_env
-                .as_deref()
-                .and_then(|e| std::env::var(e).ok());
-            let reg = greentic_extension_sdk_registry::store::GreenticStoreRegistry::new(
-                &entry.name,
-                &entry.url,
-                token,
-            )
-            .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
+        let reg_name = args
+            .registry
+            .clone()
+            .unwrap_or_else(|| cfg.default.registry.clone());
+        if let Ok(reg) = super::resolve_store_registry(args.registry.as_deref(), home) {
             check_updates(&reg, &triples, &constraints).await
         } else {
             // No matching registry configured — report every extension as Unknown.

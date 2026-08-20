@@ -4,7 +4,6 @@ use clap::Args as ClapArgs;
 use greentic_extension_sdk_registry::lifecycle::{InstallOptions, Installer, TrustPolicy};
 use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
 use greentic_extension_sdk_registry::storage::Storage;
-use greentic_extension_sdk_registry::store::GreenticStoreRegistry;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -37,7 +36,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
             .version
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("--version required for registry install"))?;
-        install_from_registry(&cfg, &args, &storage, version, trust_policy).await
+        install_from_registry(home, &args, &storage, version, trust_policy).await
     }
 }
 
@@ -77,25 +76,18 @@ async fn install_from_local_file(
 }
 
 async fn install_from_registry(
-    cfg: &greentic_extension_sdk_registry::config::GtdxConfig,
+    home: &Path,
     args: &Args,
     storage: &Storage,
     version: &str,
     trust: TrustPolicy,
 ) -> anyhow::Result<()> {
-    let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
-    let entry = cfg
-        .registries
-        .iter()
-        .find(|r| r.name == reg_name)
-        .ok_or_else(|| anyhow::anyhow!("no such registry: {reg_name}"))?;
-
-    let token = entry
-        .token_env
-        .as_deref()
-        .and_then(|e| std::env::var(e).ok());
-    let reg = GreenticStoreRegistry::new(&entry.name, &entry.url, token)
-        .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
+    // Shared resolver: reads `token_env` *and* `~/.greentic/credentials.toml`,
+    // and falls back to the built-in greentic-store URL. The inline lookup this
+    // replaces did neither — so `gtdx login` did nothing for installs, and the
+    // default `greentic-store` failed with "no such registry" on a fresh home
+    // because the shipped config names it without adding an entry.
+    let reg = super::resolve_store_registry(args.registry.as_deref(), home)?;
     let installer = Installer::new(storage.clone_shallow(), &reg);
     installer
         .install(

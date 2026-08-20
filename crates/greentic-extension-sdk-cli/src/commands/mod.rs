@@ -138,3 +138,75 @@ pub fn scan_installed(storage: &Storage, kinds: &[ExtensionKind]) -> Result<Vec<
     }
     Ok(out)
 }
+
+/// Split an installed extension directory name into `(id, version)`.
+///
+/// A naive `rfind('-')` splits inside a prerelease: `my-ext-1.0.0-rc1` parses
+/// as version `rc1` and then matches nothing, so `gtdx uninstall` reported
+/// "nothing to remove" for anything with a prerelease version. Instead take
+/// the first `-` whose remainder parses as a full semver — an id segment never
+/// does.
+///
+/// `install::parse_pack_name` already got this right for `.gtxpack` filenames;
+/// this is the same rule, shared so the two cannot diverge again.
+pub fn split_name_version(dir_name: &str) -> Option<(&str, &str)> {
+    for (idx, _) in dir_name.match_indices('-') {
+        let candidate = &dir_name[idx + 1..];
+        if semver::Version::parse(candidate).is_ok() {
+            return Some((&dir_name[..idx], candidate));
+        }
+    }
+    None
+}
+
+/// Directory names for every installed extension kind, in display order.
+pub fn all_kind_dirs() -> [&'static str; 5] {
+    [
+        ExtensionKind::Design.dir_name(),
+        ExtensionKind::Bundle.dir_name(),
+        ExtensionKind::Deploy.dir_name(),
+        ExtensionKind::Provider.dir_name(),
+        ExtensionKind::WasixMcpRouter.dir_name(),
+    ]
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::split_name_version;
+
+    #[test]
+    fn splits_a_plain_version() {
+        assert_eq!(
+            split_name_version("greentic.foo-1.0.0"),
+            Some(("greentic.foo", "1.0.0"))
+        );
+    }
+
+    /// The regression: `rfind('-')` made this `("my-ext-1.0.0", "rc1")`, so
+    /// uninstall never matched a prerelease install.
+    #[test]
+    fn splits_a_prerelease_version() {
+        assert_eq!(
+            split_name_version("my-ext-1.0.0-rc1"),
+            Some(("my-ext", "1.0.0-rc1"))
+        );
+        assert_eq!(
+            split_name_version("greentic.x-1.2.4-research.2"),
+            Some(("greentic.x", "1.2.4-research.2"))
+        );
+    }
+
+    #[test]
+    fn handles_hyphens_in_the_name() {
+        assert_eq!(
+            split_name_version("my-long-name-0.1.0"),
+            Some(("my-long-name", "0.1.0"))
+        );
+    }
+
+    #[test]
+    fn rejects_a_directory_with_no_version() {
+        assert_eq!(split_name_version("no-version-here"), None);
+        assert_eq!(split_name_version("plain"), None);
+    }
+}

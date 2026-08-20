@@ -46,7 +46,7 @@ pub(crate) fn parse_target(target: &str, home: &Path) -> Result<(String, String)
 pub(crate) fn installed_versions(home: &Path, id: &str) -> Result<Vec<String>> {
     let prefix = format!("{id}-");
     let mut out = vec![];
-    for kind in ["design", "deploy", "bundle", "provider"] {
+    for kind in super::all_kind_dirs() {
         let dir = home.join("extensions").join(kind);
         if !dir.exists() {
             continue;
@@ -73,7 +73,7 @@ pub(crate) fn installed_versions(home: &Path, id: &str) -> Result<Vec<String>> {
 
 pub(crate) fn verify_installed(home: &Path, id: &str, version: &str) -> Result<()> {
     let suffix = format!("{id}-{version}");
-    for kind in ["design", "deploy", "bundle", "provider"] {
+    for kind in super::all_kind_dirs() {
         if home.join("extensions").join(kind).join(&suffix).exists() {
             return Ok(());
         }

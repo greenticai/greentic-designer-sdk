@@ -29,7 +29,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         anyhow::bail!("specify an extension id or pass --all");
     }
 
-    let cfg = super::load_config(home)?;
+    let _cfg = super::load_config(home)?;
     let storage = Storage::new(home);
     let installed = scan_installed(&storage, &ALL_KINDS)?;
 
@@ -38,22 +38,9 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
-    let entry = cfg
-        .registries
-        .iter()
-        .find(|r| r.name == reg_name)
-        .ok_or_else(|| anyhow::anyhow!("no such registry: {reg_name}"))?;
-    let token = entry
-        .token_env
-        .as_deref()
-        .and_then(|e| std::env::var(e).ok());
-    let reg = greentic_extension_sdk_registry::store::GreenticStoreRegistry::new(
-        &entry.name,
-        &entry.url,
-        token,
-    )
-    .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
+    // Shared resolver: honours `gtdx login`'s stored credentials and the
+    // built-in greentic-store URL, neither of which the inline lookup did.
+    let reg = super::resolve_store_registry(args.registry.as_deref(), home)?;
 
     let state = ExtensionState::load(home).unwrap_or_default();
     let mut constraints: HashMap<String, String> = HashMap::new();
@@ -74,6 +61,8 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     };
 
     let mut did_any = false;
+    let mut attempted = 0usize;
+    let mut failed = 0usize;
     for u in &updates {
         if let Some(want) = args.target.as_deref()
             && want != u.id
@@ -84,6 +73,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
             continue;
         };
         did_any = true;
+        attempted += 1;
         let target = target.clone();
         match upgrade(&storage, &reg, u.kind, &u.id, &u.current, &target, opts).await {
             Ok(()) => {
@@ -97,6 +87,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
                 .ok();
             }
             Err(e) => {
+                failed += 1;
                 eprintln!("failed to update {}: {e}", u.id);
                 let id = u.id.clone();
                 let reason = e.to_string();
@@ -107,6 +98,14 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
 
     if !did_any {
         println!("Nothing to update: all selected extensions are up to date.");
+        return Ok(());
+    }
+    println!("{} updated, {failed} failed", attempted - failed);
+    if failed > 0 {
+        // Every failure was printed above but the command still returned
+        // Ok(()), so `gtdx update --all -y` could fail on every extension and
+        // leave a CI pipeline green.
+        anyhow::bail!("{failed} of {attempted} update(s) failed; see the errors above");
     }
     Ok(())
 }
