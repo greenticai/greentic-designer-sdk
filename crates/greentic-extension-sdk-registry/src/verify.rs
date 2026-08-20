@@ -82,16 +82,44 @@ pub(crate) fn verify_authenticity(
 }
 
 /// Read the raw `manifest.json` bytes from a `.gtxpack` zip, if present.
-fn read_manifest_bytes(zip_bytes: &[u8]) -> Result<Option<Vec<u8>>, RegistryError> {
+/// Read a zip entry with a hard ceiling on decompressed bytes.
+///
+/// `manifest.json` and `describe.json` are read *before*
+/// `verify_archive_against_manifest`, and `describe.json` is excluded from the
+/// ledger entirely — so neither was covered by the archive's zip-bomb caps.
+/// A ~1 MB pack whose manifest inflates to tens of GB could OOM the client
+/// before the consent prompt was ever shown.
+fn read_entry_capped<R: std::io::Read>(
+    entry: &mut R,
+    name: &str,
+) -> Result<Vec<u8>, RegistryError> {
     use std::io::Read as _;
+    let cap = greentic_extension_sdk_contract::MAX_ENTRY_BYTES;
+    let mut buf = Vec::new();
+    // `take(cap + 1)` so an over-cap entry is detectable rather than silently
+    // truncated to something that might still parse.
+    entry
+        .by_ref()
+        .take(cap + 1)
+        .read_to_end(&mut buf)
+        .map_err(RegistryError::from)?;
+    if buf.len() as u64 > cap {
+        return Err(RegistryError::ArtifactTooLarge {
+            limit: usize::try_from(cap).unwrap_or(usize::MAX),
+        });
+    }
+    let _ = name;
+    Ok(buf)
+}
+
+fn read_manifest_bytes(zip_bytes: &[u8]) -> Result<Option<Vec<u8>>, RegistryError> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
         .map_err(|e| RegistryError::Storage(format!("zip open: {e}")))?;
     match archive.by_name(greentic_extension_sdk_contract::MANIFEST_ENTRY_NAME) {
-        Ok(mut entry) => {
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf)?;
-            Ok(Some(buf))
-        }
+        Ok(mut entry) => Ok(Some(read_entry_capped(
+            &mut entry,
+            greentic_extension_sdk_contract::MANIFEST_ENTRY_NAME,
+        )?)),
         Err(_) => Ok(None),
     }
 }
@@ -103,14 +131,15 @@ fn read_manifest_bytes(zip_bytes: &[u8]) -> Result<Option<Vec<u8>>, RegistryErro
 fn read_archive_describe(
     zip_bytes: &[u8],
 ) -> Result<greentic_extension_sdk_contract::DescribeJson, RegistryError> {
-    use std::io::Read as _;
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
         .map_err(|e| RegistryError::Storage(format!("zip open: {e}")))?;
     let mut entry = archive
         .by_name(greentic_extension_sdk_contract::DESCRIBE_ENTRY_NAME)
         .map_err(|_| RegistryError::DescribeMissing)?;
-    let mut buf = Vec::new();
-    entry.read_to_end(&mut buf)?;
+    let buf = read_entry_capped(
+        &mut entry,
+        greentic_extension_sdk_contract::DESCRIBE_ENTRY_NAME,
+    )?;
     let value: serde_json::Value = serde_json::from_slice(&buf)?;
     greentic_extension_sdk_contract::schema::validate_describe_json(&value)?;
     Ok(serde_json::from_value(value)?)

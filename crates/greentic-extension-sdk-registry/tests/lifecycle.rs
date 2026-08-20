@@ -343,3 +343,75 @@ async fn install_accepts_a_pack_whose_identity_matches_the_request() {
         "the guard rejected a legitimate install"
     );
 }
+
+/// Declining the permission prompt must not leave a publisher key pinned.
+///
+/// `verify_authenticity` TOFU-pins as a side effect, and it used to run before
+/// the consent gate. A user shown "requests Secrets: …" who answered no had
+/// still permanently trusted that publisher for that id — and there is no
+/// command to undo a pin.
+#[test]
+fn declining_consent_does_not_pin_the_publisher_key() {
+    let tmp_home = TempDir::new().unwrap();
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp_home.path());
+    let installer = Installer::new(storage, &reg);
+
+    let artifact = design_artifact("greentic.declined", "0.1.0");
+    let result = installer.install_artifact_with_confirm(
+        &artifact,
+        InstallOptions {
+            trust_policy: TrustPolicy::Loose,
+            accept_permissions: false,
+            force: false,
+        },
+        |_, _| false,
+    );
+
+    assert!(
+        matches!(
+            result,
+            Err(greentic_extension_sdk_registry::error::RegistryError::PermissionDenied { .. })
+        ),
+        "expected PermissionDenied, got {result:?}"
+    );
+    assert!(
+        !tmp_home.path().join("trust/publishers.json").exists(),
+        "a publisher key was pinned even though consent was declined"
+    );
+}
+
+/// Integrity is enforced by the public entry point itself, not only by
+/// `install`. `ExtensionArtifact` is public, so a host can build one directly.
+#[test]
+fn install_artifact_rejects_a_tampered_archive() {
+    let tmp_home = TempDir::new().unwrap();
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp_home.path());
+    let installer = Installer::new(storage, &reg);
+
+    let mut artifact = design_artifact("greentic.tampered", "0.1.0");
+    // Corrupt the archive bytes after the describe was built from them.
+    let len = artifact.bytes.len();
+    artifact.bytes[len / 2] ^= 0xff;
+
+    let result = installer.install_artifact_with_confirm(
+        &artifact,
+        InstallOptions {
+            trust_policy: TrustPolicy::Loose,
+            accept_permissions: true,
+            force: false,
+        },
+        |_, _| true,
+    );
+    assert!(
+        result.is_err(),
+        "a tampered archive was installed through the public entry point"
+    );
+    assert!(
+        !tmp_home
+            .path()
+            .join("extensions/design/greentic.tampered-0.1.0")
+            .exists()
+    );
+}

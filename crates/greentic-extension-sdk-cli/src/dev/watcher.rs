@@ -65,8 +65,19 @@ pub fn spawn_watcher(project_dir: &Path, debounce: Duration) -> anyhow::Result<W
         .canonicalize()
         .unwrap_or_else(|_| project_dir.to_path_buf());
     let debouncer = new_debouncer(debounce, None, move |res: DebounceEventResult| {
-        let Ok(events) = res else {
-            return;
+        let events = match res {
+            Ok(events) => events,
+            Err(e) => {
+                // Dropped silently before. The usual real-world trigger is
+                // exhausting `fs.inotify.max_user_watches`: rebuilds simply
+                // stop while the loop keeps looking perfectly healthy.
+                tracing::warn!(
+                    ?e,
+                    "file watcher error; changes may be missed — check fs.inotify.max_user_watches"
+                );
+                eprintln!("warning: file watcher error; changes may be missed ({e:?})");
+                return;
+            }
         };
         let mut interesting = Vec::new();
         for ev in events {

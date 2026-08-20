@@ -77,10 +77,16 @@ pub async fn run_once(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result<
     out.emit(&DevEvent::BuildStart {
         profile: cfg.profile.as_str().into(),
     });
+    // Time the call here: `run_build` measures the elapsed time and then
+    // discards it when it bails, so every failure reported "✗ build failed
+    // (0.0s)" no matter how long it actually took.
+    let build_started = std::time::Instant::now();
     let build = match run_build(&cfg.project_dir, cfg.profile) {
         Ok(b) => b,
         Err(e) => {
-            out.emit(&DevEvent::BuildFailed { duration_ms: 0 });
+            out.emit(&DevEvent::BuildFailed {
+                duration_ms: u64::try_from(build_started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            });
             return Err(e);
         }
     };
@@ -138,8 +144,17 @@ pub async fn run_watch(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result
     let cancel = CancellationToken::new();
     let cancel_signal = cancel.clone();
     tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
-        cancel_signal.cancel();
+        // `let _ =` then cancelling unconditionally meant a failed handler
+        // registration (restricted containers, exhausted slots) cancelled
+        // immediately — `gtdx dev` exited 0 within milliseconds, looking
+        // exactly like a Ctrl-C nobody pressed. Keep watching instead.
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => cancel_signal.cancel(),
+            Err(e) => tracing::error!(
+                error = %e,
+                "cannot install a Ctrl+C handler; stop the watcher with `kill`"
+            ),
+        }
     });
 
     let handle = spawn_watcher(&cfg.project_dir, cfg.debounce)?;
@@ -155,6 +170,18 @@ pub async fn run_watch(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result
     });
 
     let mut last_pack_hash: Option<String> = None;
+
+    // Build once before waiting for changes. Without this a fresh
+    // `gtdx dev` installed nothing until the user touched a file — every
+    // comparable watcher (cargo-watch, vite, tsc -w) builds on start.
+    if let Err(e) = run_once_cached(cfg, out, &mut last_pack_hash).await {
+        out.emit(&DevEvent::Error {
+            message: e.to_string(),
+        });
+    }
+    out.emit(&DevEvent::Idle {
+        last_build_ok: true,
+    });
 
     loop {
         if cancel.is_cancelled() {
@@ -172,7 +199,16 @@ pub async fn run_watch(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result
                     window_ms: u64::try_from(cfg.debounce.as_millis()).unwrap_or(500),
                 });
                 if let Err(e) = run_once_cached(cfg, out, &mut last_pack_hash).await {
-                    tracing::warn!("dev cycle failed: {e}");
+                    // Was a bare `tracing::warn!`, which the default filter
+                    // dropped: a describe.json typo printed "✓ build ok" and
+                    // then nothing at all, forever, looking like a hang.
+                    // `DevEvent` reaches the terminal regardless of log level.
+                    out.emit(&DevEvent::Error {
+                        message: e.to_string(),
+                    });
+                    out.emit(&DevEvent::Idle {
+                        last_build_ok: false,
+                    });
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -194,10 +230,16 @@ async fn run_once_cached(
     out.emit(&DevEvent::BuildStart {
         profile: cfg.profile.as_str().into(),
     });
+    // Time the call here: `run_build` measures the elapsed time and then
+    // discards it when it bails, so every failure reported "✗ build failed
+    // (0.0s)" no matter how long it actually took.
+    let build_started = std::time::Instant::now();
     let build = match run_build(&cfg.project_dir, cfg.profile) {
         Ok(b) => b,
         Err(e) => {
-            out.emit(&DevEvent::BuildFailed { duration_ms: 0 });
+            out.emit(&DevEvent::BuildFailed {
+                duration_ms: u64::try_from(build_started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            });
             return Err(e);
         }
     };

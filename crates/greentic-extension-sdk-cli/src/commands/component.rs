@@ -138,7 +138,25 @@ fn pick_admin_token(
 
 fn stored_admin_token(home: &Path) -> Option<String> {
     use greentic_extension_sdk_registry::credentials::Credentials;
-    let creds = Credentials::load(&home.join("credentials.toml")).ok()?;
+    // `.ok()?` used to collapse "file is corrupt" into the same None as "no
+    // file", so the user was told to pass a token flag forever when the real
+    // fix was a broken file nobody had mentioned.
+    let creds_path = home.join("credentials.toml");
+    let creds = match Credentials::load(&creds_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                path = %creds_path.display(),
+                error = %e,
+                "credentials file exists but could not be read; treating as no stored token"
+            );
+            eprintln!(
+                "warning: {} could not be read ({e}); stored tokens are being ignored",
+                creds_path.display()
+            );
+            return None;
+        }
+    };
     creds
         .get(ADMIN_CREDENTIALS_KEY)
         .filter(|s| !s.is_empty())

@@ -50,7 +50,25 @@ pub fn resolve_registry_token(home: &Path, name: &str, token_env: Option<&str>) 
     {
         return Some(v);
     }
-    let creds = Credentials::load(&home.join("credentials.toml")).ok()?;
+    // `.ok()?` used to collapse "file is corrupt" into the same None as "no
+    // file", so the user was told to pass a token flag forever when the real
+    // fix was a broken file nobody had mentioned.
+    let creds_path = home.join("credentials.toml");
+    let creds = match Credentials::load(&creds_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                path = %creds_path.display(),
+                error = %e,
+                "credentials file exists but could not be read; treating as no stored token"
+            );
+            eprintln!(
+                "warning: {} could not be read ({e}); stored tokens are being ignored",
+                creds_path.display()
+            );
+            return None;
+        }
+    };
     creds.get(name).map(str::to_string)
 }
 
@@ -109,6 +127,13 @@ pub const ALL_KINDS: [ExtensionKind; 5] = [
 
 /// Enumerate installed extensions under the given kinds by reading each
 /// `<kind>/<name>-<version>/describe.json`.
+/// Enumerate installed extensions, skipping (and reporting) unreadable ones.
+///
+/// A single corrupt `describe.json` used to propagate out of here and abort
+/// `list`, `outdated` and `update` before any output, so N−1 healthy
+/// extensions became invisible because of one bad neighbour. `doctor` already
+/// handled the same situation correctly — counting and continuing — and this
+/// now follows it.
 pub fn scan_installed(storage: &Storage, kinds: &[ExtensionKind]) -> Result<Vec<InstalledExt>> {
     let mut out = Vec::new();
     for kind in kinds {
@@ -125,18 +150,30 @@ pub fn scan_installed(storage: &Storage, kinds: &[ExtensionKind]) -> Result<Vec<
             if !describe_path.exists() {
                 continue;
             }
-            let bytes = std::fs::read(&describe_path)?;
-            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-            let d: greentic_extension_sdk_contract::DescribeJson = serde_json::from_value(value)?;
-            out.push(InstalledExt {
-                kind: *kind,
-                id: d.metadata.id.clone(),
-                version: d.metadata.version.clone(),
-                summary: d.metadata.summary.default().to_string(),
-            });
+            match read_installed(*kind, &describe_path) {
+                Ok(ext) => out.push(ext),
+                Err(e) => {
+                    // Loud enough to act on, quiet enough not to break the
+                    // command for every other extension.
+                    eprintln!("warning: skipping {} — {e}", describe_path.display());
+                    tracing::warn!(path = %describe_path.display(), error = %e, "unreadable describe.json");
+                }
+            }
         }
     }
     Ok(out)
+}
+
+fn read_installed(kind: ExtensionKind, describe_path: &Path) -> Result<InstalledExt> {
+    let bytes = std::fs::read(describe_path)?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let d: greentic_extension_sdk_contract::DescribeJson = serde_json::from_value(value)?;
+    Ok(InstalledExt {
+        kind,
+        id: d.metadata.id.clone(),
+        version: d.metadata.version.clone(),
+        summary: d.metadata.summary.default().to_string(),
+    })
 }
 
 /// Split an installed extension directory name into `(id, version)`.

@@ -110,7 +110,22 @@ impl Storage {
                 Ok(())
             }
             Err(e) => {
-                let _ = std::fs::rename(&backup, final_dir);
+                // The rollback used to be `let _ = ...`, discarding exactly the
+                // case this code exists to prevent: if the restore also fails,
+                // the old install is stranded at the backup path and
+                // `final_dir` does not exist — the extension is simply gone,
+                // and the returned error said nothing about it or where the
+                // backup went.
+                if let Err(restore_err) = std::fs::rename(&backup, final_dir) {
+                    return Err(RegistryError::Storage(format!(
+                        "install swap failed ({e}) and the rollback also failed \
+                         ({restore_err}); the previous install is preserved at {} — \
+                         restore it with: mv {} {}",
+                        backup.display(),
+                        backup.display(),
+                        final_dir.display()
+                    )));
+                }
                 Err(e.into())
             }
         }
