@@ -17,10 +17,6 @@
     },
     "license": "{{license}}"
   },
-  "engine": {
-    "greenticDesigner": ">={{min_designer_version}}",
-    "extRuntime": "^{{sdk_version}}"
-  },
   "capabilities": {
     "offered": [],
     "required": []
@@ -55,8 +51,8 @@
   "contributions": {
     "tools": [
       {
-        "id": "complete",
         "name": "complete",
+        "export": "greentic:extension-design/tools.invoke-tool",
         "description": "Run an LLM completion.",
         "runtime_ref": "{{runtime_ref_key}}"
       }

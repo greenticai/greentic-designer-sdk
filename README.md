@@ -1,6 +1,6 @@
 # greentic-designer-sdk
 
-Public SDK for authoring [Greentic Designer](https://greentic.ai) extensions — Bundle, Design, Deploy, Provider, WASM-component, and LLM extension kinds.
+Public SDK for authoring [Greentic Designer](https://greentic.ai) extensions — Design, MCP, WASM-component, Provider, LLM, Bundle, and Deploy extension kinds.
 
 ## What this is
 
@@ -18,30 +18,58 @@ The runtime engine that *executes* WASM extensions is part of the commercial Gre
 
 ## Quick start
 
+### Prerequisites
+
+`gtdx` scaffolds and builds WASM components, so the toolchain has to be in
+place before anything below will work:
+
+| Requirement | Install |
+|---|---|
+| Rust 1.95+ (edition 2024) | <https://rustup.rs> |
+| `cargo-component` | `cargo install cargo-component --locked` |
+| `wasm32-wasip2` target | `rustup target add wasm32-wasip2` |
+| `git` (optional) | only for `gtdx new`'s `git init`; pass `--no-git` to skip |
+
+Once `gtdx` is installed, it can check all of this for you:
+
+```bash
+gtdx doctor
+```
+
 ### Install the CLI
 
 Prebuilt binaries are published to GitHub Releases for every tagged
 version (Linux / macOS / Windows, x86_64 + aarch64). Pick whichever
 matches your setup:
 
+Pick a version from the
+[releases page](https://github.com/greenticai/greentic-designer-sdk/releases),
+or resolve the newest tag automatically:
+
+```bash
+GTDX_VERSION=$(git ls-remote --tags --refs \
+  https://github.com/greenticai/greentic-designer-sdk \
+  | sed 's#.*/v##' | sort -V | tail -1)
+echo "$GTDX_VERSION"
+```
+
 **Recommended — `cargo binstall` (no compile, fetches the release binary):**
 
 ```bash
 cargo binstall greentic-extension-sdk-cli \
-  --version 1.2.2-research \
+  --version "$GTDX_VERSION" \
   --git https://github.com/greenticai/greentic-designer-sdk
 ```
 
 `--git` is required because this crate is not published to crates.io —
 binstall reads the `[package.metadata.binstall]` section directly from
-the repo at the requested tag. Drop the `--version` flag once a stable
-release is cut.
+the repo at the requested tag.
 
 **Build from source (slowest, needs the full toolchain):**
 
 ```bash
 cargo install --git https://github.com/greenticai/greentic-designer-sdk \
-  --tag v1.2.2-research \
+  --tag "v$GTDX_VERSION" \
   greentic-extension-sdk-cli
 ```
 
@@ -50,7 +78,7 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 ```bash
 # macOS Apple Silicon example — swap target for your platform
 curl -L -o gtdx.tgz \
-  https://github.com/greenticai/greentic-designer-sdk/releases/download/v1.2.2-research/gtdx-v1.2.2-research-aarch64-apple-darwin.tgz
+  "https://github.com/greenticai/greentic-designer-sdk/releases/download/v$GTDX_VERSION/gtdx-v$GTDX_VERSION-aarch64-apple-darwin.tgz"
 tar -xzf gtdx.tgz
 chmod +x gtdx && mv gtdx ~/.cargo/bin/
 ```
@@ -125,7 +153,7 @@ Install the generator once with `cargo binstall greentic-mcp-generator` (set
 The result is publish-ready:
 
 ```bash
-gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml ./weatherapi
+gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml
 ```
 
 Running `gtdx new` with no flags starts an interactive wizard; for `--kind mcp`
@@ -156,7 +184,7 @@ locally, or `gtdx lint --publish --dir <ext>` to also enforce
 | `E_ENGINE_DEPRECATED` | the `engine` block is forbidden | Move version constraints into `compat.min_designer_version` / `compat.min_runner_version` and delete `engine`. |
 | `E_SHA256_ZERO` | (`--publish` only) no placeholder `0000…` hashes | Let the build/publish step fill real `sha256` values before publishing. |
 | `E_ID_PATTERN` | `metadata.id` must match `^greentic\.[a-z0-9][a-z0-9-]*$` | Use a lowercase-kebab id under the `greentic.` namespace. |
-| `E_TOOL_NAMING` | tool names must be `snake_case` with no near-duplicate prefixes | Rename camelCase tools; disambiguate pairs like `generate_gtpack` / `generate_gtpack_from_sorla_yaml`. |
+| `E_TOOL_NAMING` | tool names must be `snake_case` with no near-duplicate prefixes | Rename camelCase tools; disambiguate pairs like `generate_gtpack` / `generate_gtpack_from_yaml`. |
 
 ### Quick dev-loop install
 
@@ -260,7 +288,7 @@ ed25519.
 ```bash
 gtdx keygen --out my-key.pem            # PKCS8 PEM private key (mode 0600)
 gtdx login                              # auth to the Greentic store (see above)
-gtdx publish --sign --key my-key.pem ./ # bind manifest, then sign — one step
+gtdx publish --sign --key my-key.pem   # bind manifest, then sign — one step
 ```
 
 Prefer not to memorise the flags? `gtdx publish --wizard` walks you through
@@ -274,7 +302,7 @@ precedence order: `--key <path>`, `--key-id <id>` (loads
 `~/.greentic/keys/<id>.key`), or the `GREENTIC_EXT_SIGNING_KEY_PEM` env var (CI).
 
 To sign a `describe.json` in isolation (outside a pack), use `gtdx sign --key
-my-key.pem ./`.
+my-key.pem ./describe.json` — `sign` takes the **file**, not its directory.
 
 To publish a component that was **built outside this CLI** (e.g. a generated MCP
 component), pass `--wasm <path>` so `publish` packs that artifact instead of
@@ -283,7 +311,7 @@ still drives the pack, signing, and registry metadata — only the build step is
 skipped:
 
 ```bash
-gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml ./
+gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml
 ```
 
 ### Verify a pack
@@ -299,6 +327,44 @@ manifest binding (`manifestSha256`), and the whole-archive integrity ledger
 not just a tampered descriptor. Without `--trusted-key` the signature is only
 checked for self-consistency (the describe is unmodified); pass `--trusted-key`
 to additionally anchor *who* signed it.
+
+## Command reference
+
+`gtdx <command> --help` documents every flag. The sections above cover the
+common workflow; this is the full surface.
+
+| Command | What it does |
+|---|---|
+| `gtdx new` | Scaffold a new extension project (interactive wizard when run with no name) |
+| `gtdx openapi` | Generate an MCP connector from an OpenAPI/Swagger spec |
+| `gtdx dev` | Inner loop: build, pack, install. `--once` for a single pass |
+| `gtdx doctor` | Check the toolchain and diagnose installed extensions — **run this first if anything misbehaves** |
+| `gtdx validate` | Check a `describe.json` against the JSON Schema |
+| `gtdx lint` | Check cross-field invariants the schema cannot express |
+| `gtdx list` | List installed extensions |
+| `gtdx info` | Show metadata for an installed extension |
+| `gtdx search` | Search a registry |
+| `gtdx install` | Install from a registry or a local `.gtxpack` |
+| `gtdx uninstall` | Remove an installed extension (`--dry-run` to preview) |
+| `gtdx enable` / `gtdx disable` | Toggle an installed extension without removing it |
+| `gtdx outdated` | Report installed extensions with newer versions available |
+| `gtdx update` | Update installed extensions to the latest permitted version |
+| `gtdx keygen` | Generate an ed25519 signing keypair |
+| `gtdx sign` | Sign a `describe.json` in place |
+| `gtdx verify` | Verify a signature (file, directory, or `.gtxpack`) |
+| `gtdx publish` | Pack, optionally sign, and publish to a registry |
+| `gtdx yank` / `gtdx unyank` | Withdraw or restore a published version |
+| `gtdx login` / `gtdx logout` | Manage registry credentials |
+| `gtdx registries` | Show or modify configured registries |
+| `gtdx version` | Print the CLI version |
+
+`gtdx component` exists for Greentic-internal tenant administration and is not
+usable without a `greentic-designer-admin` deployment.
+
+### Further reading
+
+- [Authoring secrets](docs/authoring-secrets.md) — `requiredSecrets` vs
+  `runtime.permissions.secrets`, and how the runtime resolves them.
 
 ## End-to-end: scaffold → Designer
 
@@ -364,8 +430,16 @@ The canonical WebAssembly Component Model interface specifications for all exten
 - `extension-design.wit` — `DesignExtension` world (authoring)
 - `extension-deploy.wit` — `DeployExtension` world (deployment)
 - `extension-provider.wit` — `ProviderExtension` world
+- `extension-dw-composer.wit` — designer-workspace composer interfaces
+- `runtime-side.wit` — runtime-side interfaces
 
-The WIT package versions are declared as `@0.1.0` in each `wit/*.wit` file (this is the contract surface scaffolded extensions import against — see `CONTRACT_VERSION` in `crates/greentic-extension-sdk-cli/src/scaffold/embedded.rs`). The crate / workspace ships at the version declared in the root `Cargo.toml`. The `gtdx` binary embeds a copy of the current WIT package set under `crates/greentic-extension-sdk-cli/embedded-wit/$CARGO_PKG_VERSION/` (auto-populated from `wit/` by `build.rs`) so scaffolding works offline without network access to crates.io.
+Each `wit/*.wit` file declares its **own** `@version`, and they are not all
+the same: within contract generation `0.2.0`, `extension-design` is `@0.3.0`
+and `extension-host` is still `@0.1.0` while the rest are `@0.2.0`. Scaffolded
+worlds pin each import to the version its package actually declares — see
+`WIT_VERSION_KEYS` in `crates/greentic-extension-sdk-cli/src/commands/new/mod.rs`,
+guarded by `tests/contract_version_consistency.rs`. `CONTRACT_VERSION` in
+`scaffold/embedded.rs` names the *generation*, not any individual package. The crate / workspace ships at the version declared in the root `Cargo.toml`. The `gtdx` binary embeds a copy of the current WIT package set under `crates/greentic-extension-sdk-cli/embedded-wit/$CARGO_PKG_VERSION/` (auto-populated from `wit/` by `build.rs`) so scaffolding works offline without network access to crates.io.
 
 ## Local development
 

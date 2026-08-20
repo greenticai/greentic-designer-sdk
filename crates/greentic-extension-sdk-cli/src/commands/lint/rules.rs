@@ -403,7 +403,7 @@ fn is_snake_case(name: &str) -> bool {
 }
 
 /// True when `short` is a prefix of `long` ending on a `_` boundary, e.g.
-/// `generate_gtpack` vs `generate_gtpack_from_sorla_yaml`.
+/// `generate_gtpack` vs `generate_gtpack_from_yaml`.
 fn is_prefix_on_boundary(short: &str, long: &str) -> bool {
     long.len() > short.len() && long.starts_with(short) && long.as_bytes()[short.len()] == b'_'
 }

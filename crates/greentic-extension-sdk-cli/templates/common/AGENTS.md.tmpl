@@ -72,7 +72,7 @@ Run `gtdx validate` and `gtdx lint` after any edit to `describe.json`, and
 ## Secrets
 
 Never hardcode credentials or API keys in `src/lib.rs`. If the extension needs a
-secret, declare it under `secret_requirements` in `describe.json`; the runtime
+secret, declare it under `requiredSecrets` in `describe.json` (or `secret_requirements` for `kind: wasix:mcp/router`, which validates against `describe-mcp-v1.json`); the runtime
 resolves and injects it at execution time.
 
 ## Do NOT hand-edit these — generated or managed
