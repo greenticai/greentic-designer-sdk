@@ -21,7 +21,7 @@ pub enum KindArg {
 }
 
 impl KindArg {
-    fn to_extension_kind(self) -> Option<ExtensionKind> {
+    pub(super) fn to_extension_kind(self) -> Option<ExtensionKind> {
         match self {
             KindArg::Design => Some(ExtensionKind::Design),
             KindArg::Bundle => Some(ExtensionKind::Bundle),

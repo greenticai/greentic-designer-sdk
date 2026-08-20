@@ -7,10 +7,19 @@ use greentic_extension_sdk_registry::{ExtensionRegistry, SearchQuery};
 pub struct Args {
     /// Search term (partial-match on extension name). If omitted, lists everything the registry exposes.
     pub query: Option<String>,
-    #[arg(long)]
+    /// Registry name from config (defaults to the configured default registry)
+    #[arg(short = 'r', long)]
     pub registry: Option<String>,
-    #[arg(long)]
-    pub kind: Option<String>,
+
+    /// Filter by extension kind
+    ///
+    /// A validated enum rather than a free string: `--kind provider` used to
+    /// error with "unknown kind: provider" even though `gtdx list --kind
+    /// provider` accepted it, because the two kept separate hand-rolled maps.
+    #[arg(long, value_enum)]
+    pub kind: Option<super::list::KindArg>,
+
+    /// Maximum number of results to return
     #[arg(long, default_value_t = 20)]
     pub limit: u32,
 }
@@ -23,14 +32,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     // "no such registry" until someone ran `gtdx registries add`.
     let reg = super::resolve_store_registry(args.registry.as_deref(), home)?;
 
-    let kind = match args.kind.as_deref() {
-        Some("design") => Some(greentic_extension_sdk_contract::ExtensionKind::Design),
-        Some("bundle") => Some(greentic_extension_sdk_contract::ExtensionKind::Bundle),
-        Some("deploy") => Some(greentic_extension_sdk_contract::ExtensionKind::Deploy),
-        Some("mcp") => Some(greentic_extension_sdk_contract::ExtensionKind::WasixMcpRouter),
-        Some(x) => return Err(anyhow::anyhow!("unknown kind: {x}")),
-        None => None,
-    };
+    let kind = args.kind.and_then(super::list::KindArg::to_extension_kind);
 
     let results = reg
         .search(SearchQuery {

@@ -14,10 +14,17 @@ fn outdated_runs_with_no_extensions_installed() {
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
 
+    // Point at a registry that is definitely not configured. A bare `outdated`
+    // on a fresh home now resolves to the built-in greentic-store (that is the
+    // fix for "no such registry" on first run), which would make this test
+    // depend on the network. Naming a missing registry keeps the case the test
+    // is actually about — status cannot be determined — deterministic.
     let output = Command::new(gtdx_bin())
         .arg("--home")
         .arg(&home)
         .arg("outdated")
+        .arg("--registry")
+        .arg("no-such-registry")
         .output()
         .unwrap();
 
@@ -45,10 +52,17 @@ fn outdated_lists_installed_extension_as_unknown_without_registry() {
     // Copy the fixture's describe.json into the install dir for scanning.
     std::fs::copy(fixture.describe_path.clone(), dir.join("describe.json")).unwrap();
 
+    // Name a registry that is definitely not configured. A bare `outdated` on a
+    // fresh home now resolves to the built-in greentic-store — that is the fix
+    // for "no such registry" on first run — which would make this test depend
+    // on the network. This keeps the case under test (status cannot be
+    // determined) deterministic and offline.
     let output = Command::new(gtdx_bin())
         .arg("--home")
         .arg(&home)
         .arg("outdated")
+        .arg("--registry")
+        .arg("no-such-registry")
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -61,6 +75,6 @@ fn outdated_lists_installed_extension_as_unknown_without_registry() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("not configured")
             || stdout.contains("not configured"),
-        "expected a 'not configured' signal"
+        "expected a 'not configured' signal.\nstdout: {stdout}"
     );
 }

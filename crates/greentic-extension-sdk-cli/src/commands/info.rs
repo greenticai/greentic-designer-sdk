@@ -7,6 +7,7 @@ use greentic_extension_sdk_registry::storage::Storage;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
+    /// Installed extension id
     pub name: String,
     #[arg(long)]
     pub version: Option<String>,
