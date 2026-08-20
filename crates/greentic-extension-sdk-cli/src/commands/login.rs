@@ -54,7 +54,18 @@ pub async fn run_login(args: &Args, home: &Path) -> anyhow::Result<()> {
     }
 
     let creds_path = home.join("credentials.toml");
-    let mut creds = Credentials::load(&creds_path).unwrap_or_default();
+    // `Credentials::load` returns Ok(default) when the file is *absent* and
+    // Err only when it exists and cannot be read or parsed. `unwrap_or_default`
+    // conflated the two: one corrupt byte produced an empty set, `save` then
+    // truncated the file, and every *other* registry's token was permanently
+    // gone — while printing "✓ logged in". Refuse instead.
+    let mut creds = Credentials::load(&creds_path).map_err(|e| {
+        anyhow::anyhow!(
+            "{} exists but could not be read ({e}); move it aside and re-run to \
+             recreate it — refusing to overwrite it and lose other registries' tokens",
+            creds_path.display()
+        )
+    })?;
     creds.set(&registry_name, token.trim());
     creds
         .save(&creds_path)
@@ -129,7 +140,22 @@ struct DeviceTokenResponse {
 /// `Ok(Some(token))` on approval, `Ok(None)` when the store has no device
 /// endpoints (caller falls back to paste), and `Err` on denial/expiry/timeout.
 async fn device_login(registry_url: &str, no_browser: bool) -> anyhow::Result<Option<String>> {
-    let client = reqwest::Client::new();
+    // The registry crate gates every store call on `validate_registry_url` and
+    // builds its client with redirects disabled *specifically* so an HTTPS→HTTP
+    // 3xx cannot downgrade. This flow bypassed all of it with a bare
+    // `Client::new()`, so an `http://` registry entry — which `registries add`
+    // accepts without complaint — sent the device code out and the bearer token
+    // back in cleartext.
+    greentic_extension_sdk_registry::store::validate_registry_url(
+        registry_url,
+        crate::registry_security::insecure_registry_opt_in(),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| anyhow::anyhow!("build http client: {e}"))?;
     let code: DeviceCodeResponse = {
         let response = client
             .post(format!("{registry_url}/api/v1/auth/device/code"))
@@ -258,7 +284,18 @@ pub fn run_logout(args: &LogoutArgs, home: &Path) -> anyhow::Result<()> {
     let cfg = super::load_config(home)?;
     let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
     let creds_path = home.join("credentials.toml");
-    let mut creds = Credentials::load(&creds_path).unwrap_or_default();
+    // `Credentials::load` returns Ok(default) when the file is *absent* and
+    // Err only when it exists and cannot be read or parsed. `unwrap_or_default`
+    // conflated the two: one corrupt byte produced an empty set, `save` then
+    // truncated the file, and every *other* registry's token was permanently
+    // gone — while printing "✓ logged in". Refuse instead.
+    let mut creds = Credentials::load(&creds_path).map_err(|e| {
+        anyhow::anyhow!(
+            "{} exists but could not be read ({e}); move it aside and re-run to \
+             recreate it — refusing to overwrite it and lose other registries' tokens",
+            creds_path.display()
+        )
+    })?;
     if creds.remove(reg_name).is_some() {
         creds
             .save(&creds_path)

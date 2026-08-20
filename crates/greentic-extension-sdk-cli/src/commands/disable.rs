@@ -52,9 +52,37 @@ fn warn_dependents(home: &Path, target_id: &str) -> Result<()> {
             let describe: serde_json::Value = match std::fs::read_to_string(&describe_path) {
                 Ok(s) => match serde_json::from_str(&s) {
                     Ok(v) => v,
-                    Err(_) => continue,
+                    Err(e) => {
+                        // Silently dropping a dependent defeats the point of this
+                        // scan: its "you will break X" warning simply never fires, and
+                        // the silence reads as "checked, all clear".
+                        tracing::warn!(
+                            path = %describe_path.display(),
+                            error = %e,
+                            "skipping unreadable describe.json during the dependency check"
+                        );
+                        eprintln!(
+                            "warning: could not read {} — dependency check skipped it",
+                            describe_path.display()
+                        );
+                        continue;
+                    }
                 },
-                Err(_) => continue,
+                Err(e) => {
+                    // Silently dropping a dependent defeats the point of this
+                    // scan: its "you will break X" warning simply never fires, and
+                    // the silence reads as "checked, all clear".
+                    tracing::warn!(
+                        path = %describe_path.display(),
+                        error = %e,
+                        "skipping unreadable describe.json during the dependency check"
+                    );
+                    eprintln!(
+                        "warning: could not read {} — dependency check skipped it",
+                        describe_path.display()
+                    );
+                    continue;
+                }
             };
             let id = describe["metadata"]["id"].as_str().unwrap_or("");
             if id == target_id {
@@ -96,9 +124,37 @@ fn read_offered_capabilities(home: &Path, target_id: &str) -> Result<Vec<String>
             let describe: serde_json::Value = match std::fs::read_to_string(&path) {
                 Ok(s) => match serde_json::from_str(&s) {
                     Ok(v) => v,
-                    Err(_) => continue,
+                    Err(e) => {
+                        // Silently dropping a dependent defeats the point of this
+                        // scan: its "you will break X" warning simply never fires, and
+                        // the silence reads as "checked, all clear".
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %e,
+                            "skipping unreadable describe.json during the dependency check"
+                        );
+                        eprintln!(
+                            "warning: could not read {} — dependency check skipped it",
+                            path.display()
+                        );
+                        continue;
+                    }
                 },
-                Err(_) => continue,
+                Err(e) => {
+                    // Silently dropping a dependent defeats the point of this
+                    // scan: its "you will break X" warning simply never fires, and
+                    // the silence reads as "checked, all clear".
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "skipping unreadable describe.json during the dependency check"
+                    );
+                    eprintln!(
+                        "warning: could not read {} — dependency check skipped it",
+                        path.display()
+                    );
+                    continue;
+                }
             };
             return Ok(describe["capabilities"]["offered"]
                 .as_array()

@@ -82,12 +82,24 @@ pub struct InstallSummary {
 }
 
 fn copy_atomic(src: &Path, dst: &Path) -> std::io::Result<()> {
-    let tmp = dst.with_extension("gtxpack.tmp");
-    std::fs::copy(src, &tmp)?;
-    if dst.exists() {
-        std::fs::remove_file(dst)?;
+    // Unique temp name: the old fixed `<name>.gtxpack.tmp` meant two `gtdx dev`
+    // sessions on the same extension (two worktrees, editor + CI) interleaved
+    // writes into one file and installed a torn archive.
+    let mut tmp_name = dst.file_name().unwrap_or_default().to_os_string();
+    tmp_name.push(format!(".{}.tmp", std::process::id()));
+    let tmp = dst.with_file_name(tmp_name);
+
+    let result = (|| {
+        std::fs::copy(src, &tmp)?;
+        // No `remove_file(dst)` first: on Unix `rename` over an existing file
+        // is already atomic, and unlinking opened a window where the pack did
+        // not exist — destroying the atomicity this function is named for.
+        std::fs::rename(&tmp, dst)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::rename(&tmp, dst)?;
+    result?;
     sync_parent_dir(dst);
     Ok(())
 }

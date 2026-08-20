@@ -139,12 +139,12 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     }
 
     make_scripts_executable(&target)?;
-    run_git_init(&target, resolved.no_git);
+    let git_ready = run_git_init(&target, resolved.no_git);
 
     // The OpenAPI path already printed its own "Next: gtdx publish …" line
     // inside scaffold_from_openapi; skip the generic next-steps block there.
     if resolved.from_openapi.is_none() {
-        print_summary(resolved.kind.as_str(), &target, files_written);
+        print_summary(resolved.kind.as_str(), &target, files_written, git_ready);
     }
     Ok(())
 }
@@ -528,18 +528,36 @@ fn make_scripts_executable(_target: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_git_init(target: &Path, no_git: bool) {
+/// Initialise a git repo in the scaffold. Best-effort, but never silent.
+///
+/// `let _ = ...status()` discarded both failure modes — `git` missing from
+/// PATH (slim images, fresh CI runners) and a non-zero exit — and the function
+/// returned `()`, so there was structurally no way for the caller to notice.
+/// "Scaffolded" and "Next steps" printed regardless, and the user found out at
+/// their first `git add`. Returns whether a repo now exists.
+fn run_git_init(target: &Path, no_git: bool) -> bool {
     if no_git {
-        return;
+        return false;
     }
-    let _ = std::process::Command::new("git")
+    match std::process::Command::new("git")
         .arg("init")
         .arg("--quiet")
         .current_dir(target)
-        .status();
+        .status()
+    {
+        Ok(status) if status.success() => true,
+        Ok(status) => {
+            eprintln!("warning: `git init` exited {status}; repository not initialized");
+            false
+        }
+        Err(e) => {
+            eprintln!("warning: could not run `git init` ({e}); install git or pass --no-git");
+            false
+        }
+    }
 }
 
-fn print_summary(kind: &str, target: &Path, files_written: usize) {
+fn print_summary(kind: &str, target: &Path, files_written: usize, git_ready: bool) {
     println!();
     println!(
         "Scaffolded {} extension at {} ({} files, contract {}).",
@@ -563,6 +581,9 @@ fn print_summary(kind: &str, target: &Path, files_written: usize) {
     println!("  gtdx lint --dir . # check describe.json invariants");
     println!("  gtdx dev          # watch, rebuild, reinstall on save");
     println!("  gtdx publish      # pack to dist/");
+    if !git_ready {
+        println!("  (no git repository was created)");
+    }
 }
 
 fn detect_git_author() -> String {

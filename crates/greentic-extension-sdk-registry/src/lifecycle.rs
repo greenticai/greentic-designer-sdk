@@ -54,17 +54,29 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         version: &str,
         opts: InstallOptions,
     ) -> Result<(), RegistryError> {
-        // Best-effort yanked check: refuse a yanked version unless forced.
-        // Skipped silently for registries that don't support metadata
-        // introspection (e.g. OCI), which return an error here.
-        if let Ok(metadata) = self.registry.metadata(name, version).await
-            && metadata.yanked
-            && !opts.force
-        {
-            return Err(RegistryError::Yanked {
-                name: name.into(),
-                version: version.into(),
-            });
+        // Yanked check. The comment used to say this was skipped for registries
+        // without metadata introspection, but `if let Ok(..)` swallowed *every*
+        // error — a transient 5xx, a timeout, expired auth — so a flaky
+        // connection silently installed a version that had been yanked, usually
+        // because it was compromised. Only "not supported" is a silent skip now.
+        match self.registry.metadata(name, version).await {
+            Ok(metadata) if metadata.yanked && !opts.force => {
+                return Err(RegistryError::Yanked {
+                    name: name.into(),
+                    version: version.into(),
+                });
+            }
+            // Not yanked, or a registry that cannot answer (OCI) — the one
+            // case the original silent skip was actually written for.
+            Ok(_) | Err(RegistryError::NotImplemented { .. }) => {}
+            Err(e) => {
+                tracing::warn!(
+                    name,
+                    version,
+                    error = %e,
+                    "could not check whether this version is yanked; proceeding without that check"
+                );
+            }
         }
         let artifact = self.registry.fetch(name, version).await?;
         // Every check below this line is self-referential to the served
@@ -74,14 +86,15 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
         // identity to the request first, and do it before `verify_authenticity`
         // so a substituted publisher key is never TOFU-pinned.
         assert_served_identity(name, version, &artifact)?;
-        verify_integrity(&artifact, opts.trust_policy)?;
-        verify_authenticity(self.storage.root(), &artifact.describe, opts.trust_policy)?;
+        // Verification itself lives in `install_artifact_with_confirm`, so the
+        // public entry points cannot bypass it.
         self.install_artifact(&artifact, opts)
     }
 
     /// Install an already-fetched artifact, prompting for permission consent
     /// via the interactive prompt. See [`Self::install_artifact_with_confirm`]
     /// for the testable, injectable variant.
+    ///
     pub fn install_artifact(
         &self,
         artifact: &ExtensionArtifact,
@@ -104,12 +117,25 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
     where
         F: FnOnce(&greentic_extension_sdk_contract::DescribeJson, bool) -> bool,
     {
+        // Verification runs here, not only in `install`. These entry points are
+        // public and `ExtensionArtifact` is a public struct, so an embedding
+        // host could previously construct one and get an unsigned, unverified
+        // extraction — while the verify functions were `pub(crate)`, leaving no
+        // way to opt back in.
+        verify_integrity(artifact, opts.trust_policy)?;
+
         if !confirm(&artifact.describe, opts.accept_permissions) {
             return Err(RegistryError::PermissionDenied {
                 name: artifact.name.clone(),
                 version: artifact.version.clone(),
             });
         }
+
+        // Authenticity *after* consent: it TOFU-pins the publisher key as a
+        // side effect, so running it first meant a user who read the permission
+        // prompt and declined had still permanently pinned that key, with no
+        // command to remove it.
+        verify_authenticity(self.storage.root(), &artifact.describe, opts.trust_policy)?;
 
         let kind = artifact.describe.kind;
         let (staging, final_dir) =

@@ -124,11 +124,19 @@ fn migrate_runtime(obj: &Map<String, Value>, report: &mut MigrationReport) -> Va
 fn build_component_entry(rt: &Map<String, Value>, report: &mut MigrationReport) -> Value {
     let mut entry = Map::new();
     if let Some(gtpack) = rt.get("gtpack").cloned() {
-        let sha = gtpack
-            .get("sha256")
-            .and_then(Value::as_str)
-            .unwrap_or(&"0".repeat(64))
-            .to_string();
+        let declared = gtpack.get("sha256").and_then(Value::as_str);
+        if declared.is_none() {
+            // The two sibling branches below warn when they substitute a zero
+            // digest; this one did not, so `gtdx migrate` could emit a bogus
+            // all-zero hash and report zero warnings. It fails closed at
+            // install time — `provider_install` recomputes and compares — but
+            // as a confusing mismatch much later instead of here.
+            report.warn(
+                "v1 runtime.gtpack declared no sha256; a placeholder digest was written and \
+                 must be replaced with the real hash before publishing",
+            );
+        }
+        let sha = declared.unwrap_or(&"0".repeat(64)).to_string();
         entry.insert("gtpack".into(), gtpack);
         entry.insert("sha256".into(), Value::String(sha));
         entry.insert("world".into(), Value::String("main".into()));

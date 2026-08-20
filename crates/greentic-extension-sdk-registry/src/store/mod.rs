@@ -152,7 +152,12 @@ fn build_secure_client() -> Client {
         })
 }
 
-fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), RegistryError> {
+/// Reject a registry URL that would send credentials in the clear.
+///
+/// Exposed so callers outside this module — notably the CLI's device-login
+/// flow, which builds its own HTTP client — enforce the same rule instead of
+/// re-implementing (or skipping) it.
+pub fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), RegistryError> {
     if let Some(rest) = url.strip_prefix("https://") {
         if rest.is_empty() {
             return Err(RegistryError::InsecureRegistryUrl(url.into()));
