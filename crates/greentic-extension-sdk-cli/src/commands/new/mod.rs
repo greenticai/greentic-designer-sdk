@@ -87,6 +87,8 @@ pub struct Args {
 
 /// Fully-resolved scaffold inputs, produced either from CLI flags
 /// (non-interactive) or from the interactive wizard.
+// Each bool is an independent switch, not shared state (same rationale as `Args`).
+#[allow(clippy::struct_excessive_bools)]
 pub(super) struct Resolved {
     name: String,
     kind: Kind,
@@ -101,6 +103,11 @@ pub(super) struct Resolved {
     label: Option<String>,
     /// `OpenAPI` spec path for `--kind mcp` seeded scaffolds.
     from_openapi: Option<PathBuf>,
+    /// `--yes`: skip the `--force` overwrite confirmation. Scripted callers
+    /// must opt in explicitly rather than getting silence by default.
+    assume_yes: bool,
+    /// Set by the wizard, which already printed the toolchain checks up front.
+    came_from_wizard: bool,
 }
 
 pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
@@ -113,8 +120,8 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
 
     validate_from_openapi(resolved.kind, resolved.from_openapi.as_deref())?;
 
-    run_preflight(&target, resolved.force)?;
-    prepare_target(&target, resolved.force)?;
+    run_preflight(&target, resolved.force, resolved.came_from_wizard)?;
+    prepare_target(&target, resolved.force, resolved.assume_yes)?;
 
     let ctx = build_context(&resolved)?;
 
@@ -150,7 +157,19 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
 /// keeps the original scripted/`--yes` behaviour intact.
 fn resolve(args: &Args) -> anyhow::Result<Resolved> {
     let wants_wizard = args.wizard || (args.name.is_none() && !args.yes);
-    if wants_wizard && std::io::stdin().is_terminal() {
+    // dialoguer renders to stderr, so stdin alone is not enough: with stderr
+    // redirected the wizard printed its banner and then died on the first
+    // prompt with a bare "not a terminal".
+    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+
+    if args.wizard && !interactive {
+        // Explicitly asked for, and impossible — say so rather than silently
+        // scaffolding from defaults. `gtdx publish -w` already behaves this way.
+        anyhow::bail!(
+            "--wizard requires an interactive terminal (stdin and stderr must both be a tty)"
+        );
+    }
+    if wants_wizard && interactive {
         return wizard::run(args);
     }
     resolve_from_flags(args)
@@ -162,6 +181,10 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
             "missing project name: run `gtdx new <name> [flags]`, or `gtdx new` on a terminal for the interactive wizard"
         )
     })?;
+    // Validate the name before it is used as a path, a Cargo package name, or
+    // the default id. The wizard validates at the prompt; this covers the
+    // flag-driven path, which previously accepted anything.
+    validate_name(&name).map_err(|e| anyhow::anyhow!("invalid project name {name:?}: {e}"))?;
     let id = args
         .id
         .clone()
@@ -182,16 +205,41 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
         node_type_id: args.node_type_id.clone(),
         label: args.label.clone(),
         from_openapi: args.from_openapi.clone(),
+        assume_yes: args.yes,
+        came_from_wizard: false,
     })
 }
 
-fn run_preflight(target: &Path, force: bool) -> anyhow::Result<()> {
-    let checks = vec![
+fn toolchain_checks() -> Vec<Check> {
+    vec![
         preflight::check_cargo_available(),
         preflight::check_cargo_component_available(),
         preflight::check_wasm32_wasip2_target(),
-        preflight::check_target_dir(target, force),
-    ];
+    ]
+}
+
+/// Print the toolchain checks before the wizard asks anything.
+///
+/// These used to run after every prompt, so someone missing `cargo-component`
+/// answered the whole questionnaire before finding out. A missing `cargo` is
+/// fatal and exits here; the other two are warnings and are repeated in the
+/// closing "Next steps" block, since by then they have scrolled away.
+pub(super) fn print_toolchain_preflight() {
+    let checks = toolchain_checks();
+    print_checks(&checks);
+    if checks.iter().any(|c| matches!(c, Check::Fail { .. })) {
+        eprintln!("preflight failed; fix the issues above and re-run");
+        std::process::exit(1);
+    }
+}
+
+fn run_preflight(target: &Path, force: bool, skip_toolchain: bool) -> anyhow::Result<()> {
+    let mut checks = if skip_toolchain {
+        Vec::new()
+    } else {
+        toolchain_checks()
+    };
+    checks.push(preflight::check_target_dir(target, force));
     print_checks(&checks);
     if checks.iter().any(|c| matches!(c, Check::Fail { .. })) {
         anyhow::bail!("preflight failed; fix the issues above and re-run");
@@ -199,18 +247,65 @@ fn run_preflight(target: &Path, force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn prepare_target(target: &Path, force: bool) -> anyhow::Result<()> {
+/// Toolchain warnings worth repeating after a successful scaffold.
+fn unresolved_toolchain_warnings() -> Vec<String> {
+    toolchain_checks()
+        .into_iter()
+        .filter_map(|c| match c {
+            Check::Warn { name, hint } => Some(format!("{name}: {hint}")),
+            _ => None,
+        })
+        .collect()
+}
+
+fn prepare_target(target: &Path, force: bool, assume_yes: bool) -> anyhow::Result<()> {
     if target.exists() && force {
+        confirm_overwrite(target, assume_yes)?;
         fs::remove_dir_all(target)?;
     }
     fs::create_dir_all(target)?;
     Ok(())
 }
 
+/// Confirm before `--force` deletes an existing directory.
+///
+/// `--force` is a recursive delete with no undo, and it used to run with no
+/// prompt and no indication of what was about to go. The absolute path and
+/// file count are echoed because `--dir ../thing` makes the target easy to
+/// misjudge from the command line alone.
+fn confirm_overwrite(target: &Path, assume_yes: bool) -> anyhow::Result<()> {
+    let shown = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    let entries = std::fs::read_dir(target).map_or(0, |d| d.flatten().count());
+
+    if assume_yes {
+        eprintln!("--force: removing {} ({entries} entries)", shown.display());
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "--force would delete {} ({entries} entries) but there is no terminal to confirm on; \
+             re-run with --yes to proceed non-interactively",
+            shown.display()
+        );
+    }
+    eprintln!();
+    eprintln!("⚠ --force will permanently delete:");
+    eprintln!("    {} ({entries} entries)", shown.display());
+    let ok = dialoguer::Confirm::new()
+        .with_prompt("Delete it and continue?")
+        .default(false)
+        .interact()
+        .unwrap_or(false);
+    if !ok {
+        anyhow::bail!("cancelled: nothing was deleted");
+    }
+    Ok(())
+}
+
 fn build_context(resolved: &Resolved) -> anyhow::Result<Context> {
     let mut ctx = Context::new();
     ctx.set("name", resolved.name.clone());
-    let name_cargo = resolved.name.replace('.', "-");
+    let name_cargo = cargo_package_name(&resolved.name);
     ctx.set("name_cargo", &name_cargo);
     ctx.set("kind", resolved.kind.as_str());
     // Assumes ASCII kebab-case `name`; non-ASCII or all-uppercase input may produce odd labels.
@@ -454,10 +549,20 @@ fn print_summary(kind: &str, target: &Path, files_written: usize) {
         CONTRACT_VERSION
     );
     println!();
+    for warning in unresolved_toolchain_warnings() {
+        // Repeated here because the preflight output has scrolled past by now,
+        // and a missing toolchain surfaces next as a confusing `gtdx dev` failure.
+        println!("  ! {warning}");
+    }
     println!("Next steps:");
     println!("  cd {}", target.display());
-    println!("  gtdx dev        # watch, rebuild, reinstall");
-    println!("  gtdx publish    # pack to dist/");
+    // `gtdx dev` alone drops a first-time user straight into a watch loop.
+    // Lead with the one-shot build, and name the lint gate `gtdx publish`
+    // enforces later anyway.
+    println!("  gtdx dev --once   # build, pack, install once");
+    println!("  gtdx lint --dir . # check describe.json invariants");
+    println!("  gtdx dev          # watch, rebuild, reinstall on save");
+    println!("  gtdx publish      # pack to dist/");
 }
 
 fn detect_git_author() -> String {
@@ -606,6 +711,184 @@ fn print_checks(checks: &[Check]) {
             Check::Pass { name, detail } => println!("  ✓ {name}: {detail}"),
             Check::Warn { name, hint } => println!("  ! {name}: {hint}"),
             Check::Fail { name, hint } => eprintln!("  ✗ {name}: {hint}"),
+        }
+    }
+}
+
+/// Validate a project name.
+///
+/// `name` is not just a label: it becomes a filesystem path (`PathBuf::from`,
+/// then `remove_dir_all` under `--force`), the Cargo package name via
+/// [`cargo_package_name`], and the default extension id. Before this was
+/// enforced, `gtdx new ../../important --force -i com.acme.x` deleted an
+/// arbitrary directory, and `1foo` scaffolded a crate Cargo refuses to load.
+///
+/// Dots are allowed on purpose — the repo's own fixtures use reverse-DNS-ish
+/// names like `greentic.mcp-demo`, which is what `name_cargo` exists to
+/// translate. What is rejected is anything that stops being a single, ordinary
+/// path component or a legal Cargo package name.
+pub(super) fn validate_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("name cannot be empty".to_string());
+    }
+    if name.len() > 64 {
+        return Err("name must be 64 characters or fewer".to_string());
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err("name cannot contain path separators".to_string());
+    }
+    // Blocks `..` and `../x` alike, so the name can never climb out of the
+    // working directory.
+    if name.contains("..") {
+        return Err("name cannot contain `..`".to_string());
+    }
+    if name.starts_with('.') || name.ends_with('.') {
+        return Err("name cannot start or end with `.`".to_string());
+    }
+    if name.ends_with('-') {
+        return Err("name cannot end with `-`".to_string());
+    }
+    let first = name.chars().next().unwrap_or_default();
+    if !first.is_ascii_lowercase() {
+        return Err(format!(
+            "name must start with a lowercase ASCII letter (got {first:?}); try {:?}",
+            slugify_name(name)
+        ));
+    }
+    if let Some(bad) = name
+        .chars()
+        .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-' || *c == '.'))
+    {
+        return Err(format!(
+            "name may contain only lowercase letters, digits, `-` and `.` (got {bad:?}); \
+             try {:?}",
+            slugify_name(name)
+        ));
+    }
+    Ok(())
+}
+
+/// The Cargo package name derived from a validated project `name`.
+///
+/// Cargo rejects `.`, so a dotted name like `greentic.mcp-demo` becomes
+/// `greentic-mcp-demo`. Five of the seven templates used to interpolate the
+/// raw name here and produced manifests Cargo would not load.
+pub(super) fn cargo_package_name(name: &str) -> String {
+    name.replace('.', "-")
+}
+
+/// Best-effort kebab-case suggestion for a rejected name, used in error text
+/// and offered interactively by the wizard.
+pub(super) fn slugify_name(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    // A leading digit is legal in neither Cargo package names nor WIT idents.
+    match trimmed.chars().next() {
+        Some(c) if c.is_ascii_digit() => format!("ext-{trimmed}"),
+        Some(_) => trimmed.to_string(),
+        None => "my-ext".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::{slugify_name, validate_name};
+
+    #[test]
+    fn accepts_kebab_case_and_the_repo_dotted_convention() {
+        for ok in [
+            "my-ext",
+            "ext",
+            "a1",
+            "my-ext-2",
+            "abc123",
+            // The fixtures' own style; `name_cargo` translates the dots.
+            "greentic.mcp-demo",
+            "greentic.compile-test",
+        ] {
+            assert!(validate_name(ok).is_ok(), "{ok} should be accepted");
+        }
+    }
+
+    #[test]
+    fn cargo_package_name_strips_dots() {
+        assert_eq!(
+            super::cargo_package_name("greentic.mcp-demo"),
+            "greentic-mcp-demo"
+        );
+        assert_eq!(super::cargo_package_name("my-ext"), "my-ext");
+    }
+
+    /// The reason this validator exists. Each of these previously scaffolded
+    /// successfully; the first two escape the working directory and, with
+    /// `--force`, delete whatever they land on.
+    #[test]
+    fn rejects_names_that_escape_the_working_directory() {
+        for bad in [
+            "../escaped",
+            "../../important",
+            "/etc",
+            "a/b",
+            "a\\b",
+            "..",
+            ".",
+        ] {
+            assert!(validate_name(bad).is_err(), "{bad} must be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_names_cargo_would_refuse() {
+        // `my.ext` -> invalid character, `1foo` -> cannot start with a digit.
+        for bad in ["1foo", "My-Ext", "my_ext", "my ext", "café"] {
+            assert!(validate_name(bad).is_err(), "{bad} must be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_template_placeholder_syntax() {
+        assert!(validate_name("inj{{author}}").is_err());
+    }
+
+    #[test]
+    fn rejects_empty_and_edge_shapes() {
+        for bad in ["", "-lead", "trail-", ".hidden", "trailing."] {
+            assert!(validate_name(bad).is_err(), "{bad} must be rejected");
+        }
+    }
+
+    #[test]
+    fn suggests_a_usable_slug() {
+        assert_eq!(slugify_name("MyExt"), "myext");
+        assert_eq!(slugify_name("my.ext"), "my-ext");
+        assert_eq!(slugify_name("My Cool Ext"), "my-cool-ext");
+        assert_eq!(slugify_name("1foo"), "ext-1foo");
+        assert_eq!(slugify_name("///"), "my-ext");
+    }
+
+    #[test]
+    fn every_suggestion_is_itself_valid() {
+        for input in [
+            "MyExt",
+            "my.ext",
+            "My Cool Ext",
+            "1foo",
+            "///",
+            "café",
+            "a--b",
+        ] {
+            let slug = slugify_name(input);
+            assert!(
+                validate_name(&slug).is_ok(),
+                "slugify({input:?}) produced {slug:?}, which is still invalid"
+            );
         }
     }
 }

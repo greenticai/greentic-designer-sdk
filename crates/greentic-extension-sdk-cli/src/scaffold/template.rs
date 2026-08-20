@@ -95,24 +95,41 @@ impl Context {
         self
     }
 
+    /// Substitute every `{{key}}` in `template`, in a single pass.
+    ///
+    /// Single-pass matters: the previous implementation looped until the
+    /// output stopped changing, so a *value* containing `{{key}}` was itself
+    /// expanded. `gtdx new 'inj{{author}}'` produced `name = "injbimapangestu28"`
+    /// in the generated `Cargo.toml`. Values are now copied verbatim, and a
+    /// placeholder can only come from the template itself.
+    ///
+    /// Iteration order no longer matters either — the old loop walked a
+    /// `HashMap`, so overlapping keys rendered nondeterministically.
     pub fn render(&self, template: &str) -> anyhow::Result<String> {
-        let mut out = template.to_string();
-        let mut remaining_passes = 4;
-        while remaining_passes > 0 {
-            let before = out.clone();
-            for (key, value) in &self.values {
-                let token = format!("{{{{{key}}}}}");
-                out = out.replace(&token, value);
-            }
-            if out == before {
-                break;
-            }
-            remaining_passes -= 1;
+        let mut out = String::with_capacity(template.len());
+        let mut rest = template;
+
+        while let Some(start) = rest.find("{{") {
+            let Some(offset) = rest[start..].find("}}") else {
+                // `{{` with no closing `}}` — malformed template, not a value.
+                anyhow::bail!(
+                    "unterminated placeholder: {}",
+                    &rest[start..rest.len().min(start + 40)]
+                );
+            };
+            let end = start + offset + 2;
+            let key = &rest[start + 2..end - 2];
+            let Some(value) = self.values.get(key) else {
+                anyhow::bail!("unsubstituted placeholder: {{{{{key}}}}}");
+            };
+            out.push_str(&rest[..start]);
+            out.push_str(value);
+            rest = &rest[end..];
         }
-        if let Some(pos) = out.find("{{") {
-            let end = out[pos..].find("}}").map_or(out.len(), |e| pos + e + 2);
-            anyhow::bail!("unsubstituted placeholder: {}", &out[pos..end]);
-        }
+        out.push_str(rest);
+        // No trailing scan of `out`: every placeholder in the *template* was
+        // resolved or reported above, and re-scanning the result would flag
+        // `{{...}}` that legitimately came from a substituted value.
         Ok(out)
     }
 }
@@ -450,5 +467,44 @@ mod tests {
         ] {
             assert!(names.contains(&expected), "missing {expected}: {names:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod render_isolation_tests {
+    use super::Context;
+
+    /// A value is data, not template source. Re-expanding it let a crafted
+    /// project name pull other context values into the generated files.
+    #[test]
+    fn values_are_not_re_expanded() {
+        let mut ctx = Context::new();
+        ctx.set("name", "inj{{author}}");
+        ctx.set("author", "Jane");
+        assert_eq!(ctx.render("n={{name}}").unwrap(), "n=inj{{author}}");
+    }
+
+    #[test]
+    fn substitutes_every_occurrence_in_one_pass() {
+        let mut ctx = Context::new();
+        ctx.set("a", "1");
+        ctx.set("b", "2");
+        assert_eq!(ctx.render("{{a}}-{{b}}-{{a}}").unwrap(), "1-2-1");
+    }
+
+    #[test]
+    fn unknown_placeholder_is_an_error_naming_the_key() {
+        let ctx = Context::new();
+        let err = ctx.render("x={{nope}}").unwrap_err().to_string();
+        assert!(err.contains("nope"), "unhelpful error: {err}");
+    }
+
+    #[test]
+    fn text_without_placeholders_is_passed_through() {
+        let ctx = Context::new();
+        assert_eq!(
+            ctx.render("plain { text } here").unwrap(),
+            "plain { text } here"
+        );
     }
 }
