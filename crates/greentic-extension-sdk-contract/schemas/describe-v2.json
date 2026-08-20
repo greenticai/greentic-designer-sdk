@@ -403,7 +403,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "LLM roles (wire names, e.g. sorla_composer) this extension may request from the host greentic:extension-host/llm import."
+              "description": "LLM roles (wire names, e.g. doc_composer) this extension may request from the host greentic:extension-host/llm import."
             }
           }
         },
