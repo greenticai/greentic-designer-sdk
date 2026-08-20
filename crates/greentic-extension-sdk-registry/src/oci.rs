@@ -147,6 +147,16 @@ impl ExtensionRegistry for OciRegistry {
             })?;
         verify_layer_digest(declared_digest, &first_layer.sha256_digest())?;
 
+        // The HTTP store caps downloads at 256 MiB; the OCI path had no
+        // equivalent bound, and `oci-client`'s default config sets none — so a
+        // hostile registry could stream an unbounded layer into memory.
+        let cap = greentic_extension_sdk_contract::MAX_ARCHIVE_BYTES;
+        if first_layer.data.len() as u64 > cap {
+            return Err(RegistryError::ArtifactTooLarge {
+                limit: usize::try_from(cap).unwrap_or(usize::MAX),
+            });
+        }
+
         let bytes = first_layer.data.clone();
 
         // Parse the describe out of the zip on a blocking thread (zip indexing +

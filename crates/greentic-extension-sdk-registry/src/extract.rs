@@ -2,7 +2,7 @@
 //! duplicate-entry and nesting guards. Split out of `lifecycle.rs` so
 //! filesystem hardening lives in one reviewable place.
 
-use std::io::Cursor;
+use std::io::{Cursor, Read as _};
 
 use crate::error::RegistryError;
 use crate::types::ExtensionArtifact;
@@ -13,6 +13,15 @@ use crate::types::ExtensionArtifact;
 /// denial-of-service attempt (inode/path-length exhaustion), not a pack.
 const MAX_ENTRY_DEPTH: usize = 16;
 
+/// Ceiling on bytes written per entry, and across the whole extraction.
+///
+/// Depth was capped here but size was not: `io::copy` wrote as much as the
+/// entry decompressed to. `manifest.json`'s ledger caps ledgered entries, but
+/// this is the one writer that runs after those checks, so a lone hostile
+/// entry could still fill the disk. Mirrors the contract crate's limits.
+const MAX_EXTRACT_ENTRY_BYTES: u64 = greentic_extension_sdk_contract::MAX_ENTRY_BYTES;
+const MAX_EXTRACT_TOTAL_BYTES: u64 = greentic_extension_sdk_contract::MAX_ARCHIVE_BYTES;
+
 pub(crate) fn extract_to_staging(
     artifact: &ExtensionArtifact,
     staging: &std::path::Path,
@@ -21,6 +30,7 @@ pub(crate) fn extract_to_staging(
     let mut archive = zip::ZipArchive::new(cursor)
         .map_err(|e| RegistryError::Storage(format!("zip open: {e}")))?;
     let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    let mut total_written: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -77,7 +87,23 @@ pub(crate) fn extract_to_staging(
             std::fs::create_dir_all(parent)?;
         }
         let mut out = std::fs::File::create(&out_path)?;
-        std::io::copy(&mut entry, &mut out)?;
+        // Bounded copy: `take` on the reader, then check whether it stopped
+        // because the entry ended or because it hit the cap.
+        let written = std::io::copy(
+            &mut (&mut entry).take(MAX_EXTRACT_ENTRY_BYTES + 1),
+            &mut out,
+        )?;
+        if written > MAX_EXTRACT_ENTRY_BYTES {
+            return Err(RegistryError::ArtifactTooLarge {
+                limit: usize::try_from(MAX_EXTRACT_ENTRY_BYTES).unwrap_or(usize::MAX),
+            });
+        }
+        total_written = total_written.saturating_add(written);
+        if total_written > MAX_EXTRACT_TOTAL_BYTES {
+            return Err(RegistryError::ArtifactTooLarge {
+                limit: usize::try_from(MAX_EXTRACT_TOTAL_BYTES).unwrap_or(usize::MAX),
+            });
+        }
     }
     Ok(())
 }
@@ -98,7 +124,7 @@ mod tests {
         serde_json::from_slice(&std::fs::read(&fx.describe_path).unwrap()).unwrap()
     }
 
-    fn artifact(bytes: Vec<u8>) -> ExtensionArtifact {
+    pub(super) fn artifact(bytes: Vec<u8>) -> ExtensionArtifact {
         ExtensionArtifact {
             name: "greentic.xtest".into(),
             version: "1.0.0".into(),
@@ -108,7 +134,7 @@ mod tests {
         }
     }
 
-    fn zip_with_files(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    pub(super) fn zip_with_files(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut buf: Vec<u8> = Vec::new();
         {
             let mut w = zip::ZipWriter::new(Cursor::new(&mut buf));
@@ -194,5 +220,63 @@ mod tests {
         let path = format!("{deep}/f.txt");
         let bytes = zip_with_files(&[(path.as_str(), b"x")]);
         extract_to_staging(&artifact(bytes), tmp.path()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod traversal_tests {
+    use super::extract_to_staging;
+    use super::tests::{artifact, zip_with_files};
+
+    /// Zip-slip. The `Component::ParentDir` guard had **no test at all**, and
+    /// neither did the absolute-path case — the two classic shapes this
+    /// function exists to reject.
+    #[test]
+    fn rejects_entries_that_escape_the_staging_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("staging");
+        let outside = tmp.path().join("escaped.txt");
+
+        for name in [
+            "../escaped.txt",
+            "sub/../../escaped.txt",
+            "/etc/passwd",
+            "..\\escaped.txt",
+        ] {
+            let zip = zip_with_files(&[(name, b"pwned".as_slice())]);
+            // Either rejected outright, or sanitized to stay inside staging —
+            // never written outside it.
+            let _ = extract_to_staging(&artifact(zip), &staging);
+            assert!(
+                !outside.exists(),
+                "entry {name:?} wrote outside the staging directory"
+            );
+        }
+    }
+
+    /// Depth was capped but size was not: `io::copy` wrote whatever the entry
+    /// decompressed to.
+    #[test]
+    fn rejects_an_entry_larger_than_the_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("staging");
+
+        let huge = vec![0u8; usize::try_from(super::MAX_EXTRACT_ENTRY_BYTES).unwrap() + 1];
+        let zip = zip_with_files(&[("big.bin", huge.as_slice())]);
+
+        let err = extract_to_staging(&artifact(zip), &staging).unwrap_err();
+        assert!(
+            matches!(err, crate::error::RegistryError::ArtifactTooLarge { .. }),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn extracts_an_ordinary_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("staging");
+        let zip = zip_with_files(&[("ok.txt", b"fine".as_slice())]);
+        extract_to_staging(&artifact(zip), &staging).unwrap();
+        assert_eq!(std::fs::read(staging.join("ok.txt")).unwrap(), b"fine");
     }
 }

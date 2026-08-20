@@ -138,11 +138,25 @@ struct PublishResponseDto {
 /// could succeed anyway) drops to the bare default, and that is logged.
 fn build_secure_client() -> Client {
     let no_redirect = || reqwest::redirect::Policy::none();
+    // Timeouts: there were none anywhere on the registry path, so a
+    // slow-loris registry could hold the client indefinitely. The per-request
+    // total is generous because artifact downloads are large; the connect
+    // timeout is what catches a black-holed host quickly.
+    let connect = std::time::Duration::from_secs(15);
+    let total = std::time::Duration::from_mins(5);
     Client::builder()
         .user_agent(concat!("gtdx/", env!("CARGO_PKG_VERSION")))
         .redirect(no_redirect())
+        .connect_timeout(connect)
+        .timeout(total)
         .build()
-        .or_else(|_| Client::builder().redirect(no_redirect()).build())
+        .or_else(|_| {
+            Client::builder()
+                .redirect(no_redirect())
+                .connect_timeout(connect)
+                .timeout(total)
+                .build()
+        })
         .unwrap_or_else(|e| {
             tracing::error!(
                 "failed to build a redirect-restricted HTTP client ({e}); \

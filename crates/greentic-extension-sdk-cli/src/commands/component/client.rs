@@ -51,8 +51,20 @@ pub struct AdminClient {
 
 impl AdminClient {
     pub fn new(base_url: &str, token: &str, tenant: &str, user: &str) -> anyhow::Result<Self> {
+        // This client carries a `gts_` tenant-admin token on every request, but
+        // accepted any URL from `--admin-url`/`GREENTIC_ADMIN_URL` over a bare
+        // client: no scheme check, no redirect policy, no timeout. An
+        // `http://internal-admin` value put the token on the wire in cleartext,
+        // and an https endpoint could 302 it to a plaintext host.
+        greentic_extension_sdk_registry::store::validate_registry_url(
+            base_url,
+            crate::registry_security::insecure_registry_opt_in(),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
         let client = Client::builder()
             .user_agent(concat!("gtdx/", env!("CARGO_PKG_VERSION")))
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(30))
             .build()?;
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),

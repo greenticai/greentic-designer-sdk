@@ -260,10 +260,26 @@ fn paste_token(
 /// Best-effort cross-platform browser open. Returns an error if the platform
 /// opener could not be launched; callers treat that as non-fatal.
 fn open_in_browser(url: &str) -> anyhow::Result<()> {
+    // Belt and braces on every platform: the URL is registry-controlled, so
+    // refuse anything that is not an ordinary http(s) address before handing it
+    // to a platform opener.
+    if !(url.starts_with("https://") || url.starts_with("http://"))
+        || url.chars().any(|c| {
+            c.is_control() || matches!(c, '"' | '\'' | '&' | '|' | '^' | '<' | '>' | '`' | '$')
+        })
+    {
+        anyhow::bail!("refusing to open a non-http(s) or unsafe verification URL: {url:?}");
+    }
     #[cfg(target_os = "macos")]
     let (program, args): (&str, &[&str]) = ("open", &[]);
+    // Not `cmd /C start`: Rust's Windows argument quoting only quotes on
+    // whitespace, and `cmd.exe` splits on metacharacters — so a
+    // registry-supplied `https://x/a&calc.exe` executed the payload. This flow
+    // takes its URL straight from the registry's JSON response.
+    // `rundll32 url.dll,FileProtocolHandler` takes the URL as a plain argument
+    // with no shell in between.
     #[cfg(target_os = "windows")]
-    let (program, args): (&str, &[&str]) = ("cmd", &["/C", "start", ""]);
+    let (program, args): (&str, &[&str]) = ("rundll32", &["url.dll,FileProtocolHandler"]);
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     let (program, args): (&str, &[&str]) = ("xdg-open", &[]);
 
