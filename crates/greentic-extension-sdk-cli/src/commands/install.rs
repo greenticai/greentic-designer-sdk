@@ -18,15 +18,19 @@ pub struct Args {
     /// Skip permission prompt
     #[arg(long, short = 'y')]
     pub yes: bool,
-    /// Trust policy override: strict | normal | loose
-    #[arg(long)]
-    pub trust: Option<String>,
+    /// Trust policy override (defaults to the configured policy)
+    ///
+    /// A validated enum, matching `gtdx publish`. As a free string,
+    /// `--trust stict` was accepted at parse time and only rejected later,
+    /// after config load, without listing the valid values.
+    #[arg(long, value_enum)]
+    pub trust: Option<super::publish::TrustArg>,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     let cfg = super::load_config(home)?;
     let storage = Storage::new(home);
-    let trust_policy = parse_trust(args.trust.as_deref(), &cfg.default.trust_policy)?;
+    let trust_policy = parse_trust(args.trust, &cfg.default.trust_policy)?;
 
     let target_path = PathBuf::from(&args.target);
     if target_path.exists() {
@@ -106,8 +110,16 @@ async fn install_from_registry(
     Ok(())
 }
 
-fn parse_trust(override_val: Option<&str>, default_val: &str) -> anyhow::Result<TrustPolicy> {
-    let raw = override_val.unwrap_or(default_val);
+fn parse_trust(
+    override_val: Option<super::publish::TrustArg>,
+    default_val: &str,
+) -> anyhow::Result<TrustPolicy> {
+    // The flag is now a validated enum, so only the *config* value can still be
+    // an arbitrary string.
+    if let Some(arg) = override_val {
+        return Ok(arg.to_policy());
+    }
+    let raw = default_val;
     match raw {
         "strict" => Ok(TrustPolicy::Strict),
         "normal" => Ok(TrustPolicy::Normal),

@@ -11,8 +11,19 @@ use super::{ALL_KINDS, scan_installed};
 #[derive(ClapArgs, Debug)]
 pub struct Args {
     /// Registry name from config (defaults to [default].registry)
-    #[arg(long)]
+    #[arg(short = 'r', long)]
     pub registry: Option<String>,
+
+    /// Emit machine-readable JSON instead of a table
+    ///
+    /// The fixed-width table silently truncates ids past 40 characters, which
+    /// is a trap for anything parsing it with `awk`.
+    #[arg(long)]
+    pub json: bool,
+
+    /// Exit 1 when any update is available (for CI gating, like `npm outdated`)
+    #[arg(long)]
+    pub exit_code: bool,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
@@ -66,16 +77,45 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         }
     };
 
-    println!("{:<40} {:<12} {:<12} STATUS", "ID", "CURRENT", "TARGET");
-    for u in &updates {
-        let (target, label) = match &u.status {
-            UpdateStatus::UpToDate => ("-".to_string(), "up to date"),
-            UpdateStatus::UpdateAvailable { target, .. } => (target.clone(), "update available"),
-            UpdateStatus::Pinned => ("-".to_string(), "pinned"),
-            UpdateStatus::OutOfRange { latest, .. } => (latest.clone(), "out of range"),
-            UpdateStatus::Unknown { .. } => ("?".to_string(), "unknown"),
-        };
-        println!("{:<40} {:<12} {:<12} {}", u.id, u.current, target, label);
+    let rows: Vec<(String, String, String, &str)> = updates
+        .iter()
+        .map(|u| {
+            let (target, label) = match &u.status {
+                UpdateStatus::UpToDate => ("-".to_string(), "up to date"),
+                UpdateStatus::UpdateAvailable { target, .. } => {
+                    (target.clone(), "update available")
+                }
+                UpdateStatus::Pinned => ("-".to_string(), "pinned"),
+                UpdateStatus::OutOfRange { latest, .. } => (latest.clone(), "out of range"),
+                UpdateStatus::Unknown { .. } => ("?".to_string(), "unknown"),
+            };
+            (u.id.clone(), u.current.clone(), target, label)
+        })
+        .collect();
+
+    if args.json {
+        let payload: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|(id, current, target, status)| {
+                serde_json::json!({
+                    "id": id,
+                    "current": current,
+                    "target": target,
+                    "status": status,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!("{:<40} {:<12} {:<12} STATUS", "ID", "CURRENT", "TARGET");
+        for (id, current, target, label) in &rows {
+            println!("{id:<40} {current:<12} {target:<12} {label}");
+        }
+    }
+
+    if args.exit_code && rows.iter().any(|(_, _, _, s)| *s == "update available") {
+        // Opt-in, so the default stays a read-only informational command.
+        std::process::exit(1);
     }
     Ok(())
 }

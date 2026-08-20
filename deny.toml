@@ -1,0 +1,50 @@
+# `cargo deny` configuration.
+#
+# The workspace had no supply-chain gate at all: no `cargo deny`, no
+# `cargo audit`, no dependabot. For an SDK that installs and executes
+# third-party WASM, an advisory check is the minimum.
+
+[advisories]
+# Fail on any RUSTSEC advisory affecting the dependency graph.
+yanked = "deny"
+
+# Unmaintained crates are reported, not fatal. They are worth knowing about,
+# but a transitive one with no available fix would make CI permanently red
+# without telling anyone anything new on each run.
+unmaintained = "workspace"
+
+# Known and accepted today: `proc-macro-error2` (via getset -> oci-spec ->
+# oci-client) is unmaintained with, per RUSTSEC-2026-0173, "no safe upgrade
+# available". It is a build-time proc-macro, not part of the shipped binary's
+# runtime surface. Covered by `unmaintained = "workspace"` above rather than an
+# explicit ignore, so it resolves itself when oci-client drops oci-spec 0.7.
+
+[licenses]
+# The workspace ships MIT; only permissive licences are acceptable in the tree.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+    # `notify` (the file watcher behind `gtdx dev`) is CC0-1.0 — a public-domain
+    # dedication, so at least as permissive as the rest of this list.
+    "CC0-1.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate versions are noise rather than a defect in a tree this size, but
+# surface them so they do not accumulate unnoticed.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

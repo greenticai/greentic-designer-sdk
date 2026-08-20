@@ -1,3 +1,4 @@
+use std::io::IsTerminal as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -25,15 +26,21 @@ pub fn run(args: &Args, _home: &Path) -> Result<()> {
     let pubkey_b64 =
         base64::engine::general_purpose::STANDARD.encode(signing_key.verifying_key().to_bytes());
 
-    match &args.out {
-        Some(path) => {
-            write_mode_0600(path, pem.as_bytes())
-                .with_context(|| format!("write {}", path.display()))?;
-            eprintln!("private key written: {}", path.display());
+    if let Some(path) = &args.out {
+        write_mode_0600(path, pem.as_bytes())
+            .with_context(|| format!("write {}", path.display()))?;
+        eprintln!("private key written: {}", path.display());
+    } else {
+        // Warn before writing an unencrypted private key to a terminal: it
+        // lands in scroll-back, in shell history if piped, and in CI logs.
+        // The `--out` path is the safe one (create_new + mode 0600).
+        if std::io::stdout().is_terminal() {
+            eprintln!(
+                "warning: writing an unencrypted private key to your terminal. \
+                 Use --out <file> instead — it is created with mode 0600."
+            );
         }
-        None => {
-            print!("{}", pem.as_str());
-        }
+        print!("{}", pem.as_str());
     }
 
     eprintln!("public key (base64): {pubkey_b64}");

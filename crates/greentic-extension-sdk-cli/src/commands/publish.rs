@@ -22,6 +22,19 @@ pub enum TrustArg {
 }
 
 impl TrustArg {
+    /// The install-time policy this flag selects.
+    ///
+    /// Shared with `gtdx install`, which previously hand-parsed the same three
+    /// values from a free string.
+    pub(super) fn to_policy(self) -> greentic_extension_sdk_registry::lifecycle::TrustPolicy {
+        use greentic_extension_sdk_registry::lifecycle::TrustPolicy;
+        match self {
+            Self::Loose => TrustPolicy::Loose,
+            Self::Normal => TrustPolicy::Normal,
+            Self::Strict => TrustPolicy::Strict,
+        }
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Self::Loose => "loose",
@@ -84,9 +97,13 @@ pub struct Args {
     #[arg(long)]
     pub force: bool,
 
-    /// cargo component build --release (default true for publish).
-    #[arg(long, default_value_t = true)]
-    pub release: bool,
+    /// Build with the debug profile instead of release.
+    ///
+    /// Replaces a `--release` flag that could never be turned off: as a
+    /// `SetTrue` bool defaulting to `true`, `--release` had no effect and no
+    /// negation, so the profile was always release regardless.
+    #[arg(long)]
+    pub debug: bool,
 
     /// Skip build; only check registry for version conflict.
     #[arg(long)]
@@ -146,10 +163,10 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         let rel = crate::icon::apply_icon(&project_dir, icon)?;
         eprintln!("note: wrote {rel} and set metadata.icon in describe.json (commit this)");
     }
-    let profile = if args.release {
-        Profile::Release
-    } else {
+    let profile = if args.debug {
         Profile::Debug
+    } else {
+        Profile::Release
     };
     let cfg = PublishConfig {
         project_dir,

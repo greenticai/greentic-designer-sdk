@@ -4,7 +4,9 @@ on:
   push:
     branches: [main, develop, research]
   pull_request:
-    branches: [main, develop, research]
+    # Research release branches (`chore/bump-research-*`) were not matched, so
+    # PRs targeting them ran no fmt/clippy/test at all — only the smoke job.
+    branches: [main, develop, research, "chore/bump-*", "release/**"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -71,3 +73,12 @@ jobs:
       # shipped unable to build while CI stayed green.
       - name: cargo test -- --ignored
         run: cargo test -p greentic-extension-sdk-cli --locked -- --ignored
+
+  audit:
+    name: cargo deny (advisories + licenses + bans)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

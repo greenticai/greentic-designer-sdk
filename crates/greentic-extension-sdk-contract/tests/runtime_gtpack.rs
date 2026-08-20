@@ -1,7 +1,6 @@
 use greentic_extension_sdk_contract::describe::provider::RuntimeGtpack;
 
 #[test]
-#[ignore = "v1 shape — see Phase A.2 migration; deleted in A.6.3"]
 fn runtime_gtpack_parses_from_json() {
     let json = serde_json::json!({
         "file": "runtime/provider.gtpack",
@@ -16,7 +15,6 @@ fn runtime_gtpack_parses_from_json() {
 }
 
 #[test]
-#[ignore = "v1 shape — see Phase A.2 migration; deleted in A.6.3"]
 fn runtime_gtpack_rejects_short_sha256() {
     let json = serde_json::json!({
         "file": "runtime/provider.gtpack",
@@ -29,7 +27,6 @@ fn runtime_gtpack_rejects_short_sha256() {
 }
 
 #[test]
-#[ignore = "v1 shape — see Phase A.2 migration; deleted in A.6.3"]
 fn runtime_gtpack_rejects_non_hex_sha256() {
     let err = serde_json::from_value::<RuntimeGtpack>(serde_json::json!({
         "file": "runtime/provider.gtpack",

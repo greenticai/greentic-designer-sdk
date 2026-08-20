@@ -38,12 +38,15 @@ enum Command {
     /// Register a component-tool by URL against greentic-designer-admin
     Component(commands::component::Args),
     /// List installed extensions
+    #[command(alias = "ls")]
     List(commands::list::Args),
     /// Install an extension from a registry or local .gtxpack
+    #[command(alias = "i")]
     Install(commands::install::Args),
     /// Generate an ed25519 keypair for signing extension artifacts
     Keygen(commands::keygen::Args),
     /// Remove an installed extension
+    #[command(aliases = ["rm", "remove"])]
     Uninstall(commands::uninstall::Args),
     /// Search a registry
     Search(commands::search::Args),
@@ -62,6 +65,7 @@ enum Command {
     /// Log out of a registry
     Logout(commands::login::LogoutArgs),
     /// Show/modify configured registries
+    #[command(alias = "reg")]
     Registries(commands::registries::Args),
     /// Diagnose installed extensions
     Doctor(commands::doctor::Args),
@@ -85,6 +89,10 @@ enum Command {
     /// Reverse a yank, putting a version back in circulation
     Unyank(commands::yank::UnyankArgs),
     /// Print version
+    ///
+    /// Hidden: `--version` already does this. Kept so existing scripts and
+    /// muscle memory keep working, but it should not clutter the command list.
+    #[command(hide = true)]
     Version,
 }
 

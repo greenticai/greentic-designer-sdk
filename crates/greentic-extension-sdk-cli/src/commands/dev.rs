@@ -15,14 +15,18 @@ pub struct Args {
     #[arg(long, conflicts_with = "watch")]
     pub once: bool,
 
-    /// Continuous watch mode (default)
+    /// Continuous watch mode. This is the default; pass `--once` for a single
+    /// build-pack-install pass.
+    #[allow(dead_code)] // the default; `--once` is what actually branches
     #[arg(long)]
     pub watch: bool,
 
     /// Override target registry dir (currently informational; install uses home)
-    // Reserved: consumed in future tracks.
+    // Reserved: consumed in future tracks. `hide` because advertising a flag
+    // that does nothing is worse than not offering it — it still parses, so
+    // existing scripts keep working.
     #[allow(dead_code)]
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub install_to: Option<PathBuf>,
 
     /// Build and pack only; skip installation
@@ -34,19 +38,21 @@ pub struct Args {
     pub release: bool,
 
     /// Override `describe.json` id for this run (reserved for future multi-variant dev)
-    // Reserved: consumed in future tracks.
+    // Reserved: consumed in future tracks; hidden until it is wired.
     #[allow(dead_code)]
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub ext_id: Option<String>,
 
     /// File-watch debounce window (ms)
     #[arg(long, default_value_t = default_debounce_ms())]
     pub debounce_ms: u64,
 
-    /// Log filter level
-    // Reserved: consumed in future tracks.
+    /// Log filter level (not yet implemented — use `--verbose` or `RUST_LOG`)
+    // Reserved: consumed in future tracks. This one was the most misleading of
+    // the four: it advertised `[default: info]`, so it read as the way to
+    // control verbosity, while logging came only from RUST_LOG.
     #[allow(dead_code)]
-    #[arg(long, default_value = "info")]
+    #[arg(long, default_value = "info", hide = true)]
     pub log: String,
 
     /// Path to the project's `Cargo.toml`
@@ -61,9 +67,9 @@ pub struct Args {
     pub mount: Option<PathBuf>,
 
     /// Force a full rebuild by running `cargo clean -p <crate>` first
-    // Reserved: consumed in future tracks.
+    // Reserved: consumed in future tracks; hidden until it is wired.
     #[allow(dead_code)]
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub force_rebuild: bool,
 
     /// Output format: human | json

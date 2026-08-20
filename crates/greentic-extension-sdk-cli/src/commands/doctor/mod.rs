@@ -33,7 +33,10 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     failures += check_designer_compat(home)?;
     println!();
     if failures > 0 {
-        println!("{failures} problem(s) found");
+        // Failures to stderr: `gtdx doctor 2>/dev/null` used to show every
+        // problem while `>/dev/null` hid them — exactly backwards for a
+        // diagnostic command.
+        eprintln!("{failures} problem(s) found");
         std::process::exit(1);
     }
     println!("all checks passed");
@@ -50,7 +53,7 @@ fn check_toolchain() -> usize {
     if let Ok(path) = which::which("cargo") {
         println!("  \u{2713} cargo  {}", path.display());
     } else {
-        println!("  \u{2717} cargo not found — install Rust from https://rustup.rs/");
+        eprintln!("  \u{2717} cargo not found — install Rust from https://rustup.rs/");
         fails += 1;
     }
     for (name, hint) in [
@@ -60,7 +63,7 @@ fn check_toolchain() -> usize {
         if let Ok(path) = which::which(name) {
             println!("  \u{2713} {name}  {}", path.display());
         } else {
-            println!("  \u{26A0} {name} not found — {hint}");
+            eprintln!("  \u{26A0} {name} not found — {hint}");
         }
     }
     match std::process::Command::new("rustup")
@@ -72,13 +75,13 @@ fn check_toolchain() -> usize {
             if s.lines().any(|l| l.trim() == "wasm32-wasip2") {
                 println!("  \u{2713} wasm32-wasip2 target installed");
             } else {
-                println!(
+                eprintln!(
                     "  \u{26A0} wasm32-wasip2 target missing — rustup target add wasm32-wasip2"
                 );
             }
         }
         _ => {
-            println!("  \u{26A0} cannot list rustup targets");
+            eprintln!("  \u{26A0} cannot list rustup targets");
         }
     }
     fails
@@ -88,12 +91,12 @@ async fn check_registries(home: &Path, offline: bool) -> usize {
     let cfg = match greentic_extension_sdk_registry::config::load(&home.join("config.toml")) {
         Ok(c) => c,
         Err(e) => {
-            println!("  \u{26A0} cannot read config.toml: {e}");
+            eprintln!("  \u{26A0} cannot read config.toml: {e}");
             return 1;
         }
     };
     if cfg.registries.is_empty() {
-        println!(
+        eprintln!(
             "  \u{26A0} no registries configured — add one with: gtdx registries add <name> <url>"
         );
         return 0;
@@ -107,7 +110,7 @@ async fn check_registries(home: &Path, offline: bool) -> usize {
         Err(e) => {
             // `doctor` is the command users run on a broken machine — a TLS/HTTP
             // backend init failure must be reported, not panic the diagnostics.
-            println!("  \u{2717} cannot build HTTP client to probe registries: {e}");
+            eprintln!("  \u{2717} cannot build HTTP client to probe registries: {e}");
             return cfg.registries.len();
         }
     };
@@ -125,7 +128,7 @@ async fn check_registries(home: &Path, offline: bool) -> usize {
                 println!("  \u{2713} {}  {}", entry.name, entry.url);
             }
             Ok(resp) => {
-                println!(
+                eprintln!(
                     "  \u{26A0} {}  {}  (health={} at {})",
                     entry.name,
                     entry.url,
@@ -134,7 +137,7 @@ async fn check_registries(home: &Path, offline: bool) -> usize {
                 );
             }
             Err(e) => {
-                println!("  \u{2717} {}  {}  ({e})", entry.name, entry.url);
+                eprintln!("  \u{2717} {}  {}  ({e})", entry.name, entry.url);
                 fails += 1;
             }
         }
@@ -147,7 +150,7 @@ fn check_credentials(home: &Path) -> usize {
     let creds = match Credentials::load(&path) {
         Ok(c) => c,
         Err(e) => {
-            println!("  \u{26A0} cannot read credentials.toml: {e}");
+            eprintln!("  \u{26A0} cannot read credentials.toml: {e}");
             return 1;
         }
     };
@@ -163,7 +166,7 @@ fn check_credentials(home: &Path) -> usize {
                 println!("  \u{2713} {name}  expires in {}h", dur.num_hours());
             }
             Some(_) => {
-                println!("  \u{2717} {name}  token expired — run: gtdx login --registry {name}");
+                eprintln!("  \u{2717} {name}  token expired — run: gtdx login --registry {name}");
                 fails += 1;
             }
             None => {
@@ -223,7 +226,7 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
     for ext_dir in dirs {
         let describe_path = ext_dir.join("describe.json");
         if !describe_path.exists() {
-            println!("  \u{2717} {} (no describe.json)", ext_dir.display());
+            eprintln!("  \u{2717} {} (no describe.json)", ext_dir.display());
             bad += 1;
             continue;
         }
@@ -231,13 +234,13 @@ fn check_installed(home: &Path) -> anyhow::Result<usize> {
         let value: serde_json::Value = match serde_json::from_slice(&bytes) {
             Ok(v) => v,
             Err(e) => {
-                println!("  \u{2717} {}: invalid JSON: {e}", describe_path.display());
+                eprintln!("  \u{2717} {}: invalid JSON: {e}", describe_path.display());
                 bad += 1;
                 continue;
             }
         };
         if let Err(e) = greentic_extension_sdk_contract::schema::validate_describe_json(&value) {
-            println!("  \u{2717} {}: {e}", describe_path.display());
+            eprintln!("  \u{2717} {}: {e}", describe_path.display());
             bad += 1;
         } else {
             println!("  \u{2713} {}", describe_path.display());
@@ -285,7 +288,7 @@ fn check_designer_compat(home: &Path) -> anyhow::Result<usize> {
         return Ok(0);
     };
     let Some(version) = designer_compat::designer_version(&binary) else {
-        println!(
+        eprintln!(
             "  \u{26A0} cannot read a version from {} --version — skipping",
             binary.display()
         );
@@ -315,7 +318,7 @@ fn check_designer_compat(home: &Path) -> anyhow::Result<usize> {
         let verdict = designer_compat::evaluate(&version, &describe);
         match verdict.remedy(&version) {
             Some(remedy) => {
-                println!("  \u{2717} {label}: {remedy}");
+                eprintln!("  \u{2717} {label}: {remedy}");
                 problems += 1;
             }
             None => println!("  \u{2713} {label}"),
