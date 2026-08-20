@@ -77,12 +77,51 @@ pub async fn upgrade<R: ExtensionRegistry + ?Sized>(
     target_version: &str,
     opts: InstallOptions,
 ) -> Result<(), RegistryError> {
-    if current_version == target_version {
-        return Ok(());
+    // Compare by semver precedence, not by string. Two reasons:
+    //
+    // 1. There was no ordering guard at all, so a lower target installed and
+    //    then `remove_extension(current_version)` deleted the newer install —
+    //    a silent rollback.
+    // 2. `1.0.0+build.1` and `1.0.0` are the same version but different text,
+    //    so the string check let the function "upgrade" onto itself and then
+    //    delete what it had just written.
+    //
+    // Build metadata is stripped before comparing: the semver *spec* says it is
+    // ignored for precedence, but the `semver` crate's `Ord` does compare it
+    // (`1.0.0+build.1 > 1.0.0`), which would resurrect defect 2 as a spurious
+    // "downgrade".
+    match (
+        parse_precedence(current_version),
+        parse_precedence(target_version),
+    ) {
+        (Some(current), Some(target)) => match target.cmp(&current) {
+            std::cmp::Ordering::Equal => return Ok(()),
+            std::cmp::Ordering::Less => {
+                return Err(RegistryError::Storage(format!(
+                    "refusing to downgrade {name} from {current_version} to {target_version}; \
+                     uninstall it first if that is intended"
+                )));
+            }
+            std::cmp::Ordering::Greater => {}
+        },
+        // Unparsable on either side (a hand-made install dir): fall back to the
+        // old textual no-op check rather than blocking the update outright.
+        _ => {
+            if current_version == target_version {
+                return Ok(());
+            }
+        }
     }
     let installer = Installer::new(storage.clone_shallow(), registry);
     installer.install(name, target_version, opts).await?;
     // Remove the old version only after the new one is committed on disk.
     storage.remove_extension(kind, name, current_version)?;
     Ok(())
+}
+
+/// A version with build metadata stripped, for precedence comparison.
+fn parse_precedence(v: &str) -> Option<semver::Version> {
+    let mut parsed = semver::Version::parse(v).ok()?;
+    parsed.build = semver::BuildMetadata::EMPTY;
+    Some(parsed)
 }

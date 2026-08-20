@@ -48,6 +48,14 @@ pub struct ExtensionState {
     pub default: ScopeState,
     #[serde(default)]
     pub tenants: HashMap<String, ScopeState>,
+    /// Fields written by a newer client that this version does not know about.
+    ///
+    /// `update` is a read-modify-write, so without this anything serde did not
+    /// recognise was dropped on the next `gtdx enable` — while `schema` was
+    /// preserved verbatim, leaving a file that still claimed to be the newer
+    /// version it no longer conformed to.
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub unknown: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -57,6 +65,9 @@ pub struct ScopeState {
     /// Per-extension update policy, keyed by bare `id`. Added in schema v1.1.
     #[serde(default)]
     pub policies: HashMap<String, ExtensionPolicy>,
+    /// See [`ExtensionState::unknown`].
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub unknown: serde_json::Map<String, serde_json::Value>,
 }
 
 fn default_schema() -> String {
