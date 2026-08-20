@@ -55,8 +55,14 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
-      - name: Add wasm32-wasip2 target
-        run: rustup target add wasm32-wasip2
+      # Install the targets for the toolchain the *scaffolds* pin
+      # (rust-toolchain.toml in every generated project), not just the default
+      # one — otherwise the first test to build fetches them mid-run, and the
+      # parallel tests then race each other's rustup installs.
+      - name: Add wasm targets
+        run: |
+          rustup target add wasm32-wasip2 wasm32-wasip1
+          rustup target add --toolchain 1.95.0 wasm32-wasip2 wasm32-wasip1
 
       - uses: Swatinem/rust-cache@v2
 
@@ -71,8 +77,12 @@ jobs:
       # resolution, so they cannot run in the default `cargo test`. Without this
       # job they never run at all — which is how six of seven `gtdx new` kinds
       # shipped unable to build while CI stayed green.
+      # Single-threaded: each of these tests shells out to cargo/rustup, and in
+      # parallel they contend for the same toolchain state. They are slow
+      # cargo builds either way, so serializing costs little and makes a
+      # failure readable.
       - name: cargo test -- --ignored
-        run: cargo test -p greentic-extension-sdk-cli --locked -- --ignored
+        run: cargo test -p greentic-extension-sdk-cli --locked -- --ignored --test-threads=1
 
   audit:
     name: cargo deny (advisories + licenses + bans)
