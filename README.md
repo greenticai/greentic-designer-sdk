@@ -29,6 +29,14 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
+**Use 1.2.1 or newer.** It is the first release whose `gtdx new` scaffolds
+build: every earlier one, `1.2.0` included, rendered `wit/world.wit` with a
+single contract version for packages that are versioned independently, so a
+fresh scaffold failed its first `cargo component build` for every kind except
+`mcp` with `package 'greentic:extension-host@0.2.0' not found`. 1.2.1 also
+fixed the `provider` and `--kind llm` stubs and made `--kind wasm-component`
+emit a node the runner can execute.
+
 **Recommended — `cargo binstall` (no compile, fetches the release binary):**
 
 ```bash
@@ -53,7 +61,7 @@ Grab the asset for your platform from the
 
 ```bash
 # macOS Apple Silicon example — swap TAG and target for your platform
-TAG=v1.2.0
+TAG=v1.2.1
 curl -L -o gtdx.tgz \
   "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-aarch64-apple-darwin.tgz"
 tar -xzf gtdx.tgz
@@ -72,8 +80,8 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 
 Older `-research` versions do sit on crates.io from before the skip rule
 landed. Avoid opting into pre-releases there: `1.2.3-research` is a
-pre-release of a *higher* patch, so it sorts above the 1.2.0 stable while
-containing older code.
+pre-release of a *higher* patch, so it sorts above the 1.2.1 stable while
+containing older code. `1.3.0-research.1` is the same trap one minor up.
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
@@ -93,6 +101,12 @@ There are two ways to scaffold. Pick whichever you prefer:
 ```bash
 # 1) Flag-driven (scriptable, CI-friendly)
 gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm | mcp
+
+# wasm-component wraps an already-published component as a palette node, so it
+# needs that component's OCI reference — digest-pinned. Omit it and the
+# scaffold writes a placeholder that `gtdx lint --publish` refuses.
+gtdx new my-node --kind wasm-component \
+    --component-ref oci://ghcr.io/greenticai/component/component-my-node@sha256:461c6a68…
 
 # 2) Interactive wizard — just run `gtdx new` with no name on a terminal
 gtdx new                          # prompts for name, kind, id, version, author, license
@@ -173,7 +187,7 @@ locally, or `gtdx lint --publish --dir <ext>` to also enforce
 |------|------|-----|
 | `E_SCHEMA_HOST` | `$schema` must be `https://store.greentic.cloud/schemas/describe-v2.json` | Replace any `store.greentic.ai` (or missing) `$schema` with the canonical URL. |
 | `E_EXPORT_FORM` | `tools[].export` must be a fully-qualified `greentic:extension-design/<interface>.<member>` reference (e.g. `tools.invoke-tool`, `validation.validate-content`, `knowledge.get-entry`) | Replace bare names like `"invoke-tool"` with the fully-qualified form. |
-| `E_ENGINE_DEPRECATED` | the `engine` block is forbidden | Move version constraints into `compat.min_designer_version` / `compat.min_runner_version` and delete `engine`. |
+| `E_ENGINE_DEPRECATED` | the `engine` block is forbidden | Move version constraints into `compat.min_designer_version` / `compat.min_runner_version` and delete `engine`. Templates stopped emitting it in 1.2.1, so this no longer fires on a fresh scaffold. |
 | `E_SHA256_ZERO` | (`--publish` only) no placeholder `0000…` hashes | Let the build/publish step fill real `sha256` values before publishing. |
 | `E_ID_PATTERN` | `metadata.id` must match `^greentic\.[a-z0-9][a-z0-9-]*$` | Use a lowercase-kebab id under the `greentic.` namespace. |
 | `E_TOOL_NAMING` | tool names must be `snake_case` with no near-duplicate prefixes | Rename camelCase tools; disambiguate pairs like `generate_gtpack` / `generate_gtpack_from_sorla_yaml`. |
