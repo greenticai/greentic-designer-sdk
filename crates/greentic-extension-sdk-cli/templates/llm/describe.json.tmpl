@@ -39,8 +39,8 @@
       }
     },
     "permissions": {
-      "network": ["https://api.example.com/"],
-      "secrets": ["secret://example/"],
+      "network": ["https://api.example.com/*"],
+      "secrets": ["secret://{{name}}/api_key"],
       "callExtensionKinds": []
     }
   },
@@ -55,10 +55,15 @@
   "contributions": {
     "tools": [
       {
-        "id": "complete",
         "name": "complete",
+        "export": "greentic:extension-design/tools.invoke-tool",
+        "runtime_ref": "{{runtime_ref_key}}",
         "description": "Run an LLM completion.",
-        "runtime_ref": "{{runtime_ref_key}}"
+        "input_schema": "{\"type\":\"object\",\"required\":[\"prompt\"],\"properties\":{\"prompt\":{\"type\":\"string\"},\"max_tokens\":{\"type\":\"integer\",\"minimum\":1,\"default\":256}}}",
+        "capabilities": ["agentic_worker"],
+        "secret_requirements": [
+          { "key": "{{name}}/api_key", "required": true }
+        ]
       }
     ]
   }
