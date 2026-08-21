@@ -56,10 +56,14 @@ fn new_wasm_component_produces_expected_tree() {
         "README.md",
         ".gitignore",
         "rust-toolchain.toml",
-        "extension/Cargo.toml",
-        "extension/src/lib.rs",
-        "extension/wit/world.wit",
-        "runtime/README.md",
+        // Single crate at the root, exactly like `--kind design`. The old
+        // two-crate workspace (`extension/` + `runtime/`) is gone: it
+        // duplicated the design crate, drifted against the contract, and put
+        // the vendored WIT deps outside the crate's target path, so nothing it
+        // generated ever built.
+        "src/lib.rs",
+        "wit/world.wit",
+        "wit/deps/greentic/extension-design/world.wit",
     ] {
         assert!(
             proj.join(rel).exists(),
@@ -143,4 +147,99 @@ fn new_wasm_component_compiles_to_wasi_p2() {
         ok,
         "cargo build --target wasm32-wasip2 failed\nstdout:\n{build_stdout}\nstderr:\n{build_stderr}"
     );
+}
+
+/// The node's `runtime_ref` must name a component that carries an `oci_ref`.
+///
+/// This scaffold pointed it at its own design-time component, which cannot
+/// execute a node at all — and the failure is silent at every layer that could
+/// have caught it. The designer's flow compiler reads
+/// `runtime.components.<runtime_ref>.oci_ref` and skips a `gtpack`-only
+/// component (falling through to the catalog pin), and the install path
+/// relocates a nested `.gtpack` into the runner's pack directory only for a
+/// `ProviderExtension`. So the generated node built, installed, and ran
+/// nothing.
+#[test]
+fn wasm_component_node_points_at_a_component_with_an_oci_ref() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("greentic.node-test");
+    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("greentic.node-test")
+        .arg("--kind")
+        .arg("wasm-component")
+        .arg("--id")
+        .arg("greentic.node-test")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new failed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+
+    let describe: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
+
+    let node = describe["contributions"]["nodeTypes"]
+        .as_array()
+        .and_then(|a| a.first())
+        .expect("one nodeTypes entry");
+    let runtime_ref = node["runtime_ref"].as_str().expect(
+        "nodeTypes[0].runtime_ref must be set — absent means the runtime picks the sole \
+                 declared component, which here is the design-time wasm",
+    );
+    let component = &describe["runtime"]["components"][runtime_ref];
+    assert!(
+        !component.is_null(),
+        "runtime_ref {runtime_ref:?} names no component: {describe}"
+    );
+    assert!(
+        component["oci_ref"].as_str().is_some_and(|r| !r.is_empty()),
+        "nodeTypes[0].runtime_ref points at {runtime_ref:?}, which has no oci_ref. \
+         The designer's flow compiler skips a gtpack-only component, so this node \
+         would resolve to nothing: {component}"
+    );
+    assert!(
+        component["gtpack"].is_null(),
+        "the node component must not also be an in-pack gtpack: {component}"
+    );
+    assert!(
+        node["operation"].as_str().is_some_and(|o| !o.is_empty()),
+        "nodeTypes[0].operation must be set — the runner refuses a node without one, \
+         at execution time, after the palette and the pack build both report success: {node}"
+    );
+}
+
+/// No describe template may emit the deprecated `engine` block: `gtdx lint`
+/// errors on its presence (`E_ENGINE_DEPRECATED`), so every scaffold shipped
+/// failing the project's own linter.
+#[test]
+fn scaffolded_describes_carry_no_deprecated_engine_block() {
+    for kind in [
+        "design",
+        "bundle",
+        "deploy",
+        "provider",
+        "llm",
+        "wasm-component",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("demo");
+        let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+            .arg("new")
+            .arg("demo")
+            .arg("--kind")
+            .arg(kind)
+            .arg("--dir")
+            .arg(&proj)
+            .arg("-y")
+            .arg("--no-git"));
+        assert!(ok, "gtdx new --kind {kind} failed\n{stdout}\n{stderr}");
+        let describe: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
+        assert!(
+            describe.get("engine").is_none(),
+            "{kind}: describe.json still carries the deprecated `engine` block; \
+             compat is the sole source of version constraints"
+        );
+    }
 }

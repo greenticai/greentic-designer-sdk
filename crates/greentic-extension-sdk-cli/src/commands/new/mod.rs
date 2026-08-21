@@ -74,6 +74,18 @@ pub struct Args {
     #[arg(long)]
     pub label: Option<String>,
 
+    /// `--kind wasm-component` only: OCI reference of the already-published
+    /// component that executes the node, ideally pinned by digest
+    /// (`oci://ghcr.io/org/component-x@sha256:...`).
+    ///
+    /// A node's component must be reachable by `oci_ref`: the designer's flow
+    /// compiler reads `runtime.components.<runtime_ref>.oci_ref` and skips a
+    /// `gtpack`-only component, and the install path relocates a nested
+    /// `.gtpack` for `ProviderExtension` only. Omitted, the scaffold writes a
+    /// placeholder you must replace before publishing.
+    #[arg(long, value_name = "OCI_REF")]
+    pub component_ref: Option<String>,
+
     /// Seed a `--kind mcp` extension from an OpenAPI/Swagger spec (generates the
     /// router via greentic-mcp-gen instead of the empty echo skeleton).
     #[arg(long, value_name = "SPEC")]
@@ -99,6 +111,7 @@ pub(super) struct Resolved {
     force: bool,
     node_type_id: Option<String>,
     label: Option<String>,
+    component_ref: Option<String>,
     /// `OpenAPI` spec path for `--kind mcp` seeded scaffolds.
     from_openapi: Option<PathBuf>,
 }
@@ -181,6 +194,7 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
         force: args.force,
         node_type_id: args.node_type_id.clone(),
         label: args.label.clone(),
+        component_ref: args.component_ref.clone(),
         from_openapi: args.from_openapi.clone(),
     })
 }
@@ -205,6 +219,38 @@ fn prepare_target(target: &Path, force: bool) -> anyhow::Result<()> {
     }
     fs::create_dir_all(target)?;
     Ok(())
+}
+
+/// `(placeholder, embedded WIT file suffix)` for every package a scaffolded
+/// `world.wit` can reference. Keys are used as `{{<placeholder>}}`.
+const WIT_VERSION_PLACEHOLDERS: &[(&str, &str)] = &[
+    ("wit_version_base", "base"),
+    ("wit_version_host", "host"),
+    ("wit_version_design", "design"),
+    ("wit_version_bundle", "bundle"),
+    ("wit_version_deploy", "deploy"),
+    ("wit_version_provider", "provider"),
+];
+
+/// The `greentic:extension-<pkg>@<version>` reference a given kind is authored
+/// against, for the generated README / AGENTS prose.
+///
+/// `wasm-component` and `llm` reuse the design world, and `mcp` is not a
+/// greentic extension package at all — so this is a lookup, not
+/// `format!("greentic:extension-{kind}")`, which produced non-existent
+/// references such as `greentic:extension-wasm-component@0.2.0`.
+fn kind_wit_ref(kind: &str) -> String {
+    let pkg = match kind {
+        "wasm-component" | "llm" => "design",
+        other => other,
+    };
+    if pkg == "mcp" {
+        return "wasix:mcp/router".to_string();
+    }
+    embedded::package_version_for(pkg).map_or_else(
+        || format!("greentic:extension-{pkg}"),
+        |v| format!("greentic:extension-{pkg}@{v}"),
+    )
 }
 
 fn build_context(resolved: &Resolved) -> Context {
@@ -239,6 +285,19 @@ fn build_context(resolved: &Resolved) -> Context {
             .join(" ")
     });
     ctx.set("node_type_id", &node_type_id);
+    // A placeholder rather than a blank: `Context::render` would accept "" and
+    // emit `"oci_ref": ""`, which deserializes fine and resolves to nothing at
+    // compile time. `example.invalid` is reserved by RFC 2606, so a scaffold
+    // that reaches a registry fails loudly instead of hitting a real host.
+    ctx.set(
+        "component_ref",
+        resolved.component_ref.clone().unwrap_or_else(|| {
+            format!(
+                "oci://example.invalid/REPLACE-ME/{node_type_id}@sha256:{}",
+                "0".repeat(64)
+            )
+        }),
+    );
     ctx.set("label", &label);
     let id = resolved.id.as_str();
     ctx.set("id", id);
@@ -247,6 +306,24 @@ fn build_context(resolved: &Resolved) -> Context {
     ctx.set("author", &resolved.author);
     ctx.set("license", &resolved.license);
     ctx.set("contract_version", CONTRACT_VERSION);
+    // Per-package WIT versions, read from the embedded packages themselves.
+    //
+    // `CONTRACT_VERSION` is the contract *generation*, not a uniform per-file
+    // version: within generation 0.2.0, `extension-host` is still `@0.1.0` and
+    // `extension-design` is `@0.3.0`. Rendering a world with one version for
+    // every package asks for `greentic:extension-host@0.2.0`, which has never
+    // existed, and every scaffolded project fails its first
+    // `cargo component build` with `package '...' not found`. Never substitute
+    // `contract_version` into a `world.wit`.
+    for (key, suffix) in WIT_VERSION_PLACEHOLDERS {
+        // `unwrap_or(CONTRACT_VERSION)` would reintroduce exactly the bug this
+        // exists to prevent, so an absent package renders nothing and
+        // `Context::render` then fails loudly on the unsubstituted token.
+        if let Some(v) = embedded::package_version_for(suffix) {
+            ctx.set(key, v);
+        }
+    }
+    ctx.set("kind_wit_ref", kind_wit_ref(resolved.kind.as_str()));
     // `sdk_version` is the gtdx CLI / SDK crate version (the toolchain that
     // generated this scaffold). v2 describe.json templates use it for
     // `engine.*` + `compat.*` so scaffolds pin to the same SDK line that
