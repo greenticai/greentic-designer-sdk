@@ -110,6 +110,13 @@ fn scaffolded_describe_json_validates_against_schema() {
         ("bundle", "bundle-demo"),
         ("deploy", "deploy-demo"),
         ("provider", "provider-demo"),
+        // `llm` and `wasm-component` are DesignExtension-shaped and were both
+        // absent from this list, which is why `llm` shipped a describe with an
+        // `id` key on its tool entry — a field `Tool` does not model, so
+        // `deny_unknown_fields` failed the whole describe and every `--kind llm`
+        // scaffold was unusable from the moment it was generated.
+        ("llm", "llm-demo"),
+        ("wasm-component", "wasm-component-demo"),
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join(scaffold_name);
@@ -164,6 +171,8 @@ fn scaffolded_describe_json_deserializes_into_v2_contract_types() {
         ("deploy", "deploy-rt", ExtensionKind::Deploy),
         ("provider", "provider-rt", ExtensionKind::Provider),
         ("wasm-component", "greentic.wc-rt", ExtensionKind::Design),
+        // `llm` was in neither this list nor the schema list above.
+        ("llm", "llm-rt", ExtensionKind::Design),
     ] {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join(scaffold_name);

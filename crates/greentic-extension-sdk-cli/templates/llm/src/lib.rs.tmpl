@@ -62,14 +62,18 @@ impl tools::Guest for Component {
   "required": ["prompt"]
 }"#
             .to_string(),
-            output_schema_json: r#"{
+            output_schema_json: Some(
+                r#"{
   "type": "object",
   "properties": {
     "text": { "type": "string" }
   },
   "required": ["text"]
 }"#
-            .to_string(),
+                .to_string(),
+            ),
+            capabilities: Some(vec!["agentic_worker".to_string()]),
+            agentic_worker_metadata: None,
         }]
     }
 
@@ -83,11 +87,14 @@ impl tools::Guest for Component {
             )));
         }
         // 1. Pull API key from host secrets (alias declared in describe.json).
-        let api_key = secrets::get("api_key")
-            .map_err(|e| types::ExtensionError::Runtime(format!("secrets::get: {e:?}")))?;
+        // The host takes the full URI, and it must be listed verbatim (or as a
+        // `/`-boundary prefix) in describe.json's permissions.secrets.
+        let api_key = secrets::get("secret://{{name}}/api_key")
+            .map_err(|e| types::ExtensionError::Internal(format!("secrets::get: {e:?}")))?;
         // 2. Build the HTTP request (provider-specific endpoint).
         let req = http::Request {
-            method: http::Method::Post,
+            // `request.method` is a plain string in the WIT record.
+            method: "POST".to_string(),
             url: "https://api.example.com/v1/complete".to_string(),
             headers: vec![
                 ("authorization".to_string(), format!("Bearer {api_key}")),
@@ -97,10 +104,10 @@ impl tools::Guest for Component {
         };
         // 3. Call host http (subject to permissions.network allowlist).
         let resp = http::fetch(&req)
-            .map_err(|e| types::ExtensionError::Runtime(format!("http::fetch: {e:?}")))?;
+            .map_err(|e| types::ExtensionError::Internal(format!("http::fetch: {e:?}")))?;
         // 4. Return the upstream body verbatim. Real impl should parse + reshape.
         String::from_utf8(resp.body)
-            .map_err(|e| types::ExtensionError::Runtime(format!("non-utf8 body: {e}")))
+            .map_err(|e| types::ExtensionError::Internal(format!("non-utf8 body: {e}")))
     }
 }
 

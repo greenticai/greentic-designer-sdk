@@ -207,6 +207,38 @@ fn prepare_target(target: &Path, force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `(placeholder, embedded WIT file suffix)` for every package a scaffolded
+/// `world.wit` can reference. Keys are used as `{{<placeholder>}}`.
+const WIT_VERSION_PLACEHOLDERS: &[(&str, &str)] = &[
+    ("wit_version_base", "base"),
+    ("wit_version_host", "host"),
+    ("wit_version_design", "design"),
+    ("wit_version_bundle", "bundle"),
+    ("wit_version_deploy", "deploy"),
+    ("wit_version_provider", "provider"),
+];
+
+/// The `greentic:extension-<pkg>@<version>` reference a given kind is authored
+/// against, for the generated README / AGENTS prose.
+///
+/// `wasm-component` and `llm` reuse the design world, and `mcp` is not a
+/// greentic extension package at all — so this is a lookup, not
+/// `format!("greentic:extension-{kind}")`, which produced non-existent
+/// references such as `greentic:extension-wasm-component@0.2.0`.
+fn kind_wit_ref(kind: &str) -> String {
+    let pkg = match kind {
+        "wasm-component" | "llm" => "design",
+        other => other,
+    };
+    if pkg == "mcp" {
+        return "wasix:mcp/router".to_string();
+    }
+    embedded::package_version_for(pkg).map_or_else(
+        || format!("greentic:extension-{pkg}"),
+        |v| format!("greentic:extension-{pkg}@{v}"),
+    )
+}
+
 fn build_context(resolved: &Resolved) -> Context {
     let mut ctx = Context::new();
     ctx.set("name", resolved.name.clone());
@@ -247,6 +279,24 @@ fn build_context(resolved: &Resolved) -> Context {
     ctx.set("author", &resolved.author);
     ctx.set("license", &resolved.license);
     ctx.set("contract_version", CONTRACT_VERSION);
+    // Per-package WIT versions, read from the embedded packages themselves.
+    //
+    // `CONTRACT_VERSION` is the contract *generation*, not a uniform per-file
+    // version: within generation 0.2.0, `extension-host` is still `@0.1.0` and
+    // `extension-design` is `@0.3.0`. Rendering a world with one version for
+    // every package asks for `greentic:extension-host@0.2.0`, which has never
+    // existed, and every scaffolded project fails its first
+    // `cargo component build` with `package '...' not found`. Never substitute
+    // `contract_version` into a `world.wit`.
+    for (key, suffix) in WIT_VERSION_PLACEHOLDERS {
+        // `unwrap_or(CONTRACT_VERSION)` would reintroduce exactly the bug this
+        // exists to prevent, so an absent package renders nothing and
+        // `Context::render` then fails loudly on the unsubstituted token.
+        if let Some(v) = embedded::package_version_for(suffix) {
+            ctx.set(key, v);
+        }
+    }
+    ctx.set("kind_wit_ref", kind_wit_ref(resolved.kind.as_str()));
     // `sdk_version` is the gtdx CLI / SDK crate version (the toolchain that
     // generated this scaffold). v2 describe.json templates use it for
     // `engine.*` + `compat.*` so scaffolds pin to the same SDK line that
@@ -396,6 +446,21 @@ fn print_summary(kind: &str, target: &Path, files_written: usize) {
         files_written,
         CONTRACT_VERSION
     );
+    if kind == "wasm-component" {
+        // Every other kind builds as generated and is covered by
+        // `scaffolded_worlds_reference_versions_the_vendored_packages_declare`
+        // and the describe validation tests. This one is not: its stub is
+        // written against an older design contract, its WIT deps sit outside
+        // the crate's target path, and its nodeTypes entry points at the
+        // design component, which greentic-runner-host cannot execute. Say so
+        // here rather than letting the first `cargo component build` be the
+        // messenger.
+        println!();
+        println!("WARNING: --kind wasm-component does not currently produce a");
+        println!("buildable project. Use --kind design and add the node component");
+        println!("as a separate crate built against");
+        println!("greentic:component/component-v0-v6-v0@0.6.0.");
+    }
     println!();
     println!("Next steps:");
     println!("  cd {}", target.display());

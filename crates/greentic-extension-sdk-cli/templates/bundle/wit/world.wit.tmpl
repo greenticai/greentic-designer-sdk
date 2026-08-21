@@ -1,13 +1,13 @@
 package {{id_wit}};
 
 world extension {
-  import greentic:extension-base/types@{{contract_version}};
-  import greentic:extension-host/logging@{{contract_version}};
-  import greentic:extension-host/i18n@{{contract_version}};
-  import greentic:extension-host/broker@{{contract_version}};
+  import greentic:extension-base/types@{{wit_version_base}};
+  import greentic:extension-host/logging@{{wit_version_host}};
+  import greentic:extension-host/i18n@{{wit_version_host}};
+  import greentic:extension-host/broker@{{wit_version_host}};
 
-  export greentic:extension-base/manifest@{{contract_version}};
-  export greentic:extension-base/lifecycle@{{contract_version}};
-  export greentic:extension-bundle/recipes@{{contract_version}};
-  export greentic:extension-bundle/bundling@{{contract_version}};
+  export greentic:extension-base/manifest@{{wit_version_base}};
+  export greentic:extension-base/lifecycle@{{wit_version_base}};
+  export greentic:extension-bundle/recipes@{{wit_version_bundle}};
+  export greentic:extension-bundle/bundling@{{wit_version_bundle}};
 }
