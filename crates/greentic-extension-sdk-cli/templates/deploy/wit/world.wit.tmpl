@@ -1,14 +1,14 @@
 package {{id_wit}};
 
 world extension {
-  import greentic:extension-base/types@{{contract_version}};
-  import greentic:extension-host/logging@{{contract_version}};
-  import greentic:extension-host/i18n@{{contract_version}};
-  import greentic:extension-host/secrets@{{contract_version}};
-  import greentic:extension-host/http@{{contract_version}};
+  import greentic:extension-base/types@{{wit_version_base}};
+  import greentic:extension-host/logging@{{wit_version_host}};
+  import greentic:extension-host/i18n@{{wit_version_host}};
+  import greentic:extension-host/secrets@{{wit_version_host}};
+  import greentic:extension-host/http@{{wit_version_host}};
 
-  export greentic:extension-base/manifest@{{contract_version}};
-  export greentic:extension-base/lifecycle@{{contract_version}};
-  export greentic:extension-deploy/targets@{{contract_version}};
-  export greentic:extension-deploy/deployment@{{contract_version}};
+  export greentic:extension-base/manifest@{{wit_version_base}};
+  export greentic:extension-base/lifecycle@{{wit_version_base}};
+  export greentic:extension-deploy/targets@{{wit_version_deploy}};
+  export greentic:extension-deploy/deployment@{{wit_version_deploy}};
 }

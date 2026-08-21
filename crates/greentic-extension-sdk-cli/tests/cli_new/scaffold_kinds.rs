@@ -290,3 +290,86 @@ fn scaffolds_llm_extension_as_design_extension_with_tool() {
         );
     }
 }
+
+/// Every `@version` a scaffolded `wit/world.wit` references must equal the
+/// version the vendored package under `wit/deps/` actually declares.
+///
+/// This is the guard that was missing when the world templates rendered a
+/// single `{{contract_version}}` for every package. The packages are versioned
+/// independently within a generation — `extension-host` is `@0.1.0` and
+/// `extension-design` is `@0.3.0` while the base generation is `0.2.0` — so
+/// every scaffold asked for `greentic:extension-host@0.2.0`, a package that has
+/// never existed, and failed its first `cargo component build` with
+/// `package '...' not found`.
+///
+/// Deliberately checks the rendered world against the **vendored bytes** rather
+/// than against a hardcoded table: a table would have to be updated in lockstep
+/// with the WIT files and could be updated wrongly in the same edit.
+/// `tests/contract_version_consistency.rs` pins the versions themselves; this
+/// pins that the scaffold agrees with them.
+#[test]
+fn scaffolded_worlds_reference_versions_the_vendored_packages_declare() {
+    // `mcp` is excluded on purpose: its world imports no greentic package.
+    for kind in ["design", "bundle", "deploy", "provider", "llm"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("demo");
+        let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+            .arg("new")
+            .arg("demo")
+            .arg("--kind")
+            .arg(kind)
+            .arg("--dir")
+            .arg(&proj)
+            .arg("-y")
+            .arg("--no-git"));
+        assert!(ok, "gtdx new --kind {kind} failed\n{stdout}\n{stderr}");
+
+        let world = std::fs::read_to_string(proj.join("wit/world.wit"))
+            .unwrap_or_else(|e| panic!("{kind}: read wit/world.wit: {e}"));
+
+        let mut checked = 0usize;
+        for line in world.lines() {
+            let Some(at) = line.find("greentic:extension-") else {
+                continue;
+            };
+            let rest = &line[at + "greentic:".len()..];
+            let pkg: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_lowercase() || *c == '-')
+                .collect();
+            let Some(ver_at) = line.find('@') else {
+                panic!("{kind}: reference without a version: {line}");
+            };
+            let want_line = &line[ver_at + 1..];
+            let referenced = want_line
+                .split(|c: char| c == ';' || c.is_whitespace())
+                .next()
+                .unwrap_or_default();
+
+            let dep = proj.join(format!("wit/deps/greentic/{pkg}/world.wit"));
+            let dep_text = std::fs::read_to_string(&dep)
+                .unwrap_or_else(|e| panic!("{kind}: {pkg} referenced but not vendored: {e}"));
+            let first = dep_text.lines().next().unwrap_or_default();
+            let Some(declared) = first
+                .split('@')
+                .nth(1)
+                .map(|s| s.trim_end_matches(';').trim())
+            else {
+                panic!("{kind}: {pkg} declares no @version: {first}");
+            };
+
+            assert_eq!(
+                referenced, declared,
+                "{kind}: wit/world.wit references greentic:{pkg}@{referenced}, but the \
+                 vendored package declares @{declared}. cargo component build would fail \
+                 with `package 'greentic:{pkg}@{referenced}' not found`.",
+            );
+            checked += 1;
+        }
+        assert!(
+            checked > 0,
+            "{kind}: no greentic package references found in wit/world.wit — the test \
+             would pass vacuously",
+        );
+    }
+}
