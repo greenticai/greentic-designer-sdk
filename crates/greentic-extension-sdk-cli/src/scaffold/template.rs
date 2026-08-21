@@ -65,13 +65,39 @@ pub fn load_templates_common() -> Vec<TemplateEntry> {
     collect(&TEMPLATES_COMMON)
 }
 
+/// Layer `over` on top of `base`, keyed by destination path: an entry in
+/// `over` replaces the `base` entry that would land at the same path, and new
+/// paths are appended. Order within `base` is preserved so the generated file
+/// list stays stable.
+fn overlay(base: Vec<TemplateEntry>, over: Vec<TemplateEntry>) -> Vec<TemplateEntry> {
+    let mut out = base;
+    for entry in over {
+        if let Some(slot) = out.iter_mut().find(|e| e.dst_rel == entry.dst_rel) {
+            *slot = entry;
+        } else {
+            out.push(entry);
+        }
+    }
+    out
+}
+
 pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
     match kind {
         "design" => collect(&TEMPLATES_DESIGN),
         "bundle" => collect(&TEMPLATES_BUNDLE),
         "deploy" => collect(&TEMPLATES_DEPLOY),
         "provider" => collect(&TEMPLATES_PROVIDER),
-        "wasm-component" => collect(&TEMPLATES_WASM_COMPONENT),
+        // `wasm-component` is a `design` extension whose describe additionally
+        // declares the OCI component that executes its palette node, so it
+        // reuses the design crate wholesale and overrides only the files that
+        // genuinely differ. It used to carry its own two-crate workspace
+        // (`extension/` + `runtime/`), which duplicated the crate, drifted
+        // against the contract, and put the vendored WIT deps outside the
+        // crate's target path so nothing it generated ever built.
+        "wasm-component" => overlay(
+            collect(&TEMPLATES_DESIGN),
+            collect(&TEMPLATES_WASM_COMPONENT),
+        ),
         "llm" => collect(&TEMPLATES_LLM),
         "mcp" => collect(&TEMPLATES_MCP),
         "openapi-connector" => collect(&TEMPLATES_OPENAPI_CONNECTOR),
