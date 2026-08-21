@@ -40,6 +40,13 @@ fn substitutions() -> BTreeMap<&'static str, &'static str> {
         ("node_type_id", "my-ext"),
         ("label", "My Ext"),
         ("contract_version", "0.1.0"),
+        // `wasm-component`-only: the OCI reference of the component that
+        // executes the contributed node. Digest-pinned, because that is the
+        // shape the scaffold emits and the one the docs insist on.
+        (
+            "component_ref",
+            "oci://ghcr.io/greenticai/component/component-my-ext@sha256:461c6a68db12b1148465010589c7a8447bf5da9b9de358e4ae0758178801b959",
+        ),
         // `openapi-connector`-only placeholders: `network_json`/`secrets_json`/
         // `tools_contrib_json` are substituted as raw JSON (no surrounding
         // quotes in the template), so their values must themselves be valid
