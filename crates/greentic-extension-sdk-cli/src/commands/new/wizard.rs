@@ -67,6 +67,7 @@ pub(super) fn run(args: &Args) -> anyhow::Result<Resolved> {
         force: args.force,
         node_type_id: args.node_type_id.clone(),
         label: args.label.clone(),
+        component_ref: args.component_ref.clone(),
         from_openapi,
     })
 }

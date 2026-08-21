@@ -1,14 +1,53 @@
 # {{label}}
 
-A Greentic Designer Extension that wraps a WASM component as a node.
+A Greentic Designer Extension that surfaces an already-published WASM
+component as a node in the flow-editor palette.
+
+This is a `DesignExtension` with two entries under `runtime.components`:
+
+| component | what it is |
+|---|---|
+| `{{runtime_ref_key}}` | this crate's design-time `extension.wasm`, shipped inside the `.gtxpack` |
+| `{{runtime_ref_key}}-node` | the component that **executes** the node, referenced by `oci_ref` |
+
+`contributions.nodeTypes[0].runtime_ref` points at the second one.
+
+## The node component must be reachable by `oci_ref`
+
+Not by a local `.gtpack`, and this is not a style preference — two layers
+disagree with the local shape:
+
+- the designer's flow compiler reads
+  `runtime.components.<runtime_ref>.oci_ref` and **skips a `gtpack`-only
+  component**, falling through to the catalog pin;
+- the install path only relocates a nested `.gtpack` into the runner's pack
+  directory for a `ProviderExtension`.
+
+So a node backed by an in-pack `.gtpack` builds, installs, and never runs.
 
 ## Quickstart
 
-1. Edit `describe.json` — fill in `category`, `icon`, `config_schema`, and
-   optional `permissions` for your node.
-2. Drop your pre-built `.gtpack` into `runtime/` and update the
-   `runtime.gtpack.file` path in `describe.json`.
-3. Run `gtdx dev` to build the design-time `extension.wasm`, sign, install
-   locally, and watch for changes.
-4. Open the designer — your node should appear in the palette.
-5. When ready, `gtdx publish`.
+1. Publish your component (world
+   `greentic:component/component-v0-v6-v0@0.6.0`) to an OCI registry.
+2. Put its reference in `describe.json` under
+   `runtime.components.{{runtime_ref_key}}-node.oci_ref`, **pinned by
+   digest** — a built pack embeds the ref permanently, and these registries
+   publish tags out of chronological order, so the highest semver is
+   frequently the oldest artifact. Scaffold it directly with
+   `gtdx new --kind wasm-component --component-ref oci://…@sha256:…`.
+3. Set the component's `sha256`, and fill in `category`, `icon`,
+   `config_schema` and any `permissions` the node needs.
+4. Check `contributions.nodeTypes[0].operation` names the operation your
+   component exposes. The runner **requires** it whenever the component has
+   more than one, and refuses the node at execution time — the palette, the
+   flow builder and the pack build all report success first.
+5. `gtdx dev` to build, install locally, and watch.
+6. Open the designer — the node should be in the palette.
+7. `gtdx publish` when ready.
+
+## What this crate's own wasm is for
+
+Design-time only: validation, prompt fragments, knowledge entries, and any
+design-time tools you declare in `contributions.tools`. It never executes the
+node. A fresh scaffold stubs all of it — you can leave it as-is if the node
+needs no authoring affordances.

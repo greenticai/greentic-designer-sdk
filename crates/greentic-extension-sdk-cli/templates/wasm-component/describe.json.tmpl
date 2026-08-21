@@ -17,10 +17,6 @@
     },
     "license": "{{license}}"
   },
-  "engine": {
-    "greenticDesigner": ">={{min_designer_version}}",
-    "extRuntime": "^{{sdk_version}}"
-  },
   "capabilities": {
     "offered": [],
     "required": []
@@ -36,6 +32,11 @@
         },
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
         "world": "{{id_wit}}/extension@1.0.0"
+      },
+      "{{runtime_ref_key}}-node": {
+        "oci_ref": "{{component_ref}}",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "world": "greentic:component/component-v0-v6-v0@0.6.0"
       }
     },
     "permissions": {
@@ -58,7 +59,8 @@
           { "name": "on_success", "label": "Success" },
           { "name": "on_error", "label": "Error" }
         ],
-        "runtime_ref": "{{runtime_ref_key}}"
+        "runtime_ref": "{{runtime_ref_key}}-node",
+        "operation": "{{node_type_id}}"
       }
     ]
   }

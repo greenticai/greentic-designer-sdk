@@ -74,6 +74,18 @@ pub struct Args {
     #[arg(long)]
     pub label: Option<String>,
 
+    /// `--kind wasm-component` only: OCI reference of the already-published
+    /// component that executes the node, ideally pinned by digest
+    /// (`oci://ghcr.io/org/component-x@sha256:...`).
+    ///
+    /// A node's component must be reachable by `oci_ref`: the designer's flow
+    /// compiler reads `runtime.components.<runtime_ref>.oci_ref` and skips a
+    /// `gtpack`-only component, and the install path relocates a nested
+    /// `.gtpack` for `ProviderExtension` only. Omitted, the scaffold writes a
+    /// placeholder you must replace before publishing.
+    #[arg(long, value_name = "OCI_REF")]
+    pub component_ref: Option<String>,
+
     /// Seed a `--kind mcp` extension from an OpenAPI/Swagger spec (generates the
     /// router via greentic-mcp-gen instead of the empty echo skeleton).
     #[arg(long, value_name = "SPEC")]
@@ -99,6 +111,7 @@ pub(super) struct Resolved {
     force: bool,
     node_type_id: Option<String>,
     label: Option<String>,
+    component_ref: Option<String>,
     /// `OpenAPI` spec path for `--kind mcp` seeded scaffolds.
     from_openapi: Option<PathBuf>,
 }
@@ -181,6 +194,7 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
         force: args.force,
         node_type_id: args.node_type_id.clone(),
         label: args.label.clone(),
+        component_ref: args.component_ref.clone(),
         from_openapi: args.from_openapi.clone(),
     })
 }
@@ -271,6 +285,19 @@ fn build_context(resolved: &Resolved) -> Context {
             .join(" ")
     });
     ctx.set("node_type_id", &node_type_id);
+    // A placeholder rather than a blank: `Context::render` would accept "" and
+    // emit `"oci_ref": ""`, which deserializes fine and resolves to nothing at
+    // compile time. `example.invalid` is reserved by RFC 2606, so a scaffold
+    // that reaches a registry fails loudly instead of hitting a real host.
+    ctx.set(
+        "component_ref",
+        resolved.component_ref.clone().unwrap_or_else(|| {
+            format!(
+                "oci://example.invalid/REPLACE-ME/{node_type_id}@sha256:{}",
+                "0".repeat(64)
+            )
+        }),
+    );
     ctx.set("label", &label);
     let id = resolved.id.as_str();
     ctx.set("id", id);
@@ -446,21 +473,6 @@ fn print_summary(kind: &str, target: &Path, files_written: usize) {
         files_written,
         CONTRACT_VERSION
     );
-    if kind == "wasm-component" {
-        // Every other kind builds as generated and is covered by
-        // `scaffolded_worlds_reference_versions_the_vendored_packages_declare`
-        // and the describe validation tests. This one is not: its stub is
-        // written against an older design contract, its WIT deps sit outside
-        // the crate's target path, and its nodeTypes entry points at the
-        // design component, which greentic-runner-host cannot execute. Say so
-        // here rather than letting the first `cargo component build` be the
-        // messenger.
-        println!();
-        println!("WARNING: --kind wasm-component does not currently produce a");
-        println!("buildable project. Use --kind design and add the node component");
-        println!("as a separate crate built against");
-        println!("greentic:component/component-v0-v6-v0@0.6.0.");
-    }
     println!();
     println!("Next steps:");
     println!("  cd {}", target.display());
