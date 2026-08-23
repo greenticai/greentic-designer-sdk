@@ -611,3 +611,27 @@ fn secret_key_canonical_rejects_star_wildcard() {
     assert_eq!(v.len(), 1);
     assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
 }
+
+/// The scaffold's default id must satisfy the linter shipped beside it.
+///
+/// `gtdx new` defaulted to `com.example.<name>` while `E_ID_PATTERN` requires
+/// the `greentic.` namespace, so an untouched scaffold failed `gtdx lint` with
+/// exit 1 for every kind — the tool's own output rejected by its own governance
+/// rule, with nothing anywhere connecting the two. Both sides were deliberate
+/// and neither knew about the other.
+///
+/// This asserts the pair rather than either half: change the namespace the rule
+/// enforces, or the namespace the scaffold defaults to, and this fails.
+#[test]
+fn the_scaffold_default_id_passes_the_id_rule() {
+    for name in ["demo", "telco-x", "a1"] {
+        let id = crate::commands::new::default_id(name);
+        let d = json!({ "metadata": { "id": id } });
+        let v = check_id_pattern(&d);
+        assert!(
+            v.is_empty(),
+            "gtdx new {name} scaffolds id {:?}, which gtdx lint rejects: {v:?}",
+            crate::commands::new::default_id(name)
+        );
+    }
+}
