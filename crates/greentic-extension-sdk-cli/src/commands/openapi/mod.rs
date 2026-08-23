@@ -75,7 +75,7 @@ pub fn run(args: &Args) -> anyhow::Result<()> {
 
 fn build_context(model: &ConnectorModel, slug: &str) -> Context {
     let mut ctx = Context::new();
-    let id = format!("com.example.{slug}");
+    let id = crate::commands::new::default_id(slug);
     ctx.set("name", slug.to_string());
     ctx.set("name_underscore", slug.replace('-', "_"));
     ctx.set("id", id.clone());

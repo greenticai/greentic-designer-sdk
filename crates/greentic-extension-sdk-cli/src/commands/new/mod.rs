@@ -30,7 +30,7 @@ pub struct Args {
     #[arg(short = 'k', long, value_enum, default_value = "design")]
     pub kind: Kind,
 
-    /// Extension id (reverse-DNS). Default: com.example.<name>
+    /// Extension id (reverse-DNS). Default: greentic.<name>
     #[arg(short = 'i', long)]
     pub id: Option<String>,
 
@@ -175,10 +175,7 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
             "missing project name: run `gtdx new <name> [flags]`, or `gtdx new` on a terminal for the interactive wizard"
         )
     })?;
-    let id = args
-        .id
-        .clone()
-        .unwrap_or_else(|| format!("com.example.{name}"));
+    let id = args.id.clone().unwrap_or_else(|| default_id(&name));
     let author = args.author.clone().unwrap_or_else(detect_git_author);
     validate_id(&id)?;
     validate_version(&args.version)?;
@@ -496,6 +493,19 @@ fn detect_git_author() -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
+/// The `metadata.id` a scaffold gets when the author passes no `--id`.
+///
+/// Deliberately under the `greentic.` namespace. `gtdx lint`'s `E_ID_PATTERN`
+/// requires `^greentic\.[a-z0-9][a-z0-9-]*$`, so any other default ships a
+/// scaffold that fails the linter shipped beside it — which is exactly what
+/// `com.example.<name>` did for every kind, on an untouched `gtdx new`.
+///
+/// `validate_id` already constrains each reverse-DNS segment to
+/// `^[a-z][a-z0-9-]*$`, so a name that scaffolds at all is lint-clean here.
+pub(crate) fn default_id(name: &str) -> String {
+    format!("greentic.{name}")
+}
+
 fn validate_id(id: &str) -> anyhow::Result<()> {
     if !is_reverse_dns(id) {
         anyhow::bail!("id must match reverse-DNS (got {id:?})");
@@ -539,7 +549,7 @@ fn validate_from_openapi(kind: Kind, from_openapi: Option<&Path>) -> anyhow::Res
 }
 
 fn id_to_wit_package(id: &str) -> String {
-    // com.example.demo -> com-example:demo
+    // greentic.demo -> greentic:demo; com.example.demo -> com-example:demo
     let mut parts: Vec<&str> = id.split('.').collect();
     let last = parts.pop().unwrap_or("ext");
     format!("{}:{}", parts.join("-"), last)
