@@ -119,10 +119,7 @@ fn prompt_openapi_seed(args: &Args, kind: Kind) -> anyhow::Result<Option<PathBuf
 }
 
 fn prompt_id(args: &Args, name: &str) -> anyhow::Result<String> {
-    let default_id = args
-        .id
-        .clone()
-        .unwrap_or_else(|| format!("com.example.{name}"));
+    let default_id = args.id.clone().unwrap_or_else(|| super::default_id(name));
     let id = Input::<String>::new()
         .with_prompt("Extension id (reverse-DNS)")
         .default(default_id)
