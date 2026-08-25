@@ -29,14 +29,19 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.3 or newer.** It is the first release where `cargo binstall`
-actually installs a binary: every earlier one, `1.2.2` included, pointed
-binstall at the archive root while the release tarball holds `gtdx` one
-directory deeper, so binstall found nothing and silently fell back to a full
-source build. 1.2.3 also makes `gtdx publish` write real component digests
-into `describe.json` — before it, a published extension shipped all-zero
-`sha256` placeholders and `gtdx lint --publish` failed on a freshly
-scaffolded project and kept failing after a successful publish.
+**Use 1.2.4 or newer.** It is the first release where the whole lifecycle
+works for every extension kind. Before it: `gtdx uninstall` could not remove
+a `provider` extension and reported success anyway; `gtdx enable` / `disable`
+could not see an `mcp` extension at all; a `--kind wasm-component` scaffold
+failed `gtdx lint --publish` even with a digest-pinned `--component-ref`;
+`gtdx install` failed on any `GREENTIC_HOME` containing `..`, blaming the
+pack; and `gtdx outdated` reported the built-in store as "not configured".
+
+1.2.3 before it fixed the two defects that could only reach authors as a
+release: `cargo binstall` pointed at the wrong path inside the release
+archive and silently fell back to a full source build, and `gtdx publish`
+shipped all-zero `sha256` placeholders so `gtdx lint --publish` failed on a
+freshly scaffolded project and kept failing after a successful publish.
 
 Below 1.2.1 a fresh scaffold does not build at all: `wit/world.wit` rendered
 a single contract version for packages that are versioned independently, so
@@ -54,7 +59,7 @@ cargo binstall greentic-extension-sdk-cli
 Resolves to the latest stable release from crates.io; binstall reads
 `[package.metadata.binstall]` to find the matching GitHub Release asset.
 Add `--version <x.y.z>` to pin — but pinning `1.2.2` or older re-enters the
-broken metadata above, so it compiles from source instead of downloading.
+broken binstall metadata, so it compiles from source instead of downloading.
 
 **Build from source (slowest, needs the full toolchain):**
 
@@ -70,7 +75,7 @@ Grab the asset for your platform from the
 
 ```bash
 # macOS Apple Silicon example — swap TAG and TARGET for your platform
-TAG=v1.2.3
+TAG=v1.2.4
 TARGET=aarch64-apple-darwin
 curl -L -o gtdx.tgz \
   "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-$TARGET.tgz"
@@ -93,8 +98,8 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 Older `-research` versions do sit on crates.io from before the skip rule
 landed. Avoid opting into pre-releases there: a pre-release of a *higher*
 version sorts above the current stable while carrying older code, so
-`1.3.0-research.1` outranks the 1.2.3 stable. (A pre-release of the same
-version is not a trap — `1.2.3-research` sorts *below* `1.2.3`.)
+`1.3.0-research.1` outranks the 1.2.4 stable. (A pre-release of the same
+version is not a trap — `1.2.4-research` would sort *below* `1.2.4`.)
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
