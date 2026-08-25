@@ -116,6 +116,22 @@ pub(super) struct Resolved {
     from_openapi: Option<PathBuf>,
 }
 
+/// Pull the digest out of a digest-pinned OCI reference.
+///
+/// `oci://host/ns/name@sha256:<64 lowercase hex>` yields the hex. Anything
+/// else — a tag-only ref, a different algorithm, a truncated or uppercase
+/// digest — yields `None`, because writing a digest the reference did not
+/// actually pin would be worse than the placeholder it replaces. Lowercase
+/// only, matching the v2 schema pattern and the `Sha256` newtype.
+fn oci_ref_digest(reference: &str) -> Option<&str> {
+    let (_, digest) = reference.rsplit_once("@sha256:")?;
+    let well_formed = digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    well_formed.then_some(digest)
+}
+
 pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     let resolved = resolve(args)?;
 
@@ -286,15 +302,19 @@ fn build_context(resolved: &Resolved) -> Context {
     // emit `"oci_ref": ""`, which deserializes fine and resolves to nothing at
     // compile time. `example.invalid` is reserved by RFC 2606, so a scaffold
     // that reaches a registry fails loudly instead of hitting a real host.
-    ctx.set(
-        "component_ref",
-        resolved.component_ref.clone().unwrap_or_else(|| {
-            format!(
-                "oci://example.invalid/REPLACE-ME/{node_type_id}@sha256:{}",
-                "0".repeat(64)
-            )
-        }),
-    );
+    let placeholder_digest = "0".repeat(64);
+    let component_ref = resolved.component_ref.clone().unwrap_or_else(|| {
+        format!("oci://example.invalid/REPLACE-ME/{node_type_id}@sha256:{placeholder_digest}")
+    });
+    // The reference is digest-pinned, so the node component's `sha256` is
+    // already known here — reading it back out of the ref is the difference
+    // between a scaffold that passes `gtdx lint --publish` and one that trips
+    // `E_SHA256_ZERO` despite the author having supplied everything asked of
+    // them. A ref without a usable digest keeps the placeholder, and that
+    // refusal is the documented behaviour rather than something to paper over.
+    let component_digest = oci_ref_digest(&component_ref).unwrap_or(&placeholder_digest);
+    ctx.set("component_digest", component_digest);
+    ctx.set("component_ref", component_ref.clone());
     ctx.set("label", &label);
     let id = resolved.id.as_str();
     ctx.set("id", id);
@@ -636,6 +656,41 @@ fn print_checks(checks: &[Check]) {
             Check::Pass { name, detail } => println!("  ✓ {name}: {detail}"),
             Check::Warn { name, hint } => println!("  ! {name}: {hint}"),
             Check::Fail { name, hint } => eprintln!("  ✗ {name}: {hint}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::oci_ref_digest;
+
+    const HEX: &str = "461c6a68b1c0d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccdd";
+
+    #[test]
+    fn extracts_a_pinned_digest() {
+        assert_eq!(
+            oci_ref_digest(&format!("oci://ghcr.io/org/component-x@sha256:{HEX}")),
+            Some(HEX)
+        );
+    }
+
+    #[test]
+    fn rejects_references_that_pin_nothing_usable() {
+        // A tag is not a digest, a different algorithm is not sha256, and a
+        // truncated or uppercase hex string would not survive schema
+        // validation — each must fall back to the placeholder rather than be
+        // written out as if the reference had pinned it.
+        for reference in [
+            "oci://ghcr.io/org/component-x:1.2.3",
+            "oci://ghcr.io/org/component-x",
+            &format!("oci://ghcr.io/org/component-x@sha512:{HEX}"),
+            &format!("oci://ghcr.io/org/component-x@sha256:{}", &HEX[..40]),
+            &format!(
+                "oci://ghcr.io/org/component-x@sha256:{}",
+                HEX.to_uppercase()
+            ),
+        ] {
+            assert_eq!(oci_ref_digest(reference), None, "should reject {reference}");
         }
     }
 }

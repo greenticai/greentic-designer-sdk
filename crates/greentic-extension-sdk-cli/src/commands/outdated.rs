@@ -6,7 +6,9 @@ use greentic_extension_sdk_registry::storage::Storage;
 use greentic_extension_sdk_registry::update::{ExtensionUpdate, UpdateStatus, check_updates};
 use greentic_extension_sdk_state::ExtensionState;
 
-use super::{ALL_KINDS, scan_installed};
+use greentic_extension_sdk_contract::ExtensionKind;
+
+use super::scan_installed;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -18,7 +20,7 @@ pub struct Args {
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     let cfg = super::load_config(home)?;
     let storage = Storage::new(home);
-    let installed = scan_installed(&storage, &ALL_KINDS)?;
+    let installed = scan_installed(&storage, &ExtensionKind::ALL)?;
 
     if installed.is_empty() {
         println!("No extensions installed.");
@@ -39,39 +41,32 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     // Resolve the registry entry. If it is missing (e.g. fresh home with no
     // config.toml), synthesise Unknown rows rather than returning an error so
     // the command always exits 0.
-    let updates: Vec<ExtensionUpdate> = {
-        let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
-        if let Some(entry) = cfg.registries.iter().find(|r| r.name == reg_name) {
-            let token = entry
-                .token_env
-                .as_deref()
-                .and_then(|e| std::env::var(e).ok());
-            let reg = greentic_extension_sdk_registry::store::GreenticStoreRegistry::new(
-                &entry.name,
-                &entry.url,
-                token,
-            )
-            .with_insecure_allowed(crate::registry_security::insecure_registry_opt_in());
-            check_updates(&reg, &triples, &constraints).await
-        } else {
-            // No matching registry configured — report every extension as Unknown.
-            eprintln!(
-                "warning: registry '{reg_name}' not configured; update status is unknown. \
-                 Run `gtdx registries` to configure a store."
-            );
-            triples
-                .iter()
-                .map(|(kind, id, current)| ExtensionUpdate {
-                    id: id.clone(),
-                    kind: *kind,
-                    current: current.clone(),
-                    status: UpdateStatus::Unknown {
-                        reason: format!("registry '{reg_name}' not configured"),
-                    },
-                })
-                .collect()
-        }
-    };
+    // Resolve through the shared helper so the built-in `greentic-store` URL
+    // and a `gtdx login` token are both picked up. Hand-rolling the lookup
+    // against `config.toml` alone reported the public store as "not
+    // configured" on any home without an explicit `registries add` — which the
+    // README says is never required.
+    let updates: Vec<ExtensionUpdate> =
+        match super::resolve_store_registry(args.registry.as_deref(), home) {
+            Ok(reg) => check_updates(&reg, &triples, &constraints).await,
+            Err(e) => {
+                // An unresolvable registry is reported per-extension rather than
+                // returned, so `outdated` still exits 0 and prints the table.
+                let reg_name = args.registry.as_deref().unwrap_or(&cfg.default.registry);
+                eprintln!("warning: {e}; update status is unknown.");
+                triples
+                    .iter()
+                    .map(|(kind, id, current)| ExtensionUpdate {
+                        id: id.clone(),
+                        kind: *kind,
+                        current: current.clone(),
+                        status: UpdateStatus::Unknown {
+                            reason: format!("registry '{reg_name}' could not be resolved"),
+                        },
+                    })
+                    .collect()
+            }
+        };
 
     println!("{:<40} {:<12} {:<12} STATUS", "ID", "CURRENT", "TARGET");
     for u in &updates {

@@ -152,7 +152,13 @@ fn build_secure_client() -> Client {
         })
 }
 
-fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), RegistryError> {
+/// Whether a registry URL is safe to talk to: HTTPS always, cleartext HTTP
+/// only for loopback unless the caller has opted in.
+///
+/// Public so the CLI can apply the *same* rule when a URL is first saved with
+/// `gtdx registries add`, instead of accepting anything and failing at request
+/// time. One rule, both call sites — a second copy would drift.
+pub fn validate_registry_url(url: &str, allow_insecure: bool) -> Result<(), RegistryError> {
     if let Some(rest) = url.strip_prefix("https://") {
         if rest.is_empty() {
             return Err(RegistryError::InsecureRegistryUrl(url.into()));

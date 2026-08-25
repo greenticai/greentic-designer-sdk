@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::Args;
+use greentic_extension_sdk_contract::ExtensionKind;
 use greentic_extension_sdk_state::ExtensionState;
 use std::path::Path;
 
@@ -46,7 +47,7 @@ pub(crate) fn parse_target(target: &str, home: &Path) -> Result<(String, String)
 pub(crate) fn installed_versions(home: &Path, id: &str) -> Result<Vec<String>> {
     let prefix = format!("{id}-");
     let mut out = vec![];
-    for kind in ["design", "deploy", "bundle", "provider"] {
+    for kind in ExtensionKind::ALL.map(ExtensionKind::dir_name) {
         let dir = home.join("extensions").join(kind);
         if !dir.exists() {
             continue;
@@ -73,7 +74,7 @@ pub(crate) fn installed_versions(home: &Path, id: &str) -> Result<Vec<String>> {
 
 pub(crate) fn verify_installed(home: &Path, id: &str, version: &str) -> Result<()> {
     let suffix = format!("{id}-{version}");
-    for kind in ["design", "deploy", "bundle", "provider"] {
+    for kind in ExtensionKind::ALL.map(ExtensionKind::dir_name) {
         if home.join("extensions").join(kind).join(&suffix).exists() {
             return Ok(());
         }

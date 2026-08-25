@@ -14,12 +14,10 @@ pub struct Args {
 pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
     let storage = Storage::new(home);
     let mut removed_any = false;
-    for kind in [
-        ExtensionKind::Design,
-        ExtensionKind::Bundle,
-        ExtensionKind::Deploy,
-        ExtensionKind::WasixMcpRouter,
-    ] {
+    // Every kind, not a hand-written subset: this list used to omit
+    // `Provider`, so `gtdx uninstall` could never remove a provider extension
+    // — and said "nothing to remove" while the extension stayed installed.
+    for kind in ExtensionKind::ALL {
         let dir = storage.kind_dir(kind);
         if !dir.exists() {
             continue;
@@ -43,7 +41,17 @@ pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
         }
     }
     if !removed_any {
-        eprintln!("nothing to remove for {}", args.name);
+        // Exit non-zero. The caller asked for something to be gone; reporting
+        // success while it is still installed is the failure mode that hid the
+        // missing `Provider` kind above, and it silently breaks any script
+        // that uninstalls and then checks the status.
+        anyhow::bail!(
+            "nothing to remove for {}{}",
+            args.name,
+            args.version
+                .as_deref()
+                .map_or(String::new(), |v| format!("@{v}"))
+        );
     }
     Ok(())
 }
