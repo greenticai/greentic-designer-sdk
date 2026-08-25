@@ -14,7 +14,12 @@ path = "src/main.rs"
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/gtdx-v{ version }-{ target }{ archive-suffix }"
 pkg-fmt = "tgz"
-bin-dir = "gtdx{ binary-ext }"
+# The release workflow archives the binary inside a directory named after the
+# asset stem, on every platform — `gtdx-v1.2.2-x86_64-unknown-linux-gnu/gtdx`.
+# Pointing `bin-dir` at the archive root instead makes binstall fail to find
+# the binary and silently fall back to a full source build, which is the one
+# thing `cargo binstall` exists to avoid.
+bin-dir = "gtdx-v{ version }-{ target }/gtdx{ binary-ext }"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-fmt = "zip"
@@ -32,9 +37,9 @@ clap = { workspace = true }
 dialoguer = { workspace = true }
 directories = { workspace = true }
 ed25519-dalek = { workspace = true, features = ["pkcs8", "pem"] }
-greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "=1.2.2" }
-greentic-extension-sdk-registry = { path = "../greentic-extension-sdk-registry", version = "=1.2.2" }
-greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "=1.2.2" }
+greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "=1.2.3" }
+greentic-extension-sdk-registry = { path = "../greentic-extension-sdk-registry", version = "=1.2.3" }
+greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "=1.2.3" }
 greentic-types = { workspace = true }
 include_dir = { workspace = true }
 notify-debouncer-full = { workspace = true }
@@ -61,7 +66,7 @@ zip = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
-greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "=1.2.2" }
+greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "=1.2.3" }
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
 wiremock = "0.6"

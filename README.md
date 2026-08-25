@@ -29,13 +29,21 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.1 or newer.** It is the first release whose `gtdx new` scaffolds
-build: every earlier one, `1.2.0` included, rendered `wit/world.wit` with a
-single contract version for packages that are versioned independently, so a
-fresh scaffold failed its first `cargo component build` for every kind except
-`mcp` with `package 'greentic:extension-host@0.2.0' not found`. 1.2.1 also
-fixed the `provider` and `--kind llm` stubs and made `--kind wasm-component`
-emit a node the runner can execute.
+**Use 1.2.3 or newer.** It is the first release where `cargo binstall`
+actually installs a binary: every earlier one, `1.2.2` included, pointed
+binstall at the archive root while the release tarball holds `gtdx` one
+directory deeper, so binstall found nothing and silently fell back to a full
+source build. 1.2.3 also makes `gtdx publish` write real component digests
+into `describe.json` — before it, a published extension shipped all-zero
+`sha256` placeholders and `gtdx lint --publish` failed on a freshly
+scaffolded project and kept failing after a successful publish.
+
+Below 1.2.1 a fresh scaffold does not build at all: `wit/world.wit` rendered
+a single contract version for packages that are versioned independently, so
+the first `cargo component build` failed for every kind except `mcp` with
+`package 'greentic:extension-host@0.2.0' not found`. 1.2.1 also fixed the
+`provider` and `--kind llm` stubs and made `--kind wasm-component` emit a
+node the runner can execute.
 
 **Recommended — `cargo binstall` (no compile, fetches the release binary):**
 
@@ -45,7 +53,8 @@ cargo binstall greentic-extension-sdk-cli
 
 Resolves to the latest stable release from crates.io; binstall reads
 `[package.metadata.binstall]` to find the matching GitHub Release asset.
-Add `--version <x.y.z>` to pin.
+Add `--version <x.y.z>` to pin — but pinning `1.2.2` or older re-enters the
+broken metadata above, so it compiles from source instead of downloading.
 
 **Build from source (slowest, needs the full toolchain):**
 
@@ -60,12 +69,15 @@ Grab the asset for your platform from the
 — the tag is embedded in the filename:
 
 ```bash
-# macOS Apple Silicon example — swap TAG and target for your platform
-TAG=v1.2.1
+# macOS Apple Silicon example — swap TAG and TARGET for your platform
+TAG=v1.2.3
+TARGET=aarch64-apple-darwin
 curl -L -o gtdx.tgz \
-  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-aarch64-apple-darwin.tgz"
+  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-$TARGET.tgz"
+# every archive holds the binary inside a directory named after the asset
 tar -xzf gtdx.tgz
-chmod +x gtdx && mv gtdx ~/.cargo/bin/
+chmod +x "gtdx-$TAG-$TARGET/gtdx"
+mv "gtdx-$TAG-$TARGET/gtdx" ~/.cargo/bin/
 ```
 
 **Research line** — not on crates.io, so install it from the repo at a
@@ -79,9 +91,10 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 ```
 
 Older `-research` versions do sit on crates.io from before the skip rule
-landed. Avoid opting into pre-releases there: `1.2.3-research` is a
-pre-release of a *higher* patch, so it sorts above the 1.2.1 stable while
-containing older code. `1.3.0-research.1` is the same trap one minor up.
+landed. Avoid opting into pre-releases there: a pre-release of a *higher*
+version sorts above the current stable while carrying older code, so
+`1.3.0-research.1` outranks the 1.2.3 stable. (A pre-release of the same
+version is not a trap — `1.2.3-research` sorts *below* `1.2.3`.)
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
@@ -159,7 +172,7 @@ Install the generator once with `cargo binstall greentic-mcp-generator` (set
 The result is publish-ready:
 
 ```bash
-gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml ./weatherapi
+gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml
 ```
 
 Running `gtdx new` with no flags starts an interactive wizard; for `--kind mcp`
@@ -317,7 +330,7 @@ still drives the pack, signing, and registry metadata — only the build step is
 skipped:
 
 ```bash
-gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml ./
+gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml
 ```
 
 ### Verify a pack
