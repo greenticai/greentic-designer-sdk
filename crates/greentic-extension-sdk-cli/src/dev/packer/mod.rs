@@ -107,6 +107,42 @@ fn collect_runtime_component_files(
     Ok(())
 }
 
+/// Fill in the digests of the component this build itself produces.
+///
+/// A scaffold declares `gtpack.file = "extension.wasm"` with an all-zero
+/// `sha256`, because the digest of a wasm that does not exist yet is unknowable
+/// and changes on every rebuild. Everything else in `runtime.components` stays
+/// the author's to supply: externally staged `.gtpack` files are *verified*
+/// against disk by [`collect_runtime_component_files`], and an `oci_ref`
+/// component describes an artifact this build never touched — filling either
+/// would assert something the packer cannot know.
+///
+/// Returns `true` when a digest changed, so the caller can persist the describe
+/// only when there is something to persist.
+fn fill_self_contained_hashes(describe: &mut serde_json::Value, wasm_sha: &str) -> bool {
+    let Some(components) = describe
+        .pointer_mut("/runtime/components")
+        .and_then(|v| v.as_object_mut())
+    else {
+        return false;
+    };
+    let mut changed = false;
+    for component in components.values_mut() {
+        if component.pointer("/gtpack/file").and_then(|v| v.as_str()) != Some("extension.wasm") {
+            continue;
+        }
+        for pointer in ["/gtpack/sha256", "/sha256"] {
+            if let Some(slot) = component.pointer_mut(pointer)
+                && slot.as_str() != Some(wasm_sha)
+            {
+                *slot = serde_json::Value::String(wasm_sha.to_string());
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
 /// Read the full `SecretRequirement`s declared in a nested runtime `.gtpack`
 /// (a ZIP carrying `manifest.cbor`). Returns an error when the file is not a
 /// readable `.gtpack` / the manifest is missing / decode fails, so the caller
@@ -224,8 +260,24 @@ pub fn build_pack_with_key(
     let describe_path = project_dir.join("describe.json");
     let describe_bytes =
         std::fs::read(&describe_path).map_err(|e| anyhow::anyhow!("read describe.json: {e}"))?;
-    let describe: serde_json::Value = serde_json::from_slice(&describe_bytes)
+    let mut describe: serde_json::Value = serde_json::from_slice(&describe_bytes)
         .map_err(|e| anyhow::anyhow!("parse describe.json: {e}"))?;
+
+    // The wasm this build just produced is the one artifact whose digest the
+    // author could not have written by hand. Fill it in before anything binds
+    // or signs the describe, and persist it to the project so
+    // `gtdx lint --publish` stops reporting placeholders after a publish.
+    let wasm_bytes = std::fs::read(wasm_path)
+        .map_err(|e| anyhow::anyhow!("read {}: {e}", wasm_path.display()))?;
+    let describe_bytes = if fill_self_contained_hashes(&mut describe, &sha256_hex(&wasm_bytes)) {
+        let updated = serde_json::to_string_pretty(&describe)? + "\n";
+        std::fs::write(&describe_path, &updated)
+            .map_err(|e| anyhow::anyhow!("write {}: {e}", describe_path.display()))?;
+        updated.into_bytes()
+    } else {
+        describe_bytes
+    };
+
     let ext_name = describe["metadata"]["name"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("describe.metadata.name missing"))?
@@ -241,7 +293,7 @@ pub fn build_pack_with_key(
 
     let mut entries = vec![
         PackEntry::file("describe.json", describe_bytes),
-        PackEntry::file("extension.wasm", std::fs::read(wasm_path)?),
+        PackEntry::file("extension.wasm", wasm_bytes),
     ];
 
     collect_runtime_component_files(&describe, project_dir, output_pack, &mut entries)?;
