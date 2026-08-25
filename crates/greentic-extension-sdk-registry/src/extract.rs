@@ -48,19 +48,25 @@ pub(crate) fn extract_to_staging(
                 entry_path.display()
             )));
         }
-        let out_path = staging.join(entry_path);
-        // Defense in depth: reject any entry whose resolved path
-        // contains a `..` component — mangled_name() already strips
-        // leading slashes and `..`, so this should never fire in practice.
-        if out_path
+        // Defense in depth: reject any entry path containing a `..` component
+        // — mangled_name() already strips leading slashes and `..`, so this
+        // should never fire in practice.
+        //
+        // Checked on the entry alone, never on `staging.join(..)`: the staging
+        // prefix is the caller's own directory layout, and a `GREENTIC_HOME`
+        // such as `/srv/x/../greentic` is legitimate. Scanning the joined path
+        // made the guard fire on the caller's path and report it as the
+        // archive escaping — blaming the pack for the host's configuration.
+        if entry_path
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir))
         {
             return Err(RegistryError::Storage(format!(
                 "zip entry escapes staging: {}",
-                out_path.display()
+                entry_path.display()
             )));
         }
+        let out_path = staging.join(entry_path);
         // Reject a second entry resolving to a path already written, so a
         // later entry can't overwrite an earlier (verified) one (audit N7).
         if !entry.is_dir() && !seen.insert(out_path.clone()) {
@@ -194,5 +200,39 @@ mod tests {
         let path = format!("{deep}/f.txt");
         let bytes = zip_with_files(&[(path.as_str(), b"x")]);
         extract_to_staging(&artifact(bytes), tmp.path()).unwrap();
+    }
+
+    /// A `..` in the *staging* path is the caller's own directory layout — a
+    /// `GREENTIC_HOME` like `/srv/x/../greentic` is perfectly legitimate. The
+    /// traversal guard exists to police what the archive supplies, so it must
+    /// not fire on the prefix the caller handed in.
+    #[test]
+    fn extracts_into_a_staging_path_containing_a_parent_component() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("sub/../staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let art = artifact(zip_with_files(&[("describe.json", b"{}")]));
+
+        extract_to_staging(&art, &staging)
+            .expect("a `..` in the staging prefix is not a traversal");
+        assert!(staging.join("describe.json").exists());
+    }
+
+    /// The guard itself must keep working: an entry that tries to climb out is
+    /// still refused, staging prefix or not.
+    #[test]
+    fn still_refuses_an_entry_that_climbs_out_of_staging() {
+        let tmp = tempfile::tempdir().unwrap();
+        let staging = tmp.path().join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let art = artifact(zip_with_files(&[("../escaped.json", b"{}")]));
+
+        // `mangled_name` normally strips this, so the assertion is that
+        // nothing lands outside staging either way.
+        let _ = extract_to_staging(&art, &staging);
+        assert!(
+            !tmp.path().join("escaped.json").exists(),
+            "entry escaped the staging directory"
+        );
     }
 }
