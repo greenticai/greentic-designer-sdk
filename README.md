@@ -60,12 +60,15 @@ Grab the asset for your platform from the
 — the tag is embedded in the filename:
 
 ```bash
-# macOS Apple Silicon example — swap TAG and target for your platform
-TAG=v1.2.1
+# macOS Apple Silicon example — swap TAG and TARGET for your platform
+TAG=v1.2.2
+TARGET=aarch64-apple-darwin
 curl -L -o gtdx.tgz \
-  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-aarch64-apple-darwin.tgz"
+  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-$TARGET.tgz"
+# every archive holds the binary inside a directory named after the asset
 tar -xzf gtdx.tgz
-chmod +x gtdx && mv gtdx ~/.cargo/bin/
+chmod +x "gtdx-$TAG-$TARGET/gtdx"
+mv "gtdx-$TAG-$TARGET/gtdx" ~/.cargo/bin/
 ```
 
 **Research line** — not on crates.io, so install it from the repo at a
@@ -159,7 +162,7 @@ Install the generator once with `cargo binstall greentic-mcp-generator` (set
 The result is publish-ready:
 
 ```bash
-gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml ./weatherapi
+gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml
 ```
 
 Running `gtdx new` with no flags starts an interactive wizard; for `--kind mcp`
@@ -317,7 +320,7 @@ still drives the pack, signing, and registry metadata — only the build step is
 skipped:
 
 ```bash
-gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml ./
+gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml
 ```
 
 ### Verify a pack
