@@ -427,7 +427,7 @@ pub(crate) fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<us
     let mut files_written = 0usize;
     let mut lock_files = BTreeMap::new();
     for file in embedded::files_for_kind(kind) {
-        let pkg_dir = wit_package_subdir_for(file.name);
+        let pkg_dir = wit_package_subdir_for(file.name)?;
         let dst = target
             .join("wit/deps/greentic")
             .join(pkg_dir)
@@ -575,8 +575,15 @@ fn id_to_wit_package(id: &str) -> String {
     format!("{}:{}", parts.join("-"), last)
 }
 
-fn wit_package_subdir_for(filename: &str) -> &'static str {
-    match filename {
+/// Map an embedded WIT filename to the vendored dependency directory it is
+/// written into (`wit/deps/greentic/<subdir>/world.wit`).
+///
+/// Errors on an unmapped file rather than falling back to `extension-misc`:
+/// that catch-all directory is referenced by no `Cargo.toml.tmpl`, so the
+/// package was vendored somewhere nothing could find it and the scaffold
+/// failed later, blaming a missing WIT package.
+fn wit_package_subdir_for(filename: &str) -> anyhow::Result<&'static str> {
+    let subdir = match filename {
         "extension-base.wit" => "extension-base",
         "extension-host.wit" => "extension-host",
         "extension-design.wit" => "extension-design",
@@ -584,8 +591,14 @@ fn wit_package_subdir_for(filename: &str) -> &'static str {
         "extension-deploy.wit" => "extension-deploy",
         "extension-provider.wit" => "extension-provider",
         "runtime-side.wit" => "runtime-side",
-        _ => "extension-misc",
-    }
+        "extension-dw-composer.wit" => "dw-composer",
+        other => anyhow::bail!(
+            "no vendored dependency directory mapped for WIT file `{other}` — \
+             add an arm to wit_package_subdir_for and reference the directory \
+             from the kind's Cargo.toml.tmpl"
+        ),
+    };
+    Ok(subdir)
 }
 
 fn now_iso8601() -> String {
@@ -692,5 +705,37 @@ mod tests {
         ] {
             assert_eq!(oci_ref_digest(reference), None, "should reject {reference}");
         }
+    }
+}
+
+#[cfg(test)]
+mod wit_subdir_tests {
+    use super::wit_package_subdir_for;
+
+    /// Every embedded WIT file must have an explicit dependency directory.
+    /// The old `_ => "extension-misc"` fallback put unmapped packages in a
+    /// directory no Cargo.toml.tmpl references, so the scaffold built nothing
+    /// and blamed a missing WIT package rather than a missing mapping.
+    #[test]
+    fn every_embedded_wit_file_is_mapped() {
+        for file in crate::scaffold::embedded::wit_files() {
+            let subdir = wit_package_subdir_for(file.name)
+                .unwrap_or_else(|e| panic!("{} is unmapped: {e}", file.name));
+            assert_ne!(
+                subdir, "extension-misc",
+                "{} still resolves to the old catch-all",
+                file.name
+            );
+        }
+    }
+
+    #[test]
+    fn an_unmapped_wit_file_is_an_error() {
+        let err = wit_package_subdir_for("extension-addon.wit")
+            .expect_err("an unmapped wit file must error");
+        assert!(
+            err.to_string().contains("extension-addon.wit"),
+            "the error should name the file, got: {err}"
+        );
     }
 }
