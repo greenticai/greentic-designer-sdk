@@ -169,9 +169,16 @@ package greentic:extension-addon@0.1.0;
 interface resources {
   record output-spec {
     name: string,
-    output-type: output-kind,     // text | number | boolean
+    output-type: output-kind,     // text | number | boolean — wire key is
+                                   // `type`, not `output_type`: `type` is a
+                                   // keyword in the Rust binding this shipped
+                                   // against, but the JSON wire form uses the
+                                   // field name as written to the describe.
+                                   // A naive WIT→JSON bridge in phase 2 must
+                                   // emit `type`, or it fails
+                                   // `deny_unknown_fields` on `output_type`.
     sensitive: bool,
-    description: string,
+    description: option<string>,
   }
 
   record resource-spec {
@@ -179,11 +186,12 @@ interface resources {
     family: string,               // "vector-db" — flows may require a family, not a vendor
     display-name: string,
     description: string,
-    icon-path: option<string>,
+    icon: option<string>,         // host-resolved icon name, not a path
     config-schema: string,        // JSON Schema: user-facing knobs
     desired-state-schema: string, // JSON Schema: day-2 state
     outputs: list<output-spec>,
     supports-backup: bool,
+    schema-version: u32,          // versions desired-state-schema's shape (D17)
   }
 
   list-resources: func() -> list<resource-spec>;
