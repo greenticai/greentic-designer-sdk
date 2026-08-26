@@ -173,6 +173,20 @@ pub fn render_and_write(ctx: &Context, template: &str, path: &Path) -> anyhow::R
 mod tests {
     use super::*;
 
+    /// Every `scaffold::Kind` variant's wire string, sourced from
+    /// `Kind::value_variants()` rather than hand-listed — the idiom
+    /// `commands::list.rs:126` already established. A hand-written list here
+    /// would pass vacuously for a newly added `Kind` variant nobody
+    /// remembered to add to the list, which is exactly the failure mode
+    /// these guards exist to catch.
+    fn all_kind_strs() -> Vec<&'static str> {
+        use clap::ValueEnum as _;
+        crate::scaffold::Kind::value_variants()
+            .iter()
+            .map(|k| k.as_str())
+            .collect()
+    }
+
     #[test]
     fn render_substitutes_placeholder() {
         let mut ctx = Context::new();
@@ -304,15 +318,7 @@ mod tests {
     /// produces wasm with the wrong feature set.
     #[test]
     fn every_kind_template_ships_rust_toolchain_pinned_to_1_95_0() {
-        for kind in [
-            "design",
-            "bundle",
-            "deploy",
-            "provider",
-            "wasm-component",
-            "llm",
-            "mcp",
-        ] {
+        for kind in all_kind_strs() {
             let entries = load_templates_kind(kind)
                 .unwrap_or_else(|e| panic!("kind {kind} templates resolve: {e}"));
             let toolchain = entries
@@ -405,15 +411,7 @@ mod tests {
     /// future template that regresses to v1 shape.
     #[test]
     fn every_kind_describe_template_is_v2() {
-        for kind in [
-            "design",
-            "bundle",
-            "deploy",
-            "provider",
-            "wasm-component",
-            "llm",
-            "mcp",
-        ] {
+        for kind in all_kind_strs() {
             let entries = load_templates_kind(kind)
                 .unwrap_or_else(|e| panic!("kind {kind} templates resolve: {e}"));
             let describe = entries
@@ -505,16 +503,12 @@ mod tests {
     /// loads it directly, without going through `Kind`.
     #[test]
     fn every_scaffoldable_kind_resolves_to_files() {
-        for kind in [
-            "design",
-            "bundle",
-            "deploy",
-            "provider",
-            "wasm-component",
-            "llm",
-            "mcp",
-            "openapi-connector",
-        ] {
+        // `openapi-connector` is appended explicitly: it bypasses `Kind` by
+        // design (`gtdx openapi` loads it directly), so it is not — and must
+        // not be — in `Kind::value_variants()`.
+        let mut kinds = all_kind_strs();
+        kinds.push("openapi-connector");
+        for kind in kinds {
             let entries =
                 load_templates_kind(kind).unwrap_or_else(|e| panic!("{kind} must resolve: {e}"));
             assert!(!entries.is_empty(), "{kind} resolved to zero files");

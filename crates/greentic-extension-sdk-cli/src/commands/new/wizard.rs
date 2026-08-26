@@ -200,19 +200,17 @@ mod tests {
 
     /// Every scaffoldable `Kind` must be offered by the wizard picker;
     /// otherwise a newly added kind would be silently unreachable interactively.
+    ///
+    /// Derived from `Kind::value_variants()`, not a hand-written list — a
+    /// hand-written list would pass vacuously for a variant nobody remembered
+    /// to add here, same as it would to `KIND_CHOICES` itself.
     #[test]
     fn every_kind_is_offered_in_the_picker() {
-        for kind in [
-            Kind::Design,
-            Kind::Bundle,
-            Kind::Deploy,
-            Kind::Provider,
-            Kind::WasmComponent,
-            Kind::Mcp,
-            Kind::Llm,
-        ] {
+        use clap::ValueEnum as _;
+
+        for kind in Kind::value_variants() {
             assert!(
-                KIND_CHOICES.iter().any(|(choice, _, _)| *choice == kind),
+                KIND_CHOICES.iter().any(|(choice, _, _)| choice == kind),
                 "Kind {kind:?} is missing from the wizard picker"
             );
         }
