@@ -426,7 +426,7 @@ fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<
 pub(crate) fn write_wit_and_lock(kind: &str, target: &Path) -> anyhow::Result<usize> {
     let mut files_written = 0usize;
     let mut lock_files = BTreeMap::new();
-    for file in embedded::files_for_kind(kind) {
+    for file in embedded::files_for_kind(kind)? {
         let pkg_dir = wit_package_subdir_for(file.name)?;
         let dst = target
             .join("wit/deps/greentic")

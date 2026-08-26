@@ -53,20 +53,27 @@ pub fn wit_files() -> Vec<WitFile> {
 /// `wasix:mcp/router` interface — so it pulls in none of these embedded files.
 /// The `wasix-mcp` WIT dep ships as a `templates/mcp/wit/deps/wasix-mcp/`
 /// template file instead.
-pub fn files_for_kind(kind: &str) -> Vec<WitFile> {
+///
+/// # Errors
+///
+/// A `kind` with no known WIT arm is an error naming the kind, not a silent
+/// base+host-only scaffold — matching the idiom `scaffold::template::
+/// load_templates_kind` already uses for the same failure shape.
+pub fn files_for_kind(kind: &str) -> anyhow::Result<Vec<WitFile>> {
     if kind == "mcp" {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let kind_file = match kind {
+        "design" | "bundle" | "deploy" | "provider" => format!("extension-{kind}.wit"),
         "wasm-component" | "llm" => "extension-design.wit".to_string(),
-        other => format!("extension-{other}.wit"),
+        other => anyhow::bail!("no embedded WIT files for scaffold kind `{other}`"),
     };
-    wit_files()
+    Ok(wit_files()
         .into_iter()
         .filter(|f| {
             matches!(f.name, "extension-base.wit" | "extension-host.wit") || f.name == kind_file
         })
-        .collect()
+        .collect())
 }
 
 /// Extract the `@X.Y.Z` package version declared on the first
@@ -139,7 +146,7 @@ mod tests {
 
     #[test]
     fn files_for_kind_design_includes_base_host_and_design() {
-        let files = files_for_kind("design");
+        let files = files_for_kind("design").expect("design resolves");
         let names: Vec<_> = files.iter().map(|f| f.name).collect();
         assert!(names.contains(&"extension-base.wit"));
         assert!(names.contains(&"extension-host.wit"));
@@ -149,7 +156,7 @@ mod tests {
 
     #[test]
     fn files_for_kind_bundle_includes_bundle_not_design() {
-        let files = files_for_kind("bundle");
+        let files = files_for_kind("bundle").expect("bundle resolves");
         let names: Vec<_> = files.iter().map(|f| f.name).collect();
         assert!(names.contains(&"extension-bundle.wit"));
         assert!(!names.contains(&"extension-design.wit"));
@@ -157,7 +164,7 @@ mod tests {
 
     #[test]
     fn files_for_kind_provider_includes_provider_not_design() {
-        let files = files_for_kind("provider");
+        let files = files_for_kind("provider").expect("provider resolves");
         let names: Vec<_> = files.iter().map(|f| f.name).collect();
         assert!(names.contains(&"extension-base.wit"));
         assert!(names.contains(&"extension-host.wit"));
@@ -172,7 +179,7 @@ mod tests {
     /// can resolve the scaffolded world.
     #[test]
     fn files_for_kind_llm_uses_design_wit() {
-        let files = files_for_kind("llm");
+        let files = files_for_kind("llm").expect("llm resolves");
         let names: Vec<_> = files.iter().map(|f| f.name).collect();
         assert!(names.contains(&"extension-base.wit"));
         assert!(names.contains(&"extension-host.wit"));
@@ -188,12 +195,58 @@ mod tests {
     /// as a `templates/mcp` file instead.
     #[test]
     fn files_for_kind_mcp_pulls_no_greentic_wit() {
-        let files = files_for_kind("mcp");
+        let files = files_for_kind("mcp").expect("mcp resolves");
         assert!(
             files.is_empty(),
             "mcp (wasix:mcp/router) must not bundle greentic WIT deps, got: {:?}",
             files.iter().map(|f| f.name).collect::<Vec<_>>()
         );
+    }
+
+    /// An unrecognised kind must error naming the kind, not silently degrade
+    /// to base+host — the same fallback shape already fixed for
+    /// `scaffold::template::load_templates_kind`.
+    #[test]
+    fn files_for_kind_rejects_an_unknown_kind() {
+        let err = match files_for_kind("addon") {
+            Ok(files) => panic!(
+                "unknown kind must error, got {:?}",
+                files.iter().map(|f| f.name).collect::<Vec<_>>()
+            ),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string().contains("addon"),
+            "error must name the offending kind: {err}"
+        );
+    }
+
+    /// Every scaffoldable kind (`scaffold::Kind::value_variants()`) either
+    /// resolves to WIT files beyond base+host, or is `mcp` — the one
+    /// documented exemption, since `wasix:mcp/router` imports no greentic WIT
+    /// package at all.
+    #[test]
+    fn every_scaffoldable_kind_resolves_wit_files_or_is_the_mcp_exemption() {
+        use crate::scaffold::Kind;
+        use clap::ValueEnum as _;
+
+        for kind in Kind::value_variants() {
+            let kind_str = kind.as_str();
+            let files = files_for_kind(kind_str)
+                .unwrap_or_else(|e| panic!("{kind_str} must resolve to WIT files: {e}"));
+            let names: Vec<_> = files.iter().map(|f| f.name).collect();
+            if kind_str == "mcp" {
+                assert!(
+                    names.is_empty(),
+                    "mcp is documented to pull no greentic WIT files, got: {names:?}"
+                );
+                continue;
+            }
+            assert!(
+                names.len() > 2,
+                "{kind_str} must yield more than just base+host, got: {names:?}"
+            );
+        }
     }
 
     #[test]
