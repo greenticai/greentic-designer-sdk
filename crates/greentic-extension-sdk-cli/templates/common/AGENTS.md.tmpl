@@ -38,6 +38,43 @@ Run `./ci/local_check.sh` before every commit and before publishing. The bar is
 **zero clippy warnings** (`cargo clippy --all-targets -- -D warnings`) and green
 tests. Do not commit if it fails.
 
+## Testing
+
+Three layers, fastest first. Most of your testing belongs in the first one.
+
+| Layer | Command | What it proves |
+|---|---|---|
+| Unit, on the host | `cargo test` | Your logic is right. Milliseconds, no WASM, no designer. |
+| Full gate | `./ci/local_check.sh` | fmt + clippy + tests + the wasm actually builds. |
+| Integration | `gtdx dev --once` | It packs and installs. Not that it behaves — that is the layer above. |
+
+The guest exports are plain Rust functions, so a host test calls them directly:
+
+```rust
+let out = <Component as tools::Guest>::invoke_tool("echo".into(), args)?;
+```
+
+`src/lib.rs` ships example tests doing exactly this. Extend them; do not delete
+them and leave `cargo test` with nothing to run.
+
+**One prerequisite:** `cargo test` needs `src/bindings.rs`, which is generated
+rather than committed. Build once (`gtdx dev --once` or `cargo component build`)
+before the first `cargo test` in a fresh clone, or it fails with
+`cannot find export in bindings`.
+
+Testing code that calls host functions — http, secrets, state, logging,
+translation? Add the SDK's mocks as a dev-dependency:
+
+```toml
+[dev-dependencies]
+greentic-extension-sdk-testing = "{{sdk_version}}"
+```
+
+They are ordinary in-memory objects (`MockHttpClient`, `MockSecretsBackend`,
+`MockLogger`, …), so they only help if your code takes the host dependency as a
+parameter rather than calling the binding directly. Structure it that way and
+the logic stays testable on the host.
+
 ## Self-check before publishing
 
 Beyond the Rust gate above, validate the manifest with gtdx — these catch a broken
