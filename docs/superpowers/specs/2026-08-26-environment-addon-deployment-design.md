@@ -681,7 +681,7 @@ outside this repo.
 
 | Phase | What ships | Gated on |
 |---|---|---|
-| 1 | `contributions.addons` — the declarative catalogue (id, family, `config-schema`, `desired-state-schema`, `outputs`). Platform-side reconcilers for Qdrant, Redis, Postgres, written against the public interface. Hosted placement only. | **Nothing.** Startable now. |
+| 1 | `contributions.addons` — the declarative catalogue (id, family, `config-schema`, `desired-state-schema`, `outputs`). Platform-side reconcilers for Qdrant, Redis, Postgres, written against the public interface. Hosted placement only. | **Done in the SDK** (catalogue). Reconcilers remain platform-side. |
 | 2 | `ExtensionKind::Addon` + the `extension-addon` WIT world — third parties ship their own reconcilers as WASM. | `extension-base@0.3.0` (§9.2) |
 | 3 | Third-party addon marketplace. | Production trust root (§9.2) |
 | — | BYOC placement. | Engine sign-off, legal and engineering (§9.2, §6.3) |
