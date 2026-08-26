@@ -1153,11 +1153,13 @@ fn a_secret_inside_contains_is_caught() {
     );
 }
 
-/// `not`, `if`, `then`, `else` all constrain the same data position as their
+/// `if`, `then`, `else` all constrain the same data position as their
 /// parent and can carry a nested `properties` map, exactly like `allOf`.
+/// Data can genuinely match an `if` before `then` applies, so these are
+/// real positions, unlike `not` below.
 #[test]
-fn a_secret_inside_not_if_then_or_else_is_caught() {
-    for wrapper in ["not", "if", "then", "else"] {
+fn a_secret_inside_if_then_or_else_is_caught() {
+    for wrapper in ["if", "then", "else"] {
         let mut a = base_addon();
         a["desired_state_schema"] = json!(format!(
             r#"{{"type":"object","{wrapper}":{{"type":"object",
@@ -1170,6 +1172,45 @@ fn a_secret_inside_not_if_then_or_else_is_caught() {
             "a secret nested inside {wrapper:?} must be caught: {v:?}"
         );
     }
+}
+
+/// `not: {"properties":{"admin_password":...}}` means the instance must NOT
+/// have `admin_password` in that shape - the author is forbidding the
+/// credential, not declaring one. A name reachable only through `not` must
+/// not be flagged: doing so would invert the schema's meaning and punish an
+/// author for writing the exact prohibition D16 recommends.
+#[test]
+fn a_secret_reachable_only_through_not_is_not_flagged() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","not":{"type":"object",
+            "properties":{"admin_password":{"type":"string"}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "a property forbidden by `not` must not be flagged as declared: {v:?}"
+    );
+}
+
+/// `unevaluatedProperties` is 2020-12's successor to `additionalProperties`
+/// for properties left over after composition - it takes a schema, not
+/// only a boolean, and that schema is a real leftover-property data
+/// position, so a secret hiding inside it must be caught.
+#[test]
+fn a_secret_inside_unevaluated_properties_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"known":{"type":"string"}},
+            "unevaluatedProperties":{"type":"object",
+                "properties":{"leftover_password":{"type":"string"}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter().any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"
+            && x.message.contains("leftover_password")),
+        "a secret nested inside unevaluatedProperties must be caught: {v:?}"
+    );
 }
 
 /// `dependentSchemas` values are full schemas applied to the same object,
