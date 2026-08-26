@@ -14,10 +14,11 @@
 > - **Contract release `greentic:extension-base@0.3.0`** — adding a variant to
 >   the WIT `enum kind` is a breaking change and must be coordinated with the
 >   commercial runtime repo (§9.2).
-> - **Legal sign-off on the BYOC engine.** Terraform is BUSL-1.1; running it on
->   customers' behalf in a PaaS is plausibly outside its additional use grant.
->   The spec plans on OpenTofu (D12), but counsel must confirm before
->   engineering time is committed to either.
+> - **Sign-off on the BYOC engine.** Terraform is BUSL-1.1, and the licence's
+>   definition of *Embedded* reaches a wrapper that merely downloads the binary.
+>   The spec defaults to OpenTofu (D12) with Pulumi Automation API as the live
+>   alternative (§6.3). Needs counsel on the licence AND an engineering call on
+>   operational shape before either is committed to.
 >
 > **Prerequisites that are independently shippable and should land first:** §9.1.
 
@@ -64,7 +65,7 @@ know whether a changed circumstance invalidates it.
 | D9 | Rollback is **re-applying a previous spec revision**, not an addon-implemented undo. | Correct `undo` is close to unwritable by an addon author. Level-triggered reconciliation makes it unnecessary: a previous revision is just another desired state. |
 | D10 | `plan` returns **planned desired state plus replace-paths**, never a list of opaque actions. | Terraform's `PlanResourceChange` returns `planned_state` + `requires_replace`, and core derives the verb; the provider never names an action. An opaque action payload cannot be diffed, rendered, or consistency-checked by the platform — only the plugin can say what will happen, which makes the plan unverifiable. Since both `current` and `planned` are JSON documents of a schema the addon published, the platform can diff them generically. |
 | D11 | The host **enforces plan/apply consistency, fatally, with no escape hatch.** Every known leaf in the planned state must equal the corresponding leaf observed after apply. | This is what separates a plan from a dry run. Terraform enforces it via `objchange.AssertObjectCompatible` and emits "Provider produced inconsistent result after apply". Its one escape hatch, `legacy_type_system`, is a decade-old compatibility wart its own proto comments shout at people not to use. We are greenfield and must not ship one. |
-| D12 | The BYOC renderer targets **OpenTofu**, not Terraform. | Terraform moved to BUSL-1.1 in August 2023 (now under IBM); the additional use grant excludes embedding or hosting it to build an offering competitive with HashiCorp's commercial products. A PaaS that runs Terraform on customers' behalf sits squarely against HCP Terraform. OpenTofu is the MPL-2.0 Linux Foundation continuation. **Needs counsel to confirm, but plan on OpenTofu.** |
+| D12 | The BYOC renderer does **not** run Terraform. The candidates are OpenTofu and Pulumi Automation API; OpenTofu is the default pending §9.2 sign-off. | Terraform is BUSL-1.1 under IBM. The grant excludes offering it "on a hosted or embedded basis in order to compete", and the licence defines *Embedded* to include "packaging the competitive offering in such a way that the Licensed Work must be accessed or downloaded for the competitive offering to operate" — which names the wrapper shape itself, not just vendoring the source. OpenTofu is the MPL-2.0 Linux Foundation fork and adds state encryption at rest, which Terraform lacks and which matters because state holds secrets in plaintext. Pulumi Automation API is the other real candidate (§6.3). |
 | D13 | The contract carries a **`deferred` signal** (`absent-prereq`, `config-unknown`) from day one. | A three-call interface has no way to say "I cannot plan this yet". Terraform had to bolt `Deferred` on later and negotiate it behind a capability flag. We hit this immediately: day-2 config cannot be planned before the instance exists. |
 
 ### 2.1 Non-goals
@@ -405,7 +406,60 @@ model: *"If there's already a run in progress, the new run won't start until
 the current one has completely finished — HCP Terraform won't even plan the
 run yet, because the current run might change what a future run would do."*
 
-**Two limits this path inherits and the hosted path does not.** First,
+**The generated backend config must set `use_lockfile = true` explicitly.** The
+S3 backend's `Lock()` opens with `if !c.useLockFile && c.ddbTable == "" { return
+"", nil }` — a backend with neither configured **locks nothing and reports
+success**. In config we generate per tenant, this cannot be a default.
+
+Note also that these locks have **no TTL**: `LockInfo` carries a `Created`
+timestamp and no expiry, and nothing expires it. A crashed apply holds the lock
+until something clears it out of band, so the control plane needs its own
+lock-reaping path rather than assuming a human will run `force-unlock`.
+
+### 6.3 What a crashed runner does to a customer's cloud account
+
+This is the failure mode that most shapes the BYOC design, and it is not
+hypothetical.
+
+When Terraform completes an apply but cannot persist state, it degrades through
+four stages: it writes `errored.tfstate` **into the working directory**; failing
+that, it dumps the raw JSON state **to the terminal** and asks a human to paste
+it into a file; failing that, it reports that the record of every resource
+created during the apply **has been lost** and must be recovered by importing
+each one by hand.
+
+Every one of those paths assumes a human at a persistent workstation. In a
+container-per-run architecture the working directory dies with the container,
+and the resources the apply just created become invisible orphans **in the
+customer's own cloud account, billing them**. Terraform also cannot refresh
+provider credentials mid-apply, so a token that expires during a long apply
+produces exactly this state — an open, unfixed issue.
+
+Four requirements follow, and none are optional:
+
+1. `errored.tfstate` is uploaded to object storage **before** container teardown.
+2. The stdout JSON fallback is captured from logs, not just displayed.
+3. Runner credentials provably outlive the maximum apply duration.
+4. A reconciliation sweep can find and adopt orphans after the fact.
+
+**Engine choice turns partly on this.** Pulumi's operational shape is built for
+a programmatic caller where Terraform's is built for a workstation: state is
+written as checkpoints continuously rather than once at the end; concurrency is
+an expiring *lease* returning a typed `ConcurrentUpdateError` rather than a
+TTL-less lock file; and `refresh --clear-pending-creates` addresses the
+interrupted-create case directly. Its Automation API is explicitly built for
+exposing IaC behind a REST/gRPC API and per-customer infrastructure at SaaS
+scale. Terraform has no equivalent — `terraform-exec` is a CLI wrapper whose own
+README says Terraform Core "is not intended for use outside Terraform Core", and
+CDKTF was archived in December 2025.
+
+This does not settle the choice; provider-ecosystem breadth and HCL familiarity
+pull the other way. It does mean §9.2's sign-off should weigh operational shape
+alongside licence, rather than treating the decision as legal-only.
+
+### 6.4 Limits the BYOC path inherits
+
+First,
 provider configuration must be fully known at plan time, so "create the
 instance, then configure inside it" cannot happen in one apply — this is
 `hashicorp/terraform#30937`, unsolved. Second, the runner must reach the data
@@ -465,6 +519,21 @@ means that resource is never retried.
 Deprovisioning external infrastructure needs a finalizer-style guard: the
 resource record must survive until cleanup succeeds, or a customer's Qdrant
 cluster outlives the record that knows about it.
+
+**When the runner itself dies mid-provision**, the control plane needs a rule
+for whether to clean up. The Open Service Broker spec is the only place this is
+formalised, and its status-code decision table transfers directly: a `5xx` or a
+timeout means mitigate (attempt deletion, retry until it succeeds), because the
+provision may have partly happened; a `408` or other `4xx` means do not, because
+the request was rejected or never arrived; a success code with a malformed body
+means mitigate. Its governing principle is the one we want: *"The Platform is
+the source of truth… Service Brokers are expected to have successfully
+provisioned all of the Service Instances the Platform knows about, and none that
+it doesn't."*
+
+§5.5 rejects OSB as the shape of the **addon contract**. This is a different
+thing — it is the **platform's** behaviour when its own runner crashes — and
+adopting it there costs us nothing.
 
 ### 7.4 Status and drift
 
@@ -574,6 +643,12 @@ provisioned infrastructure and, on the BYOC path, runs against the customer's
 own cloud account — a different class of target. **A third-party addon
 marketplace cannot open on an empty trust root.** Tracked as D.5+ in
 `2026-05-13-extensions-1.0-cleanup.md`, blocked on an org decision.
+
+**BYOC engine decision.** Not Terraform (D12). OpenTofu by default, Pulumi
+Automation API as the alternative that is better shaped for a hosted runner
+(§6.3). Two sign-offs, not one: counsel on the licence, and an engineering call
+on crashed-runner semantics. Shipping BYOC before §6.3's four requirements are
+met puts orphaned resources in customers' cloud accounts.
 
 **Contract release `extension-base@0.3.0`.** `wit/extension-base.wit:10-15`
 declares `enum kind { design, bundle, deploy, provider }`. Additive enum
