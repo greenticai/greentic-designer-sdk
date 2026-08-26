@@ -16,6 +16,7 @@ pub enum Kind {
     WasmComponent,
     Mcp,
     Llm,
+    Addon,
 }
 
 impl Kind {
@@ -28,6 +29,7 @@ impl Kind {
             Kind::WasmComponent => "wasm-component",
             Kind::Mcp => "mcp",
             Kind::Llm => "llm",
+            Kind::Addon => "addon",
         }
     }
 }
@@ -60,8 +62,9 @@ mod tests {
     /// This ties the two enums together: every `ExtensionKind::ALL` entry
     /// must be scaffoldable via some `scaffold::Kind` (matched by
     /// `dir_name()` == `as_str()`), unless explicitly exempted below with a
-    /// comment explaining why. `ExtensionKind::Addon` is the one exemption
-    /// today, pending its scaffold template.
+    /// comment explaining why. There are no exemptions today — every
+    /// `ExtensionKind` `gtdx new` knows about can be scaffolded from
+    /// scratch.
     #[test]
     fn every_extension_kind_is_scaffoldable() {
         use clap::ValueEnum as _;
@@ -69,13 +72,7 @@ mod tests {
 
         // Deliberately non-scaffoldable `ExtensionKind`s go here, with a
         // comment saying why `gtdx new` cannot produce them.
-        const NON_SCAFFOLDABLE: &[ExtensionKind] = &[
-            // `gtdx new --kind addon` needs `templates/addon/`, which ships in
-            // a later commit alongside the addon scaffold. `ExtensionKind::Addon`
-            // can already be installed/listed/searched/uninstalled today —
-            // it just can't be scaffolded from scratch yet.
-            ExtensionKind::Addon,
-        ];
+        const NON_SCAFFOLDABLE: &[ExtensionKind] = &[];
 
         let scaffoldable: Vec<&'static str> =
             Kind::value_variants().iter().map(|k| k.as_str()).collect();

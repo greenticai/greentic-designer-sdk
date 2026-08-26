@@ -1,0 +1,596 @@
+// Addon extension guest for {{id}}.
+//
+// An addon is a managed service the platform provisions and reconciles as
+// declarative infrastructure (a Qdrant, a Redis) rather than a flow-time or
+// design-time extension — see `wit/deps/greentic/extension-addon`. This
+// scaffold ships one resource, `cache`, shaped like a small Redis: it exists
+// so a fresh build has something real to validate, plan and render, not to
+// be shipped as-is.
+//
+// `greentic:extension-addon` splits its five exported functions by what a
+// scaffold can honestly do without a real backing service:
+//
+//   - `validation` and `workload` are fully implemented below: real checks
+//     against the schemas in `describe.json`, and a real digest-pinned
+//     `container-workload`.
+//   - `reconciler.plan` is fully implemented too — a genuine diff of
+//     `current` against `desired`. It is PURE (no network), which is what
+//     lets `tests::plan_is_idempotent_and_stable` hold it to the same two
+//     properties the platform will hold every addon to.
+//   - `reconciler.observe` and `reconciler.apply` need a real backing
+//     service to talk to over the network, which this scaffold does not
+//     have. They fail LOUDLY — an `extension-error` from `observe`, an
+//     `apply-report` with `outcome::failed-terminal` from `apply` — rather
+//     than reporting a success that never happened. A stub that returns a
+//     fake `applied` is the one bug this contract cannot tolerate: it is the
+//     single place the platform trusts the answer to decide whether
+//     infrastructure exists.
+
+#[allow(warnings)]
+mod bindings;
+
+use bindings::exports::greentic::extension_addon::{reconciler, validation, workload};
+use bindings::exports::greentic::extension_base::{lifecycle, manifest};
+use bindings::greentic::extension_addon::types as addon_types;
+use bindings::greentic::extension_base::types;
+
+struct Component;
+
+/// The one resource this scaffold declares in `describe.json`'s
+/// `contributions.addons[]`. Every exported function is namespaced by
+/// `resource-id` — a real addon with more than one resource would match on
+/// it the way `provider`'s scaffold matches on channel id.
+const RESOURCE_ID: &str = "cache";
+
+/// Digest-pinned on purpose — see `container.image`'s doc comment in
+/// `wit/deps/greentic/extension-addon`: a mutable tag means the workload the
+/// plan approved is not necessarily the workload that runs. `render-workload`
+/// is PURE (no registry lookup), so this cannot resolve a real digest at
+/// scaffold time. Replace it with the digest of the image you actually pin —
+/// `docker buildx imagetools inspect redis:7-alpine` (or your registry's
+/// equivalent) prints one — before this addon ships. Shipping the
+/// placeholder below is indistinguishable from shipping a mutable tag.
+const IMAGE: &str = "docker.io/library/redis@sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+const DEFAULT_MAX_CONNECTIONS: u64 = 100;
+const DEFAULT_EVICTION_POLICY: &str = "noeviction";
+
+// ---- extension-base/manifest ----
+impl manifest::Guest for Component {
+    fn get_identity() -> types::ExtensionIdentity {
+        types::ExtensionIdentity {
+            id: "{{id}}".to_string(),
+            version: "{{version}}".to_string(),
+            kind: types::Kind::Addon,
+        }
+    }
+
+    fn get_offered() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+
+    fn get_required() -> Vec<types::CapabilityRef> {
+        Vec::new()
+    }
+}
+
+// ---- extension-base/lifecycle ----
+impl lifecycle::Guest for Component {
+    fn init(_config_json: String) -> Result<(), types::ExtensionError> {
+        Ok(())
+    }
+
+    fn shutdown() {}
+}
+
+/// `true` when `n` is a power of two — the one thing `memory_mb` in
+/// `describe.json`'s `config_schema` cannot express on its own, so it is
+/// checked here instead. `0` is not a power of two.
+fn is_power_of_two(n: u64) -> bool {
+    n != 0 && (n & (n - 1)) == 0
+}
+
+fn unknown_resource_diagnostic(resource_id: &str) -> types::Diagnostic {
+    types::Diagnostic {
+        severity: types::Severity::Error,
+        code: "E_UNKNOWN_RESOURCE".to_string(),
+        message: format!("this extension declares no addon named {resource_id:?}"),
+        path: None,
+    }
+}
+
+// ---- extension-addon/validation ----
+impl validation::Guest for Component {
+    /// Behavioural check `config_schema`'s JSON Schema cannot express on its
+    /// own: `memory_mb` must be a power of two.
+    fn validate_config(resource_id: String, config_json: String) -> Vec<types::Diagnostic> {
+        if resource_id != RESOURCE_ID {
+            return vec![unknown_resource_diagnostic(&resource_id)];
+        }
+        let Ok(serde_json::Value::Object(config)) =
+            serde_json::from_str::<serde_json::Value>(&config_json)
+        else {
+            return vec![types::Diagnostic {
+                severity: types::Severity::Error,
+                code: "E_CONFIG_NOT_AN_OBJECT".to_string(),
+                message: "config must be a JSON object matching config_schema".to_string(),
+                path: None,
+            }];
+        };
+        match config.get("memory_mb").and_then(serde_json::Value::as_u64) {
+            Some(mb) if is_power_of_two(mb) => Vec::new(),
+            Some(mb) => vec![types::Diagnostic {
+                severity: types::Severity::Error,
+                code: "E_MEMORY_NOT_POWER_OF_TWO".to_string(),
+                message: format!(
+                    "memory_mb must be a power of two (the allocator pages in powers of two); got {mb}"
+                ),
+                path: Some("/memory_mb".to_string()),
+            }],
+            None => vec![types::Diagnostic {
+                severity: types::Severity::Error,
+                code: "E_MEMORY_MB_REQUIRED".to_string(),
+                message: "memory_mb is required and must be a positive integer".to_string(),
+                path: Some("/memory_mb".to_string()),
+            }],
+        }
+    }
+
+    /// Takes `config_json` alongside `desired` because the most common thing
+    /// wrong with desired state is disagreement with config: here,
+    /// `max_connections` outrunning what `memory_mb` can support. Neither
+    /// schema alone can express that — it needs both documents at once.
+    fn validate_desired_state(
+        resource_id: String,
+        config_json: String,
+        desired: addon_types::VersionedState,
+    ) -> Vec<types::Diagnostic> {
+        if resource_id != RESOURCE_ID {
+            return vec![unknown_resource_diagnostic(&resource_id)];
+        }
+        if desired.schema_version != 1 {
+            return vec![types::Diagnostic {
+                severity: types::Severity::Error,
+                code: "E_DESIRED_STATE_SCHEMA_VERSION".to_string(),
+                message: format!(
+                    "this addon only understands desired_state_schema version 1, got {}",
+                    desired.schema_version
+                ),
+                path: None,
+            }];
+        }
+
+        let memory_mb = serde_json::from_str::<serde_json::Value>(&config_json)
+            .ok()
+            .and_then(|v| v.get("memory_mb").and_then(serde_json::Value::as_u64).map(|n| n));
+        let max_connections = serde_json::from_str::<serde_json::Value>(&desired.json)
+            .ok()
+            .and_then(|v| {
+                v.get("max_connections")
+                    .and_then(serde_json::Value::as_u64)
+            });
+
+        let (Some(memory_mb), Some(max_connections)) = (memory_mb, max_connections) else {
+            // Either document failed to parse or is missing the field: that
+            // is `validate-config`'s / the schema's job to report, not this
+            // function's — there is nothing to cross-check without both
+            // numbers.
+            return Vec::new();
+        };
+
+        let ceiling = memory_mb.saturating_mul(2);
+        if max_connections > ceiling {
+            return vec![types::Diagnostic {
+                severity: types::Severity::Error,
+                code: "E_MAX_CONNECTIONS_EXCEEDS_MEMORY".to_string(),
+                message: format!(
+                    "max_connections ({max_connections}) exceeds what memory_mb ({memory_mb}) can \
+                     support (at most {ceiling} at ~2 connections/MB); raise memory_mb or lower \
+                     max_connections"
+                ),
+                path: Some("/max_connections".to_string()),
+            }];
+        }
+        Vec::new()
+    }
+}
+
+// ---- extension-addon/workload ----
+impl workload::Guest for Component {
+    /// PURE: no network, no registry lookup. Renders a real
+    /// `container-workload` — digest-pinned image, a readiness probe, a
+    /// resource request sized off `memory_mb`, and a volume for the data
+    /// directory.
+    fn render_workload(
+        resource_id: String,
+        config_json: String,
+    ) -> Result<workload::WorkloadSpec, types::ExtensionError> {
+        if resource_id != RESOURCE_ID {
+            return Err(types::ExtensionError::NotFound(resource_id));
+        }
+        let config: serde_json::Value = serde_json::from_str(&config_json)
+            .map_err(|e| types::ExtensionError::SchemaInvalid(format!("config_json: {e}")))?;
+        let memory_mb = config
+            .get("memory_mb")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| {
+                types::ExtensionError::SchemaInvalid(
+                    "memory_mb is required and must fit in u32".to_string(),
+                )
+            })?;
+
+        let container = workload::ContainerWorkload {
+            primary: workload::Container {
+                image: IMAGE.to_string(),
+                args: Vec::new(),
+                // A REQUEST, not a pointer: `render-workload` is pure and
+                // cannot generate a password itself, so it names the secret
+                // it needs and the platform materialises the real value
+                // before the container starts. See `value-ref`'s doc
+                // comment in wit/deps/greentic/extension-addon.
+                env: vec![(
+                    "REDIS_PASSWORD".to_string(),
+                    addon_types::ValueRef::SecretRef("cache-password".to_string()),
+                )],
+                ports: vec![workload::Port {
+                    name: "redis".to_string(),
+                    number: 6379,
+                }],
+            },
+            sidecars: Vec::new(),
+            volumes: vec![workload::Volume {
+                name: "data".to_string(),
+                size_gb: 1,
+                mount_path: "/data".to_string(),
+            }],
+            resources: workload::ResourceRequest {
+                min_memory_mb: memory_mb,
+                min_cpu_millis: 250,
+                recommended_memory_mb: Some(memory_mb.saturating_mul(2)),
+                recommended_cpu_millis: Some(500),
+            },
+            readiness: workload::Probe {
+                // A successful TCP connect is what Redis's wire protocol can
+                // actually offer without embedding a client just to ping it.
+                kind: workload::ProbeKind::Tcp("redis".to_string()),
+                initial_delay_seconds: 5,
+                period_seconds: 10,
+            },
+            extra_json: None,
+        };
+        Ok(workload::WorkloadSpec::Container(container))
+    }
+}
+
+/// `desired_json`, parsed and amended with this addon's own defaults —
+/// exactly what `planned-change.planned`'s doc comment asks for. Reads only
+/// `desired`, never `current`: filling a default is not itself a change, so
+/// basing it on `desired` alone is what keeps `plan(x, x)` a no-op (see
+/// `tests::plan_is_idempotent_and_stable`) instead of the "normalises an
+/// absent key to `{}` on every call" bug this addon must not repeat.
+fn defaulted_desired_state(desired_json: &str) -> serde_json::Value {
+    let mut obj = match serde_json::from_str::<serde_json::Value>(desired_json) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+    obj.entry("max_connections")
+        .or_insert_with(|| serde_json::json!(DEFAULT_MAX_CONNECTIONS));
+    obj.entry("eviction_policy")
+        .or_insert_with(|| serde_json::json!(DEFAULT_EVICTION_POLICY));
+    serde_json::Value::Object(obj)
+}
+
+// ---- extension-addon/reconciler ----
+impl reconciler::Guest for Component {
+    /// Day-2 state read back from the live instance. This scaffold has no
+    /// live instance to read: implementing this honestly needs
+    /// `extension-host/http` (or a client built on it) reaching the address
+    /// in `binding.outputs`, which is exactly what this scaffold cannot do
+    /// without a real Redis to talk to. Fails loudly rather than fabricating
+    /// an observed state — an addon that lies here breaks drift detection
+    /// for every resource it manages.
+    fn observe(
+        resource_id: String,
+        _binding: reconciler::Binding,
+    ) -> Result<addon_types::VersionedState, types::ExtensionError> {
+        Err(types::ExtensionError::Internal(format!(
+            "observe() is not implemented for resource {resource_id:?}. Implement it by reading \
+             `binding.outputs` (e.g. CACHE_URL) and calling `extension-host/http` against the real \
+             backing service, then translate what comes back into a versioned-state matching \
+             desired_state_schema."
+        )))
+    }
+
+    /// PURE — a real diff of `current` against `desired`, amended with this
+    /// addon's defaults. The scaffold's centrepiece: everything here can be
+    /// computed with no network, so there is no honest reason to defer or
+    /// fake it.
+    fn plan(
+        resource_id: String,
+        current: addon_types::VersionedState,
+        desired: addon_types::VersionedState,
+    ) -> Result<reconciler::PlanOutcome, types::ExtensionError> {
+        if resource_id != RESOURCE_ID {
+            return Err(types::ExtensionError::NotFound(resource_id));
+        }
+        if desired.schema_version != 1 {
+            return Err(types::ExtensionError::SchemaInvalid(format!(
+                "this addon only understands desired_state_schema version 1, got {}",
+                desired.schema_version
+            )));
+        }
+
+        let planned_value = defaulted_desired_state(&desired.json);
+
+        // A change to `eviction_policy` cannot be applied to a running
+        // instance — the eviction algorithm is chosen at process start — so
+        // it forces destroy-and-recreate. Compared against `current`
+        // directly (not against a default): a resource that does not exist
+        // yet (`current` is `"{}"`) has nothing to replace.
+        let mut requires_replace = Vec::new();
+        if let Ok(serde_json::Value::Object(current_obj)) =
+            serde_json::from_str::<serde_json::Value>(&current.json)
+            && let (Some(before), Some(after)) = (
+                current_obj.get("eviction_policy"),
+                planned_value.get("eviction_policy"),
+            )
+            && before != after
+        {
+            requires_replace.push("/eviction_policy".to_string());
+        }
+
+        Ok(reconciler::PlanOutcome::Planned(reconciler::PlannedChange {
+            planned: addon_types::VersionedState {
+                schema_version: 1,
+                json: planned_value.to_string(),
+            },
+            requires_replace,
+        }))
+    }
+
+    /// Converging the live instance toward `planned`. Like `observe`, this
+    /// needs a real backing service this scaffold does not have. Returns
+    /// `Ok` with `outcome::failed-terminal` rather than `Err`: an apply
+    /// report is expected to carry `observed` state even on failure, and
+    /// `observed` here is honestly just `current` — nothing changed, because
+    /// nothing was attempted against a real instance.
+    fn apply(
+        resource_id: String,
+        _binding: reconciler::Binding,
+        current: addon_types::VersionedState,
+        _planned: addon_types::VersionedState,
+    ) -> Result<reconciler::ApplyReport, types::ExtensionError> {
+        Ok(reconciler::ApplyReport {
+            message: format!(
+                "apply() is not implemented for resource {resource_id:?}. Nothing was changed on \
+                 any live instance — `observed` is `current` unchanged, not a fabricated success. \
+                 Implement this by using `binding.outputs` to reach the real backing service and \
+                 converge it toward `planned`."
+            ),
+            observed: current,
+            outcome: reconciler::Outcome::FailedTerminal,
+        })
+    }
+}
+
+bindings::export!(Component with_types_in bindings);
+
+// Unit tests run on the host — no WASM, no designer, milliseconds. The guest
+// exports are plain Rust functions, so call them directly.
+//
+// `cargo test` needs `src/bindings.rs`, which is generated. Build once first
+// (`gtdx dev --once` or `cargo component build`), then test freely.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resource_id() -> String {
+        RESOURCE_ID.to_string()
+    }
+
+    #[test]
+    fn valid_config_has_no_diagnostics() {
+        let diags = <Component as validation::Guest>::validate_config(
+            resource_id(),
+            r#"{"memory_mb":256}"#.to_string(),
+        );
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    #[test]
+    fn a_non_power_of_two_memory_is_flagged() {
+        let diags = <Component as validation::Guest>::validate_config(
+            resource_id(),
+            r#"{"memory_mb":300}"#.to_string(),
+        );
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, "E_MEMORY_NOT_POWER_OF_TWO");
+    }
+
+    #[test]
+    fn desired_state_exceeding_memory_capacity_is_flagged() {
+        let diags = <Component as validation::Guest>::validate_desired_state(
+            resource_id(),
+            r#"{"memory_mb":16}"#.to_string(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: r#"{"max_connections":1000}"#.to_string(),
+            },
+        );
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, "E_MAX_CONNECTIONS_EXCEEDS_MEMORY");
+    }
+
+    #[test]
+    fn desired_state_within_memory_capacity_is_clean() {
+        let diags = <Component as validation::Guest>::validate_desired_state(
+            resource_id(),
+            r#"{"memory_mb":256}"#.to_string(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: r#"{"max_connections":100}"#.to_string(),
+            },
+        );
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    #[test]
+    fn render_workload_returns_a_digest_pinned_container_with_a_readiness_probe() {
+        let spec = <Component as workload::Guest>::render_workload(
+            resource_id(),
+            r#"{"memory_mb":256}"#.to_string(),
+        )
+        .expect("256 is a valid power-of-two memory_mb");
+        let workload::WorkloadSpec::Container(container) = spec else {
+            panic!("expected a container-workload, not a managed one");
+        };
+        assert!(
+            container.primary.image.contains("@sha256:"),
+            "image must be digest-pinned, got: {}",
+            container.primary.image
+        );
+        assert_eq!(container.resources.min_memory_mb, 256);
+        assert!(matches!(container.readiness.kind, workload::ProbeKind::Tcp(_)));
+        assert_eq!(container.volumes.len(), 1);
+    }
+
+    #[test]
+    fn plan_fills_defaults_and_marks_eviction_policy_replace() {
+        let outcome = <Component as reconciler::Guest>::plan(
+            resource_id(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: r#"{"max_connections":100,"eviction_policy":"noeviction"}"#.to_string(),
+            },
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: r#"{"eviction_policy":"allkeys-lru"}"#.to_string(),
+            },
+        )
+        .expect("plan is pure and must not fail on well-formed input");
+        let reconciler::PlanOutcome::Planned(change) = outcome else {
+            panic!("expected a plan, not deferred");
+        };
+        assert!(change.planned.json.contains("\"max_connections\":100"));
+        assert!(change.planned.json.contains("allkeys-lru"));
+        assert_eq!(change.requires_replace, vec!["/eviction_policy".to_string()]);
+    }
+
+    #[test]
+    fn observe_fails_loudly_instead_of_faking_success() {
+        let err =
+            <Component as reconciler::Guest>::observe(resource_id(), reconciler::Binding {
+                outputs: Vec::new(),
+            })
+            .expect_err("observe must fail until a real backing service is wired up");
+        let types::ExtensionError::Internal(message) = err else {
+            panic!("expected Internal, got a different ExtensionError variant");
+        };
+        assert!(message.contains("not implemented"), "message: {message}");
+    }
+
+    #[test]
+    fn apply_reports_failed_terminal_instead_of_faking_success() {
+        let current = addon_types::VersionedState {
+            schema_version: 1,
+            json: "{}".to_string(),
+        };
+        let current_for_apply = addon_types::VersionedState {
+            schema_version: 1,
+            json: current.json.clone(),
+        };
+        let planned = addon_types::VersionedState {
+            schema_version: 1,
+            json: r#"{"max_connections":100,"eviction_policy":"noeviction"}"#.to_string(),
+        };
+        let report = <Component as reconciler::Guest>::apply(
+            resource_id(),
+            reconciler::Binding { outputs: Vec::new() },
+            current_for_apply,
+            planned,
+        )
+        .expect("apply reports failure through apply-report, not Err");
+        assert!(matches!(report.outcome, reconciler::Outcome::FailedTerminal));
+        assert_eq!(report.observed.json, current.json);
+        assert!(report.message.contains("not implemented"));
+    }
+
+    /// The property every addon `plan` is held to. Uses
+    /// `greentic-extension-sdk-testing`'s conformance helpers against this
+    /// addon's own `plan` — see the crate doc comment above for why
+    /// `defaulted_desired_state` reads only `desired`, which is what keeps
+    /// this passing.
+    #[test]
+    fn plan_is_idempotent_and_stable() {
+        use greentic_extension_sdk_testing::{PlanResult, assert_plan_idempotent, assert_plan_stable};
+
+        let call = |current: &str, desired: &str| -> Option<PlanResult> {
+            let outcome = <Component as reconciler::Guest>::plan(
+                resource_id(),
+                addon_types::VersionedState {
+                    schema_version: 1,
+                    json: current.to_string(),
+                },
+                addon_types::VersionedState {
+                    schema_version: 1,
+                    json: desired.to_string(),
+                },
+            )
+            .expect("plan is pure and must not fail on well-formed input");
+            match outcome {
+                reconciler::PlanOutcome::Planned(change) => Some(PlanResult {
+                    planned_json: change.planned.json,
+                    requires_replace: change.requires_replace,
+                }),
+                reconciler::PlanOutcome::Deferred(_) => None,
+            }
+        };
+
+        // A steady state already includes both defaulted fields — planning
+        // it toward itself must be a genuine no-op. (An empty `"{}"` is the
+        // right input for the FIRST plan of a resource that does not exist
+        // yet, but is deliberately not the fixture here: filling in defaults
+        // on that first plan is real work, not churn, so it is not the case
+        // `assert_plan_idempotent` is about.)
+        let steady_state = r#"{"max_connections":100,"eviction_policy":"noeviction"}"#;
+        assert_plan_idempotent(steady_state, call).expect("plan(x, x) must be a no-op");
+
+        assert_plan_stable(
+            steady_state,
+            r#"{"max_connections":200,"eviction_policy":"allkeys-lru"}"#,
+            call,
+        )
+        .expect("two identical plan calls must agree");
+    }
+
+    #[test]
+    fn an_unknown_resource_is_an_error_everywhere() {
+        assert!(
+            <Component as validation::Guest>::validate_config(
+                "not-cache".to_string(),
+                "{}".to_string()
+            )
+            .iter()
+            .any(|d| d.code == "E_UNKNOWN_RESOURCE")
+        );
+        assert!(
+            <Component as workload::Guest>::render_workload("not-cache".to_string(), "{}".to_string())
+                .is_err()
+        );
+        assert!(
+            <Component as reconciler::Guest>::plan(
+                "not-cache".to_string(),
+                addon_types::VersionedState {
+                    schema_version: 1,
+                    json: "{}".to_string(),
+                },
+                addon_types::VersionedState {
+                    schema_version: 1,
+                    json: "{}".to_string(),
+                },
+            )
+            .is_err()
+        );
+    }
+}

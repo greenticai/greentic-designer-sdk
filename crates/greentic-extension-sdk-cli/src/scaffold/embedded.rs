@@ -56,11 +56,7 @@ pub fn wit_files() -> Vec<WitFile> {
 /// template file instead.
 ///
 /// `addon` resolves to `extension-base.wit` + `extension-host.wit` +
-/// `extension-addon.wit` like any other greentic-package kind, even though
-/// `gtdx new --kind addon` cannot scaffold yet (no `scaffold::Kind::Addon`,
-/// no `templates/addon/` tree) — this function is keyed by the kind string,
-/// not by what `gtdx new` currently accepts, so the WIT plumbing is ready
-/// ahead of the scaffold template that will consume it.
+/// `extension-addon.wit` like any other greentic-package kind.
 ///
 /// # Errors
 ///
@@ -233,8 +229,7 @@ mod tests {
 
     /// `addon` needs `extension-base.wit` + `extension-host.wit` +
     /// `extension-addon.wit`, exactly like `design`/`bundle`/`deploy`/`provider`
-    /// need their own package alongside base+host — even though `gtdx new
-    /// --kind addon` cannot scaffold yet (see `scaffold::mod::NON_SCAFFOLDABLE`).
+    /// need their own package alongside base+host.
     #[test]
     fn files_for_kind_addon_includes_base_host_and_addon() {
         let files = files_for_kind("addon").expect("addon resolves");
