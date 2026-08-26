@@ -15,6 +15,7 @@ static TEMPLATES_LLM: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/llm"
 static TEMPLATES_MCP: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/mcp");
 static TEMPLATES_OPENAPI_CONNECTOR: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/templates/openapi-connector");
+static TEMPLATES_VIEW_ADDON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/view-addon");
 
 #[derive(Debug, Clone)]
 pub struct TemplateEntry {
@@ -63,6 +64,13 @@ fn translate_dst(rel: &str) -> String {
 
 pub fn load_templates_common() -> Vec<TemplateEntry> {
     collect(&TEMPLATES_COMMON)
+}
+
+/// Assets for `gtdx new --with-view`. An additive overlay rather than a kind:
+/// a view is a contribution, so it layers onto whichever kind the author chose
+/// instead of replacing it.
+pub fn load_templates_view_addon() -> Vec<TemplateEntry> {
+    collect(&TEMPLATES_VIEW_ADDON)
 }
 
 /// Layer `over` on top of `base`, keyed by destination path: an entry in

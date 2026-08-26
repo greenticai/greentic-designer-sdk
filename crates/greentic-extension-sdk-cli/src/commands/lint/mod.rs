@@ -31,6 +31,23 @@
 //!   `namespace/name` lowercase form (`[a-z0-9._-/]`, no leading/trailing `/`,
 //!   no `..` segment, no `://`). Keys that are non-canonical break secret
 //!   resolution and must be renamed by the author.
+//!
+//! View rules (August 2026), for `contributions.views[]`:
+//! - `E_VIEW_ID_PATTERN` — `id` does not match `^[a-z0-9][a-z0-9._-]*$`, the
+//!   same pattern the schema declares. Checked before the id is joined into
+//!   an asset path, so a traversal attempt is reported as an invalid id
+//!   rather than surfacing as a confusing missing-file error.
+//! - `E_VIEW_ENTRY_PATH` — `entry` escapes `assets/views/<id>/`
+//! - `E_VIEW_ENTRY_MISSING` — `entry` names a file that is not in the project
+//! - `E_VIEW_ENTRY_UNREADABLE` — `entry` names a file that exists but could
+//!   not be read (not valid UTF-8, or a permissions error) — distinct from
+//!   `E_VIEW_ENTRY_MISSING`, which only ever means the file was not found
+//! - `E_VIEW_REMOTE_ASSET` — the entry HTML has a `<script src>`/`<img src>`
+//!   or `<link href>` pointing at a remote origin, which would defeat the
+//!   pack manifest's integrity. Scoped to the tag that owns the attribute, so
+//!   an ordinary `<a href="https://…">` hyperlink does not trip it.
+//! - `W_VIEW_SLOT_UNKNOWN` — `placement.slot` is not in the CLI's snapshot of
+//!   host slots. A warning, because the snapshot goes stale by construction.
 
 use std::path::{Path, PathBuf};
 
@@ -38,6 +55,7 @@ use clap::Args as ClapArgs;
 
 mod rules;
 mod rules_secret_key;
+mod rules_views;
 #[cfg(test)]
 mod tests;
 
@@ -47,6 +65,7 @@ use rules::{
     check_schema_host, check_sha256_zero, check_tool_naming, check_version_semver,
 };
 use rules_secret_key::check_secret_key_canonical;
+use rules_views::check_views;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -107,7 +126,7 @@ pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("parse describe.json: {e}"))?;
 
-    let violations = collect_violations(&value, home, args.publish);
+    let violations = collect_violations(&value, &args.dir, home, args.publish);
     for v in &violations {
         eprintln!("{v}");
     }
@@ -124,7 +143,12 @@ pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
     anyhow::bail!("{error_count} error(s)");
 }
 
-fn collect_violations(describe: &serde_json::Value, home: &Path, publish: bool) -> Vec<Violation> {
+fn collect_violations(
+    describe: &serde_json::Value,
+    dir: &Path,
+    home: &Path,
+    publish: bool,
+) -> Vec<Violation> {
     let mut out = Vec::new();
     out.extend(check_version_semver(describe));
     out.extend(check_runtime_refs(describe));
@@ -138,5 +162,6 @@ fn collect_violations(describe: &serde_json::Value, home: &Path, publish: bool) 
     out.extend(check_sha256_zero(describe, publish));
     out.extend(check_perms_secrets_plain_key(describe));
     out.extend(check_secret_key_canonical(describe));
+    out.extend(check_views(describe, dir));
     out
 }
