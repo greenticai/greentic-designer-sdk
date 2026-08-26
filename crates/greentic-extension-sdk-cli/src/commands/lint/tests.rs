@@ -1113,6 +1113,101 @@ fn a_secret_inside_an_all_of_branch_is_caught() {
     );
 }
 
+/// Draft 2020-12 declares tuples with `prefixItems`, not array-form `items`
+/// (which is deprecated there). `describe-v2.json` is a 2020-12 schema, so
+/// this is the form addon authors actually write.
+#[test]
+fn a_secret_inside_prefix_items_is_caught_with_an_array_path() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"pairs":{"type":"array",
+            "prefixItems":[{"type":"object",
+                "properties":{"password":{"type":"string"}}}]}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("pairs[].password"),
+        "message should carry the array path to the offending property: {hit:?}"
+    );
+}
+
+/// `contains` is the non-tuple counterpart of `items` - a schema at least
+/// one array element must match.
+#[test]
+fn a_secret_inside_contains_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"nodes":{"type":"array",
+            "contains":{"type":"object",
+                "properties":{"admin_password":{"type":"string"}}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "a secret nested inside contains must be caught: {v:?}"
+    );
+}
+
+/// `not`, `if`, `then`, `else` all constrain the same data position as their
+/// parent and can carry a nested `properties` map, exactly like `allOf`.
+#[test]
+fn a_secret_inside_not_if_then_or_else_is_caught() {
+    for wrapper in ["not", "if", "then", "else"] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","{wrapper}":{{"type":"object",
+                "properties":{{"admin_password":{{"type":"string"}}}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "a secret nested inside {wrapper:?} must be caught: {v:?}"
+        );
+    }
+}
+
+/// `dependentSchemas` values are full schemas applied to the same object,
+/// so a secret hiding inside one must be caught.
+#[test]
+fn a_secret_inside_dependent_schemas_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"credit_card":{"type":"string"}},
+            "dependentSchemas":{"credit_card":{"type":"object",
+                "properties":{"cvv_secret":{"type":"string"}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter().any(
+            |x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE" && x.message.contains("cvv_secret")
+        ),
+        "a secret nested inside a dependentSchemas value must be caught: {v:?}"
+    );
+}
+
+/// `propertyNames` validates property *names* as strings, never the object
+/// itself - a `properties` map placed inside it is schema-legal but dead,
+/// since it can never apply to any actual data. It must not be walked.
+#[test]
+fn a_properties_map_inside_property_names_is_not_walked() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","propertyNames":{"type":"string",
+            "properties":{"password":{"type":"string"}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "propertyNames must not be walked for nested properties: {v:?}"
+    );
+}
+
 /// A `$defs` nested under a real data position must not report a path that
 /// looks like it lives there. `foo.password` would send the author looking
 /// for a `password` property directly under `foo`, when none exists - the
