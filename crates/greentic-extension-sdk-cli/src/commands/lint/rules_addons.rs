@@ -154,13 +154,14 @@ fn looks_like_a_secret(property: &str) -> bool {
 /// name that appears as a **property key**: every key of a `properties`
 /// object, at any depth reachable through `properties`, `items`,
 /// `prefixItems`, `contains`, `$defs`, `definitions`, `patternProperties`,
-/// `dependentSchemas`, `additionalProperties`, `allOf`, `anyOf`, `oneOf`,
-/// `not`, `if`, `then`, `else`. `path` accumulates a human-readable pointer
-/// through `properties`/`items` nesting (`acl_users[].password`) and most
-/// schema-composition keywords add nothing (`allOf`, `anyOf`, `oneOf`,
-/// `patternProperties`, `dependentSchemas`, `not`, `if`, `then`, `else` all
-/// pass `path` through unchanged, since they don't correspond to a position
-/// of their own in the *data* shape). `$defs` and
+/// `dependentSchemas`, `additionalProperties`, `unevaluatedProperties`,
+/// `allOf`, `anyOf`, `oneOf`, `if`, `then`, `else`. `path` accumulates a
+/// human-readable pointer through `properties`/`items` nesting
+/// (`acl_users[].password`) and most schema-composition keywords add
+/// nothing (`allOf`, `anyOf`, `oneOf`, `patternProperties`,
+/// `dependentSchemas`, `if`, `then`, `else` all pass `path` through
+/// unchanged, since they don't correspond to a position of their own in the
+/// *data* shape). `$defs` and
 /// `definitions` are the exception: a def has no data position at all, since
 /// it is reachable only through a `$ref` this walk deliberately never
 /// resolves. So instead of passing `path` through, they insert a
@@ -180,7 +181,12 @@ fn looks_like_a_secret(property: &str) -> bool {
 /// its schema validates each property *name* as a string, never the object
 /// itself, so a `properties` map placed inside it is schema-legal but dead -
 /// it can never apply to any actual data an addon declares - and walking it
-/// would only add noise, not signal.
+/// would only add noise, not signal. `dependentRequired` is not walked
+/// either: its values are arrays of property name strings, never schemas,
+/// so there is nowhere for a `properties` map to go. `not` is likewise
+/// deliberately excluded - see the note at its former call site below for
+/// why negation is different from every other composition keyword this
+/// walk covers.
 ///
 /// # Why unbounded recursion is safe here
 ///
@@ -334,6 +340,18 @@ fn walk_schema_properties(
         walk_schema_properties(additional, path, on_property);
     }
 
+    // `unevaluatedProperties` is Draft 2020-12's successor to
+    // `additionalProperties` for properties left over after `allOf`/`if`/
+    // `$ref` composition is accounted for. Like `additionalProperties` it
+    // takes a schema (not only a boolean) and that schema applies at the
+    // same, real leftover-property data position, so it is walked the same
+    // way: path unchanged, only when it is an object.
+    if let Some(unevaluated) = obj.get("unevaluatedProperties")
+        && unevaluated.is_object()
+    {
+        walk_schema_properties(unevaluated, path, on_property);
+    }
+
     for key in ["allOf", "anyOf", "oneOf"] {
         if let Some(branches) = obj.get(key).and_then(|v| v.as_array()) {
             for branch in branches {
@@ -342,14 +360,24 @@ fn walk_schema_properties(
         }
     }
 
-    // `not`, `if`, `then`, `else` are each a single schema constraining the
-    // *same* data position as their parent, exactly like the `allOf`/
-    // `anyOf`/`oneOf` branches above - `not` says the position must not
-    // match, `if`/`then`/`else` apply conditionally - but none of that
-    // changes where a `properties` map inside them would land in the actual
+    // `if`, `then`, `else` are each a single schema constraining the *same*
+    // data position as their parent, exactly like the `allOf`/`anyOf`/
+    // `oneOf` branches above - applied conditionally, but that doesn't
+    // change where a `properties` map inside them would land in the actual
     // data, so `path` passes through unchanged, same as
     // `additionalProperties`.
-    for key in ["not", "if", "then", "else"] {
+    //
+    // `not` is deliberately NOT walked here, unlike every other
+    // composition keyword above. `not: {"properties":{"admin_password":...}}`
+    // means the instance must NOT have `admin_password` in that shape - the
+    // author is forbidding the credential, not declaring one. Flagging a
+    // name found only inside `not` would invert its meaning and punish an
+    // author for writing the prohibition D16 recommends (the same mistake
+    // this rule already made once, for `secret_ref`, and fixed). The bias
+    // toward over-detection elsewhere in this file is deliberate; it does
+    // not extend to a construct whose entire meaning is negation. Do not
+    // re-add `not` to this list without re-reading this comment.
+    for key in ["if", "then", "else"] {
         if let Some(sub) = obj.get(key)
             && sub.is_object()
         {
