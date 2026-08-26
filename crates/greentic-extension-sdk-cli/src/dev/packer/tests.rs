@@ -821,3 +821,65 @@ fn rebuilding_identical_wasm_leaves_describe_untouched() {
 
     assert_eq!(after_first, after_second);
 }
+
+/// The packer already walks `assets/` and `manifest.json` already records a
+/// sha256 for every entry, which is why contributed views need no packer
+/// change at all. Nothing pinned that until now. If someone narrows the asset
+/// walk later, this fails here instead of every published view silently losing
+/// its HTML somewhere downstream.
+#[test]
+fn view_assets_round_trip_into_the_pack_and_the_manifest() {
+    use std::io::Read as _;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_project(tmp.path());
+
+    let view_dir = tmp.path().join("assets/views/hello");
+    std::fs::create_dir_all(&view_dir).unwrap();
+    let html: &[u8] = b"<!doctype html><h1>hi</h1>\n";
+    std::fs::write(view_dir.join("index.html"), html).unwrap();
+    std::fs::write(view_dir.join("app.js"), b"console.log(1);\n").unwrap();
+
+    let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    let zip_bytes = std::fs::read(&out).unwrap();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).unwrap();
+
+    let names: Vec<String> = (0..zip.len())
+        .map(|i| zip.by_index(i).unwrap().name().to_string())
+        .collect();
+    for expected in ["assets/views/hello/index.html", "assets/views/hello/app.js"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "{expected} must be in the pack, got {names:?}"
+        );
+    }
+
+    let mut packed = Vec::new();
+    zip.by_name("assets/views/hello/index.html")
+        .unwrap()
+        .read_to_end(&mut packed)
+        .unwrap();
+    assert_eq!(
+        packed, html,
+        "asset bytes must round-trip unmodified — the host verifies them \
+         against the manifest sha256 before serving"
+    );
+
+    let mut manifest_bytes = Vec::new();
+    zip.by_name("manifest.json")
+        .unwrap()
+        .read_to_end(&mut manifest_bytes)
+        .unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+    let entries = manifest["entries"].as_array().unwrap();
+    for expected in ["assets/views/hello/index.html", "assets/views/hello/app.js"] {
+        let row = entries
+            .iter()
+            .find(|e| e["path"] == expected)
+            .unwrap_or_else(|| panic!("{expected} missing from manifest.json"));
+        let sha = row["sha256"].as_str().unwrap();
+        assert_eq!(sha.len(), 64, "sha256 must be 64 hex chars, got {sha:?}");
+    }
+}
