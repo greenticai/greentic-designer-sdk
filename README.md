@@ -29,7 +29,7 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.3.0 or newer.** It ships `greentic:extension-addon@0.1.0` — the WIT
+**Use 1.2.12 or newer.** It ships `greentic:extension-addon@0.1.0` — the WIT
 contract an addon will implement to declare the workload it needs and to
 reconcile day-2 state inside it. **Nothing executes yet**: `ExtensionKind::Addon`
 and a component's ability to implement these worlds wait on a
@@ -44,8 +44,11 @@ platform will call in production, and `assert_plan_idempotent` /
 at all. An addon that fails idempotency never settles — every reconcile finds
 work, and the symptom reads as a platform fault rather than an addon defect.
 
-This is a **minor** rather than a patch because that testing crate gains public
-API. On the wire nothing changed.
+Shipped as a patch. `greentic-extension-sdk-testing` does gain public API,
+which semver would normally make a minor — the release line was kept on 1.2.x
+deliberately. The addition is purely additive and nothing changed on the wire,
+so no existing consumer breaks; a downstream crate that matches on
+`Contributions` exhaustively is the one shape that would notice.
 
 **Use 1.2.11 or newer.** An extension can now declare the managed services it
 offers — Qdrant, Redis, Postgres — as a typed `contributions.addons` block, so
