@@ -139,6 +139,21 @@ fn a_config_schema_that_is_not_json_is_rejected() {
     );
 }
 
+/// `Addon.schema_version` is `u32` in the struct (so `0` deserializes) but
+/// `describe-v2.json` declares `"minimum": 1`. Reject `0` here too, so the
+/// two layers agree instead of the schema being the only enforcement point.
+#[test]
+fn a_schema_version_of_zero_is_rejected() {
+    let mut a = addon("qdrant", &serde_json::json!([]));
+    a["schema_version"] = serde_json::json!(0);
+    let d = describe_with(&serde_json::json!([a]));
+    let err = parse(d).expect_err("schema_version 0 must be rejected");
+    assert!(
+        err.to_string().contains("qdrant"),
+        "error should name the addon: {err}"
+    );
+}
+
 #[test]
 fn a_desired_state_schema_that_is_not_json_is_rejected() {
     let mut a = addon("qdrant", &serde_json::json!([]));

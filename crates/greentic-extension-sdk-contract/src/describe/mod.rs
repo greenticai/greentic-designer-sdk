@@ -114,14 +114,24 @@ struct DescribeJsonRaw {
 /// duplicate makes one of the two unaddressable. Outputs are addressed by
 /// name from other resources' bindings, so a duplicate means
 /// `${resources.x.outputs.url}` resolves to whichever entry the platform saw
-/// last. And a schema that is not JSON renders as an empty form with no
-/// error — the worst place to discover the typo.
+/// last. A schema that is not JSON renders as an empty form with no error —
+/// the worst place to discover the typo. And `schema_version` is `u32` in
+/// the struct but `"minimum": 1` in `describe-v2.json`; reject `0` here so
+/// the two layers agree instead of the schema silently being the stricter
+/// one.
 fn validate_addons(addons: &[contributions::Addon]) -> Result<(), String> {
     let mut seen_addons = std::collections::BTreeSet::new();
     for addon in addons {
         if !seen_addons.insert(addon.id.as_str()) {
             return Err(format!(
                 "contributions.addons[] declares duplicate id {:?}",
+                addon.id
+            ));
+        }
+
+        if addon.schema_version == 0 {
+            return Err(format!(
+                "addon {:?} has schema_version 0 - it must be >= 1",
                 addon.id
             ));
         }
