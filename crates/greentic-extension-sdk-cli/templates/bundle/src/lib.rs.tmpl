@@ -131,3 +131,39 @@ impl bundling::Guest for Component {
 }
 
 bindings::export!(Component with_types_in bindings);
+
+// Unit tests run on the host — no WASM, no designer, milliseconds. The guest
+// exports are plain Rust functions, so call them directly.
+//
+// `cargo test` needs `src/bindings.rs`, which is generated. Build once first
+// (`gtdx dev --once` or `cargo component build`), then test freely.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_recipe_is_listed() {
+        let recipes = <Component as recipes::Guest>::list_recipes();
+        assert_eq!(recipes.len(), 1);
+        assert_eq!(recipes[0].id, "starter");
+    }
+
+    #[test]
+    fn the_recipe_has_a_config_schema() {
+        let schema = <Component as recipes::Guest>::recipe_config_schema("starter".to_string())
+            .expect("starter is implemented");
+        assert!(schema.contains("bundle_name"), "got: {schema}");
+    }
+
+    /// An id this extension does not own must be refused, not answered with an
+    /// empty schema — the designer treats an error as "ask someone else".
+    #[test]
+    fn an_unknown_recipe_is_an_error() {
+        assert!(
+            <Component as recipes::Guest>::recipe_config_schema("nope".to_string()).is_err()
+        );
+        assert!(
+            <Component as recipes::Guest>::supported_capabilities("nope".to_string()).is_err()
+        );
+    }
+}

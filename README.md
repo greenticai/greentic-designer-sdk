@@ -29,12 +29,15 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.7 or newer.** It is the first release where every scaffold does
-something on its first run. Before it, `design`, `bundle`, `deploy` and
-`provider` implemented their exports as empty stubs, so a fresh extension
-built, packed and installed cleanly — and contributed nothing. Each now ships
-one working example, declared in `describe.json` as well as implemented in the
-guest, because the designer lists what `contributions` declares.
+**Use 1.2.8 or newer.** It is the first release where a fresh scaffold both
+does something and proves it: every kind that ships a working example now
+ships tests for it, and `AGENTS.md` says how to test at all. `ci/local_check.sh`
+has always run `cargo test` — until 1.2.8 there was nothing for it to run.
+
+1.2.7 before it gave `design`, `bundle`, `deploy` and `provider` a working
+example. Before that they implemented every export as an empty stub, so a
+fresh extension built, packed and installed cleanly — and contributed
+nothing.
 
 1.2.6 before it settled `gtdx dev` watch mode: a `cargo component build`
 re-touched the very paths the watcher watches — `src/bindings.rs`,
@@ -94,7 +97,7 @@ Grab the asset for your platform from the
 
 ```bash
 # macOS Apple Silicon example — swap TAG and TARGET for your platform
-TAG=v1.2.7
+TAG=v1.2.8
 TARGET=aarch64-apple-darwin
 curl -L -o gtdx.tgz \
   "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-$TARGET.tgz"
@@ -117,8 +120,8 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 Older `-research` versions do sit on crates.io from before the skip rule
 landed. Avoid opting into pre-releases there: a pre-release of a *higher*
 version sorts above the current stable while carrying older code, so
-`1.3.0-research.1` outranks the 1.2.7 stable. (A pre-release of the same
-version is not a trap — `1.2.7-research` would sort *below* `1.2.7`.)
+`1.3.0-research.1` outranks the 1.2.8 stable. (A pre-release of the same
+version is not a trap — `1.2.8-research` would sort *below* `1.2.8`.)
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
