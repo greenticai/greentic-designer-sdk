@@ -910,3 +910,118 @@ fn a_traversal_id_is_rejected_as_an_invalid_id_not_a_missing_entry() {
         "must not also report the wrong error: {v:?}"
     );
 }
+
+// --- contributions.addons ---
+
+use rules_addons::check_addons;
+
+fn describe_with_addon(addon: &serde_json::Value) -> serde_json::Value {
+    json!({ "contributions": { "addons": [addon] } })
+}
+
+fn base_addon() -> serde_json::Value {
+    json!({
+        "id": "qdrant",
+        "family": "vector-db",
+        "display_name": "Qdrant",
+        "description": "Vector database.",
+        "config_schema": "{\"type\":\"object\"}",
+        "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"collections\":{\"type\":\"array\"}}}",
+        "outputs": [{ "name": "QDRANT_URL", "type": "text" }]
+    })
+}
+
+#[test]
+fn a_well_formed_addon_produces_no_violations() {
+    let v = check_addons(&describe_with_addon(&base_addon()));
+    assert!(v.is_empty(), "expected no violations, got: {v:?}");
+}
+
+#[test]
+fn an_id_with_uppercase_or_underscores_is_an_error() {
+    for bad in ["Qdrant", "qdrant_db", "-qdrant", ""] {
+        let mut a = base_addon();
+        a["id"] = json!(bad);
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter().any(|x| x.code == "E_ADDON_ID_PATTERN"),
+            "id {bad:?} should be rejected, got: {v:?}"
+        );
+    }
+}
+
+/// Output names become environment variables on the consuming service, so a
+/// name that is not a valid identifier breaks at injection time.
+#[test]
+fn an_output_name_that_is_not_env_var_safe_is_an_error() {
+    for bad in ["qdrant-url", "1url", "url!", ""] {
+        let mut a = base_addon();
+        a["outputs"] = json!([{ "name": bad, "type": "text" }]);
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter().any(|x| x.code == "E_ADDON_OUTPUT_NAME"),
+            "output name {bad:?} should be rejected, got: {v:?}"
+        );
+    }
+}
+
+/// Spec D16. A credential in desired state can never be read back by
+/// `observe`, so it diffs forever and no plan is ever clean. Catching it here
+/// is cheaper than discovering it when the first reconcile never converges.
+#[test]
+fn a_secret_looking_property_in_desired_state_is_an_error() {
+    for bad in [
+        "password",
+        "apiKey",
+        "api_key",
+        "auth_token",
+        "clientSecret",
+        "credentials",
+    ] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{bad}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "desired-state property {bad:?} should be rejected, got: {v:?}"
+        );
+    }
+}
+
+/// The same word in `config_schema` is fine — config is not reconciled
+/// against observed state, so it does not diff forever.
+#[test]
+fn a_secret_looking_property_in_config_schema_is_not_flagged() {
+    let mut a = base_addon();
+    a["config_schema"] = json!(r#"{"type":"object","properties":{"password":{"type":"string"}}}"#);
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        !v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "config_schema must not be flagged, got: {v:?}"
+    );
+}
+
+#[test]
+fn an_unfamiliar_family_is_a_warning_not_an_error() {
+    let mut a = base_addon();
+    a["family"] = json!("quantum-db");
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "W_ADDON_FAMILY_UNKNOWN")
+        .unwrap_or_else(|| panic!("expected W_ADDON_FAMILY_UNKNOWN, got: {v:?}"));
+    assert!(
+        matches!(hit.severity, Severity::Warning),
+        "an unfamiliar family must warn, not fail the run: {hit:?}"
+    );
+}
+
+#[test]
+fn a_describe_with_no_addons_produces_no_violations() {
+    let v = check_addons(&json!({ "contributions": {} }));
+    assert!(v.is_empty(), "expected no violations, got: {v:?}");
+}

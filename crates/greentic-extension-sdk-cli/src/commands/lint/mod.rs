@@ -49,12 +49,26 @@
 //!   an ordinary `<a href="https://…">` hyperlink does not trip it.
 //! - `W_VIEW_SLOT_UNKNOWN` — `placement.slot` is not in the CLI's snapshot of
 //!   host slots. A warning, because the snapshot goes stale by construction.
+//!
+//! Addon rules (August 2026), for `contributions.addons[]`:
+//! - `E_ADDON_ID_PATTERN` — `id` does not match `^[a-z0-9][a-z0-9-]*$`
+//! - `E_ADDON_OUTPUT_NAME` — an output name is not a valid environment
+//!   variable identifier (`^[A-Za-z_][A-Za-z0-9_]*$`); outputs are injected
+//!   as environment variables on the consuming service
+//! - `E_ADDON_SECRET_IN_DESIRED_STATE` — spec D16: a top-level property of
+//!   `desired_state_schema` looks like a credential. A credential there can
+//!   never be read back by `observe`, so it diffs forever and no plan is
+//!   ever clean; credentials reach the addon through its runtime binding
+//!   instead
+//! - `W_ADDON_FAMILY_UNKNOWN` — `family` is not one this SDK version knows.
+//!   A warning, for the same reason as `W_VIEW_SLOT_UNKNOWN`
 
 use std::path::{Path, PathBuf};
 
 use clap::Args as ClapArgs;
 
 mod rules;
+mod rules_addons;
 mod rules_secret_key;
 mod rules_views;
 #[cfg(test)]
@@ -65,6 +79,7 @@ use rules::{
     check_export_form, check_id_pattern, check_perms_secrets_plain_key, check_runtime_refs,
     check_schema_host, check_sha256_zero, check_tool_naming, check_version_semver,
 };
+use rules_addons::check_addons;
 use rules_secret_key::check_secret_key_canonical;
 use rules_views::check_views;
 
@@ -164,5 +179,6 @@ fn collect_violations(
     out.extend(check_perms_secrets_plain_key(describe));
     out.extend(check_secret_key_canonical(describe));
     out.extend(check_views(describe, dir));
+    out.extend(check_addons(describe));
     out
 }
