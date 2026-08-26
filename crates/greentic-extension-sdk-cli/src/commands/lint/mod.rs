@@ -14,8 +14,9 @@
 //!   it itself provides — the resolver would happily satisfy via self and
 //!   the runtime would then panic on dispatch)
 //! - `W_DESCRIBE_DIFF_BREAKING` — the previously-installed describe under
-//!   `<home>/extensions/<kind>/<id>/describe.json` exposed contributions or
-//!   capabilities that the current describe no longer does, AND
+//!   `<home>/extensions/<kind>/<id>-<version>/describe.json` (highest
+//!   installed version of `id`) exposed contributions or capabilities that
+//!   the current describe no longer does, AND
 //!   `metadata.version` was not bumped. Warning, not error: prints the
 //!   summary and exits zero so it's CI-noise rather than CI-breaking.
 //!

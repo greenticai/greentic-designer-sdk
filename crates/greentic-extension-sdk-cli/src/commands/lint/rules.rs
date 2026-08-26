@@ -165,6 +165,40 @@ pub(super) fn is_breaking_bump(prev: &semver::Version, current: &semver::Version
     prev.major == 0 && current.minor > prev.minor
 }
 
+/// Find the installed `describe.json` for `id` under
+/// `<home>/extensions/<kind_dir>/`. Installs land at `<id>-<version>` (flat
+/// layout — see `registry/src/storage.rs::extension_dir`, `commands/enable.rs`,
+/// `commands/info.rs`, `commands/install.rs`), never at a bare `<id>/`, so this
+/// scans the kind dir for `<id>-<version>` entries and returns the describe.json
+/// of the highest installed version. Mirrors the resolution `commands/info.rs`
+/// (`find_installed`) already does for the same layout.
+fn find_installed_describe(home: &Path, kind_dir: &str, id: &str) -> Option<std::path::PathBuf> {
+    let dir = home.join("extensions").join(kind_dir);
+    let entries = std::fs::read_dir(&dir).ok()?;
+    let mut best: Option<(semver::Version, std::path::PathBuf)> = None;
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+            continue;
+        }
+        let dir_name = entry.file_name();
+        let dir_str = dir_name.to_string_lossy();
+        let Some(rest) = dir_str.strip_prefix(id) else {
+            continue;
+        };
+        let Some(ver_str) = rest.strip_prefix('-') else {
+            continue;
+        };
+        let Ok(ver) = semver::Version::parse(ver_str) else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(best_ver, _)| ver > *best_ver) {
+            best = Some((ver, entry.path().join("describe.json")));
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
 pub(super) fn check_describe_diff_breaking(
     describe: &serde_json::Value,
     home: &Path,
@@ -178,11 +212,9 @@ pub(super) fn check_describe_diff_breaking(
     let Some(kind_dir) = kind_dir_name(kind) else {
         return Vec::new();
     };
-    let installed_path = home
-        .join("extensions")
-        .join(kind_dir)
-        .join(id)
-        .join("describe.json");
+    let Some(installed_path) = find_installed_describe(home, kind_dir, id) else {
+        return Vec::new();
+    };
     let Ok(prev_bytes) = std::fs::read(&installed_path) else {
         return Vec::new();
     };

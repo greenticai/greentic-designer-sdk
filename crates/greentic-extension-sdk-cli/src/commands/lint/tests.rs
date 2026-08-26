@@ -35,7 +35,16 @@ fn breaking_bump_detection() {
 }
 
 fn write_installed(home: &Path, id: &str, describe: &serde_json::Value) {
-    let dir = home.join("extensions").join("design").join(id);
+    // Installs land at `<id>-<version>` (flat layout), never at a bare
+    // `<id>/` — mirror that here so the rule under test actually finds it.
+    let version = describe
+        .pointer("/metadata/version")
+        .and_then(|v| v.as_str())
+        .expect("fixture describe must set metadata.version");
+    let dir = home
+        .join("extensions")
+        .join("design")
+        .join(format!("{id}-{version}"));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("describe.json"),
@@ -132,6 +141,66 @@ fn capability_cycle_fails_when_self_required() {
     assert_eq!(v[0].code, "E_CAP_CYCLE");
 }
 
+/// The rule reads the flat install layout (`<id>-<version>`), not a bare
+/// `<id>/` directory — nothing installs at the bare path, and prior to this
+/// fix the rule always read that nonexistent path, which is why it never
+/// fired for any kind.
+#[test]
+fn describe_diff_ignores_a_bare_id_directory_with_no_version_suffix() {
+    let home = empty_home();
+    let bare_dir = home.path().join("extensions/design/x");
+    std::fs::create_dir_all(&bare_dir).unwrap();
+    std::fs::write(
+        bare_dir.join("describe.json"),
+        serde_json::to_vec(&json!({
+            "metadata": {"id": "x", "version": "1.0.0"},
+            "kind": "DesignExtension",
+            "contributions": {"tools": [{"name": "t1"}]}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let current = json!({
+        "metadata": {"id": "x", "version": "1.0.0"},
+        "kind": "DesignExtension",
+        "contributions": {"tools": []}
+    });
+    assert!(
+        check_describe_diff_breaking(&current, home.path()).is_empty(),
+        "a bare <id>/ dir (no -<version> suffix) must not be treated as an installed copy"
+    );
+}
+
+/// When multiple versions of the same extension are installed, the rule must
+/// diff against the highest one, not an arbitrary directory-listing order.
+#[test]
+fn describe_diff_diffs_against_the_highest_installed_version() {
+    let home = empty_home();
+    let older = json!({
+        "metadata": {"id": "x", "version": "1.0.0"},
+        "kind": "DesignExtension",
+        "contributions": {"tools": [{"name": "only_in_old"}]}
+    });
+    let newer = json!({
+        "metadata": {"id": "x", "version": "1.5.0"},
+        "kind": "DesignExtension",
+        "contributions": {"tools": [{"name": "t1"}]}
+    });
+    write_installed(home.path(), "x", &older);
+    write_installed(home.path(), "x", &newer);
+    let current = json!({
+        "metadata": {"id": "x", "version": "1.5.0"},
+        "kind": "DesignExtension",
+        "contributions": {"tools": [{"name": "t1"}]}
+    });
+    // Nothing removed vs the newer (1.5.0) install even though the older
+    // (1.0.0) install's tool set differs — proves 1.5.0 was the one diffed.
+    assert!(
+        check_describe_diff_breaking(&current, home.path()).is_empty(),
+        "must diff against the highest installed version (1.5.0), not the lowest"
+    );
+}
+
 #[test]
 fn describe_diff_skips_when_no_installed_copy() {
     let home = empty_home();
@@ -145,7 +214,7 @@ fn describe_diff_skips_when_no_installed_copy() {
 #[test]
 fn describe_diff_skips_when_version_bumped() {
     let home = empty_home();
-    let installed_dir = home.path().join("extensions/design/com.example.x");
+    let installed_dir = home.path().join("extensions/design/com.example.x-0.1.0");
     std::fs::create_dir_all(&installed_dir).unwrap();
     std::fs::write(
         installed_dir.join("describe.json"),
@@ -168,7 +237,7 @@ fn describe_diff_skips_when_version_bumped() {
 #[test]
 fn describe_diff_warns_when_tool_removed_without_bump() {
     let home = empty_home();
-    let installed_dir = home.path().join("extensions/design/com.example.x");
+    let installed_dir = home.path().join("extensions/design/com.example.x-0.1.0");
     std::fs::create_dir_all(&installed_dir).unwrap();
     std::fs::write(
         installed_dir.join("describe.json"),
@@ -195,7 +264,7 @@ fn describe_diff_warns_when_tool_removed_without_bump() {
 #[test]
 fn describe_diff_warns_when_capability_offered_removed_without_bump() {
     let home = empty_home();
-    let installed_dir = home.path().join("extensions/design/com.example.y");
+    let installed_dir = home.path().join("extensions/design/com.example.y-0.1.0");
     std::fs::create_dir_all(&installed_dir).unwrap();
     std::fs::write(
         installed_dir.join("describe.json"),
