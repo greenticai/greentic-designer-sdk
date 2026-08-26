@@ -609,6 +609,12 @@ fn describe_with_addons(addons: &str) -> String {
 
 #[test]
 fn a_full_addon_validates() {
+    // Historical note (not a correction of this plan): `icon` is shown here
+    // as a path, `icons/qdrant.svg`. What shipped instead is a
+    // host-resolved icon name, matching `View.icon` - the host looks the
+    // name up in its own icon set, and no directory is reserved for an
+    // addon icon the way `assets/views/<id>/` is for a view. See
+    // `docs/authoring-addons.md`'s `icon` field entry.
     let d = describe_with_addons(
         r#"[{
             "id": "qdrant",
