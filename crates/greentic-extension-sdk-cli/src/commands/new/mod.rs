@@ -372,7 +372,7 @@ fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::R
 
     // Render the mcp describe.json template, then patch network + secrets.
     let mut files = 1usize; // the generated wasm
-    let describe_tmpl = template::load_templates_kind("mcp")
+    let describe_tmpl = template::load_templates_kind("mcp")?
         .into_iter()
         .find(|e| e.dst_rel.ends_with("describe.json"))
         .ok_or_else(|| anyhow::anyhow!("mcp describe.json template missing"))?;
@@ -410,7 +410,7 @@ fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<
         template::write_file(&dst, rendered.as_bytes())?;
         files_written += 1;
     }
-    for entry in template::load_templates_kind(kind) {
+    for entry in template::load_templates_kind(kind)? {
         let dst = target.join(&entry.dst_rel);
         let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;
         template::write_file(&dst, rendered.as_bytes())?;

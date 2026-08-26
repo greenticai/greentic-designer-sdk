@@ -139,7 +139,7 @@ fn build_context(model: &ConnectorModel, slug: &str) -> Context {
 /// `rust-toolchain.toml`, `build.sh`) through the `{{key}}` engine.
 fn render_static_templates(ctx: &Context, target: &Path) -> anyhow::Result<usize> {
     let mut files_written = 0usize;
-    for entry in template::load_templates_kind("openapi-connector") {
+    for entry in template::load_templates_kind("openapi-connector")? {
         let dst = target.join(&entry.dst_rel);
         let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;
         template::write_file(&dst, rendered.as_bytes())?;
