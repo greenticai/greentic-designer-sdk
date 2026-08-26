@@ -635,3 +635,98 @@ fn the_scaffold_default_id_passes_the_id_rule() {
         );
     }
 }
+
+// --- contributions.views[] (August 2026) ---
+
+use rules_views::check_views;
+
+fn view_project(entry: &str, html: Option<&str>) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    if let Some(body) = html {
+        let asset_dir = dir.path().join("assets/views/hello");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+        std::fs::write(asset_dir.join(entry), body).unwrap();
+    }
+    dir
+}
+
+fn describe_with_view(entry: &str, slot: &str) -> serde_json::Value {
+    json!({
+        "contributions": {
+            "views": [{
+                "id": "hello",
+                "surface": "designer",
+                "title_key": "k",
+                "title_fallback": "Hello",
+                "entry": entry,
+                "placement": { "slot": slot }
+            }]
+        }
+    })
+}
+
+#[test]
+fn view_entry_present_is_clean() {
+    let dir = view_project(
+        "index.html",
+        Some("<h1>hi</h1><script src=\"app.js\"></script>"),
+    );
+    let d = describe_with_view("index.html", "designer.sidebar");
+    assert!(check_views(&d, dir.path()).is_empty());
+}
+
+#[test]
+fn view_entry_missing_is_an_error() {
+    let dir = view_project("index.html", None);
+    let d = describe_with_view("index.html", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "E_VIEW_ENTRY_MISSING");
+}
+
+#[test]
+fn view_entry_escaping_its_directory_is_an_error() {
+    let dir = view_project("index.html", Some("<h1>hi</h1>"));
+    let d = describe_with_view("../../../etc/passwd", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_VIEW_ENTRY_PATH"),
+        "traversal must be reported before the file is looked up: {v:?}"
+    );
+}
+
+#[test]
+fn remote_script_in_the_entry_is_an_error() {
+    let dir = view_project(
+        "index.html",
+        Some("<script src=\"https://cdn.example.com/x.js\"></script>"),
+    );
+    let d = describe_with_view("index.html", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_VIEW_REMOTE_ASSET"),
+        "manifest integrity is theatre if the page pulls unverified code: {v:?}"
+    );
+}
+
+#[test]
+fn unknown_slot_is_a_warning_not_an_error() {
+    let dir = view_project("index.html", Some("<h1>hi</h1>"));
+    let d = describe_with_view("index.html", "admin.notARealSlot");
+    let v = check_views(&d, dir.path());
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "W_VIEW_SLOT_UNKNOWN");
+    assert_eq!(
+        v[0].severity,
+        Severity::Warning,
+        "the SDK's slot list is a snapshot and goes stale by construction — a \
+         stale snapshot must never fail a build"
+    );
+}
+
+#[test]
+fn describe_without_views_is_clean() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let d = json!({ "contributions": {} });
+    assert!(check_views(&d, dir.path()).is_empty());
+}
