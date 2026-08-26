@@ -177,6 +177,44 @@ fn scaffold_with_view_for_a_toolless_kind_ships_empty_tools() {
     );
 }
 
+/// The scaffolded `app.js` must call the kind's actual tool with an argument
+/// shape that tool's own `input_schema` requires — not `echo`'s hardcoded
+/// `{ message: "hello" }`. `llm`'s `complete` tool requires `prompt`; a page
+/// that still sends `message` fails schema validation on the very first
+/// click, which is exactly the "scaffold that doesn't work" failure 1.2.7
+/// and 1.2.8 already paid for.
+#[test]
+fn scaffold_with_view_derives_the_kinds_own_argument_shape() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let target = tmp.path().join("llmargs");
+
+    let (ok, _out, err) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("llmargs")
+        .arg("--kind")
+        .arg("llm")
+        .arg("--with-view")
+        .arg("--no-git")
+        .arg("--dir")
+        .arg(&target));
+    assert!(ok, "scaffold failed: {err}");
+
+    let app_js = std::fs::read_to_string(target.join("assets/views/hello/app.js"))
+        .expect("read scaffolded app.js");
+    // Checked as a quoted JSON key (`"prompt"` / `"message"`) rather than a
+    // bare substring: app.js's own error handling legitimately reads
+    // `err.message`, so a bare `contains("message")` would false-positive on
+    // that unrelated property access rather than on the tool's argument key.
+    assert!(
+        app_js.contains("\"prompt\""),
+        "app.js must send the argument llm's `complete` tool actually requires (`prompt`): {app_js}"
+    );
+    assert!(
+        !app_js.contains("\"message\""),
+        "app.js must not carry over echo's `message` argument shape for a kind that doesn't use it: {app_js}"
+    );
+}
+
 #[test]
 fn with_view_is_rejected_for_kind_mcp() {
     let tmp = tempfile::tempdir().expect("tempdir");

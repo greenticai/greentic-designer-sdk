@@ -443,10 +443,19 @@ fn render_templates(
         let describe_path = target.join("describe.json");
         let current = std::fs::read_to_string(&describe_path)
             .map_err(|e| anyhow::anyhow!("read {}: {e}", describe_path.display()))?;
-        let (authored, tool_name) = view_addon::add_view_to_describe(&current, "hello")?;
+        let (authored, tool) = view_addon::add_view_to_describe(&current, "hello")?;
         template::write_file(&describe_path, authored.as_bytes())?;
 
-        ctx.set("view_tool", tool_name.unwrap_or_default());
+        let (tool_name, tool_args) = match tool {
+            Some(tool) => (tool.name, tool.args),
+            None => (String::new(), serde_json::json!({})),
+        };
+        ctx.set("view_tool", tool_name);
+        ctx.set(
+            "view_tool_args",
+            serde_json::to_string(&tool_args)
+                .map_err(|e| anyhow::anyhow!("serialize placeholder tool args: {e}"))?,
+        );
         for entry in template::load_templates_view_addon() {
             let dst = target.join(&entry.dst_rel);
             let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;

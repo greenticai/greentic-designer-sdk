@@ -4,35 +4,88 @@
 // its own: no host cookies, no localStorage, no parent DOM, and its own
 // fetch() would send `Origin: null`. Everything goes through the host, which
 // holds the credentials and applies the caller's own permissions to each
-// request. The bridge asks for results; it never receives keys.
+// request. The bridge asks for results; it never receives keys — though the
+// results it gets back (tool output, callApi bodies) can still be
+// confidential to the viewer, so treat this channel as sensitive even though
+// no credential crosses it.
 (function (global) {
   const PROTOCOL = 1;
+  // How long to wait for a reply before giving up and freeing the slot. A
+  // disabled extension, a host that navigated away, or a message `type` the
+  // host doesn't implement all look identical from here: silence. Without a
+  // timeout the Promise — and its `pending`/`ready` entry — would live for
+  // the rest of the page's life.
+  const CALL_TIMEOUT_MS = 10000;
+  const INIT_TIMEOUT_MS = 10000;
+
   const pending = new Map();
   let nextId = 0;
+
   let readyResolve;
-  const ready = new Promise((resolve) => {
+  let readyReject;
+  const ready = new Promise((resolve, reject) => {
     readyResolve = resolve;
+    readyReject = reject;
   });
+  const readyTimer = global.setTimeout(() => {
+    readyReject(
+      new Error(
+        "no init message received from host within " + INIT_TIMEOUT_MS + "ms"
+      )
+    );
+  }, INIT_TIMEOUT_MS);
 
   function send(message) {
     // targetOrigin cannot be pinned: an opaque origin has no name to pin to.
-    // This is exactly why the host puts nothing secret in what it sends back.
+    // The host posts with "*" for the same reason.
     global.parent.postMessage(Object.assign({ v: PROTOCOL }, message), "*");
   }
 
   function call(type, payload) {
     const id = "c" + ++nextId;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      const timer = global.setTimeout(() => {
+        pending.delete(id);
+        reject(
+          new Error(
+            "bridge call " +
+              id +
+              " (" +
+              type +
+              ") timed out after " +
+              CALL_TIMEOUT_MS +
+              "ms: no response from host"
+          )
+        );
+      }, CALL_TIMEOUT_MS);
+      pending.set(id, {
+        resolve: (data) => {
+          global.clearTimeout(timer);
+          resolve(data);
+        },
+        reject: (err) => {
+          global.clearTimeout(timer);
+          reject(err);
+        },
+      });
       send(Object.assign({ id: id, type: type }, payload));
     });
   }
 
   global.addEventListener("message", (event) => {
+    // event.origin cannot be used to identify the sender: this page has an
+    // opaque origin (sandboxed iframe, no allow-same-origin), so the real
+    // host's messages arrive with event.origin === "null" — and a forged
+    // message from any other window would look identical by that measure.
+    // The one thing that does identify the sender is *which window object*
+    // posted the message: only the parent frame is a legitimate bridge peer.
+    if (event.source !== global.parent) return;
+
     const msg = event.data;
     if (!msg || msg.v !== PROTOCOL) return;
 
     if (msg.type === "init") {
+      global.clearTimeout(readyTimer);
       readyResolve(msg);
       return;
     }
