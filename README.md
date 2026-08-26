@@ -29,10 +29,22 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.8 or newer.** It is the first release where a fresh scaffold both
-does something and proves it: every kind that ships a working example now
-ships tests for it, and `AGENTS.md` says how to test at all. `ci/local_check.sh`
-has always run `cargo test` — until 1.2.8 there was nothing for it to run.
+**Use 1.2.10 or newer.** It is the first release where a decode failure says
+what actually went wrong. `gtdx install` against a store serving a newer
+describe used to fail with reqwest's `error decoding response body` — no
+field, no position, no endpoint — which reads as a network fault. The real
+cause is a version skew: `DescribeJson`'s nested types are
+`deny_unknown_fields`, so one unrecognised field fails the whole parse. The
+message now names the endpoint, the field, and the fix.
+
+1.2.9 before it gave every kind example tests, not just four — `ci/local_check.sh`
+has always run `cargo test`, and on `llm` and `mcp` there was still nothing
+for it to run.
+
+1.2.8 before it gave `design`, `bundle`, `deploy` and `provider` their tests,
+and added a Testing section to the scaffolded `AGENTS.md` — including the one
+prerequisite that otherwise reads as a broken project: `cargo test` needs the
+generated `src/bindings.rs`, so a fresh clone must build once first.
 
 1.2.7 before it gave `design`, `bundle`, `deploy` and `provider` a working
 example. Before that they implemented every export as an empty stub, so a
@@ -97,7 +109,7 @@ Grab the asset for your platform from the
 
 ```bash
 # macOS Apple Silicon example — swap TAG and TARGET for your platform
-TAG=v1.2.8
+TAG=v1.2.10
 TARGET=aarch64-apple-darwin
 curl -L -o gtdx.tgz \
   "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-$TARGET.tgz"
@@ -120,8 +132,8 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 Older `-research` versions do sit on crates.io from before the skip rule
 landed. Avoid opting into pre-releases there: a pre-release of a *higher*
 version sorts above the current stable while carrying older code, so
-`1.3.0-research.1` outranks the 1.2.8 stable. (A pre-release of the same
-version is not a trap — `1.2.8-research` would sort *below* `1.2.8`.)
+`1.3.0-research.1` outranks the 1.2.10 stable. (A pre-release of the same
+version is not a trap — `1.2.10-research` would sort *below* `1.2.10`.)
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
