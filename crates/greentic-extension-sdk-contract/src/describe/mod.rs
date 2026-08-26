@@ -156,6 +156,38 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
             }
         }
 
+        // View ids namespace to `<extension_id>/<view_id>` on the host, so a
+        // duplicate would make two different pages collide on one route.
+        let mut seen_views = std::collections::BTreeSet::new();
+        for view in &raw.contributions.views {
+            if !seen_views.insert(view.id.as_str()) {
+                return Err(format!(
+                    "contributions.views[] declares duplicate id {:?}",
+                    view.id
+                ));
+            }
+        }
+
+        // A view may only invoke tools this same extension contributes. A
+        // dangling name would fail at the bridge, at runtime, in the browser —
+        // the worst place to discover it.
+        let tool_names: std::collections::BTreeSet<&str> = raw
+            .contributions
+            .tools
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        for view in &raw.contributions.views {
+            for wanted in &view.tools {
+                if !tool_names.contains(wanted.as_str()) {
+                    return Err(format!(
+                        "view {:?} lists tool {:?}, which is not in contributions.tools",
+                        view.id, wanted
+                    ));
+                }
+            }
+        }
+
         Ok(DescribeJson {
             schema_ref: raw.schema_ref,
             api_version: raw.api_version,
