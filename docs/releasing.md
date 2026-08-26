@@ -9,6 +9,29 @@ six platform binaries plus a **permanent** crates.io publish. crates.io
 versions cannot be deleted, only yanked — so everything below happens before
 the merge, not after.
 
+## 0. Check nobody else is mid-release
+
+Version numbers are a shared resource and the tag is permanent. Before picking
+one, look for another release already in flight:
+
+```bash
+git fetch origin
+git branch -r --list 'origin/release/*'
+git log --oneline -10 origin/main          # what landed since the last tag?
+```
+
+This step exists because it was skipped. Two sessions cut `1.2.10` within the
+same hour — one for a decode-failure fix, one for the views feature. Both were
+real, both were ready, and the number could only belong to one. It happened to
+resolve harmlessly: the tag was cut after both had merged to `main`, so the
+release carries everything. Had the timing gone the other way, a finished
+feature would have merged with a version already taken and `tag-on-version-bump`
+would have stayed silent — shipping nothing, quietly.
+
+Also read what actually landed since the last tag, not just your own commits.
+A release carries everything on `main`, and the release notes should say so:
+`1.2.10`'s bump commit names only one of the two features in it.
+
 ## 1. Land the change on `research` first
 
 Promotion is `research → develop → main` and **research wins every conflicting
