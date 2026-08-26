@@ -168,6 +168,37 @@ fn looks_like_a_secret(property: &str) -> bool {
 /// *inside* a `properties` object in the shapes this walks. `enum` and
 /// `const` are not in the keyword set walked here, so their values are
 /// never descended into.
+///
+/// # Why unbounded recursion is safe here
+///
+/// This function recurses with no explicit depth guard. That is safe today,
+/// but only because of two facts that hold nowhere else in this file and
+/// must both keep holding:
+///
+/// 1. **`$ref` is deliberately never resolved.** `$ref` is not one of the
+///    keywords walked above, so a `$defs`/`$ref` pair is an ordinary finite
+///    tree: the `$defs` value is walked once, directly, and a sibling `$ref`
+///    pointing at it is never followed back down. Adding `$ref` resolution
+///    would let a `$defs` entry's schema point at an ancestor of itself,
+///    turning that finite tree into an actual cycle and this recursion into
+///    an infinite one.
+/// 2. **The input's nesting depth is bounded before it ever reaches this
+///    function.** The only caller parses the schema with
+///    `serde_json::from_str`, whose deserializer defaults to a
+///    `remaining_depth` of 128 and errors out before producing a `Value` for
+///    anything nested deeper. This crate never enables `serde_json`'s
+///    `unbounded_depth` feature, so a schema nested past that limit fails to
+///    *parse* - the caller's `if let Ok(parsed) = ...` simply skips it - and
+///    never reaches this walk at all. See
+///    `a_desired_state_schema_nested_past_serde_json_depth_limit_fails_to_parse`
+///    in `tests.rs`, which pins this.
+///
+/// If either assumption stops holding - `$ref` resolution is added (extending
+/// the set of keywords this walk covers is exactly when that temptation
+/// shows up), or `unbounded_depth` is enabled anywhere in the dependency
+/// graph - this function needs an explicit depth guard, because it would
+/// then be walking attacker-controlled, effectively unbounded recursion at
+/// publish/install time.
 fn walk_schema_properties(
     schema: &serde_json::Value,
     path: &str,

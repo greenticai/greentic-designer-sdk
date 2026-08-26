@@ -1182,3 +1182,39 @@ fn narrowing_does_not_weaken_the_existing_positives() {
         );
     }
 }
+
+/// Pins the second safety assumption documented on `walk_schema_properties`:
+/// that function recurses with no depth guard of its own, which is safe only
+/// because `serde_json::from_str` refuses to *parse* anything nested past its
+/// default 128-frame `remaining_depth` limit in the first place. If this
+/// crate ever enables `serde_json`'s `unbounded_depth` feature, this test
+/// starts failing - which is the signal that `walk_schema_properties` now
+/// needs an explicit depth guard of its own.
+#[test]
+fn a_desired_state_schema_nested_past_serde_json_depth_limit_fails_to_parse() {
+    // 200 nested arrays comfortably clears serde_json's 128-frame default
+    // depth limit regardless of exactly where the off-by-one boundary falls.
+    let depth = 200;
+    let nested: String = "[".repeat(depth) + &"]".repeat(depth);
+
+    // The assumption itself: serde_json rejects this at parse time.
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&nested).is_err(),
+        "expected serde_json to refuse to parse {depth} levels of nesting - \
+         if it now succeeds, `unbounded_depth` may have been enabled \
+         somewhere in the dependency graph, and \
+         `walk_schema_properties`'s lack of a depth guard is no longer safe"
+    );
+
+    // The consequence relied on by `check_addons`: since parsing fails, the
+    // `if let Ok(parsed) = ...` around the walk skips this schema entirely -
+    // `walk_schema_properties` never sees it, and no violation is reported.
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(nested);
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "an unparsable desired_state_schema must be silently skipped, not \
+         reach the walk: {v:?}"
+    );
+}
