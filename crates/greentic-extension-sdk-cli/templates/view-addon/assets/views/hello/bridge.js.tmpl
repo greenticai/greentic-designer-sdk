@@ -38,7 +38,15 @@
   function send(message) {
     // targetOrigin cannot be pinned: an opaque origin has no name to pin to.
     // The host posts with "*" for the same reason.
-    global.parent.postMessage(Object.assign({ v: PROTOCOL }, message), "*");
+    //
+    // `message` is spread first so the protocol version always wins: no
+    // current caller passes a `v` key, but this file is copied verbatim by
+    // authors, and a payload that could clobber the protocol tag is a trap
+    // worth closing even before something exploits it.
+    global.parent.postMessage(
+      Object.assign({}, message, { v: PROTOCOL }),
+      "*"
+    );
   }
 
   function call(type, payload) {
@@ -68,7 +76,10 @@
           reject(err);
         },
       });
-      send(Object.assign({ id: id, type: type }, payload));
+      // Same ordering rule as `send`: the caller's own payload is spread
+      // first, so it can never clobber the correlation id or message type
+      // the reply is matched against.
+      send(Object.assign({}, payload, { id: id, type: type }));
     });
   }
 
