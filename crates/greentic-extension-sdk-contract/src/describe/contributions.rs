@@ -1,8 +1,9 @@
-//! Typed `contributions` block. Nine children, each its own typed list, plus
+//! Typed `contributions` block. Ten children, each its own typed list, plus
 //! the optional `connection_test` self-test descriptor.
 
 use serde::{Deserialize, Serialize};
 
+pub mod addon;
 pub mod connection_test;
 pub mod dw_provider;
 pub mod guardrail;
@@ -14,6 +15,7 @@ pub mod schema;
 pub mod tool;
 pub mod view;
 
+pub use addon::{Addon, OutputSpec, OutputType};
 pub use connection_test::ConnectionTest;
 pub use dw_provider::DwProvider;
 pub use guardrail::Guardrail;
@@ -50,6 +52,10 @@ pub struct Contributions {
     /// Admin from assets shipped under `assets/views/<id>/` in the pack.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<View>,
+    /// Managed services this extension offers to an environment — Qdrant,
+    /// Redis, Postgres. Catalogue metadata only; the platform provisions.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub addons: Vec<Addon>,
     /// Optional self-test descriptor: which contributed tool (by name) a
     /// consumer should invoke to verify a live connection/credential.
     /// `snake_case` on the wire — matches how extensions and the designer
