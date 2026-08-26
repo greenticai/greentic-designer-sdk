@@ -23,12 +23,13 @@
       "const": "greentic.ai/v2"
     },
     "kind": {
-      "description": "Which extension family this artifact belongs to; selects the on-disk install directory (`design`, `bundle`, `deploy`, `provider`). A fifth kind, `wasix:mcp/router`, is deliberately absent from this enum: those artifacts are validated against describe-mcp-v1.json instead.",
+      "description": "Which extension family this artifact belongs to; selects the on-disk install directory (`design`, `bundle`, `deploy`, `provider`, `addon`). `wasix:mcp/router` is deliberately absent from this enum: those artifacts are validated against describe-mcp-v1.json instead. `AddonExtension` is a component the platform provisions and reconciles as declarative infrastructure (a Qdrant, a Redis) rather than a flow-time or design-time extension; it declares itself through `contributions.addons[]` like any other kind, but its runtime component implements `greentic:extension-addon@0.1.0`'s `addon-extension` world instead of a design/bundle/deploy/provider one.",
       "enum": [
         "DesignExtension",
         "BundleExtension",
         "DeployExtension",
-        "ProviderExtension"
+        "ProviderExtension",
+        "AddonExtension"
       ]
     },
     "compat": {

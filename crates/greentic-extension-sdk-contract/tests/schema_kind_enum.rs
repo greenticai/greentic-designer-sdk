@@ -12,7 +12,8 @@ use greentic_extension_sdk_contract::ExtensionKind;
 /// kind must be present.
 fn kinds_expected_in_v2() -> Vec<&'static str> {
     let mut v: Vec<&'static str> = ExtensionKind::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|k| *k != ExtensionKind::WasixMcpRouter)
         .map(ExtensionKind::wire_name)
         .collect();

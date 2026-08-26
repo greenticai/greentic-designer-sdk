@@ -44,7 +44,7 @@ fn find_installed(
 
     let mut candidates: Vec<(ExtensionKind, semver::Version, DescribeJson)> = Vec::new();
 
-    for kind in all_kinds {
+    for kind in all_kinds.iter().copied() {
         let kind_dir = storage.kind_dir(kind);
         if !kind_dir.exists() {
             continue;

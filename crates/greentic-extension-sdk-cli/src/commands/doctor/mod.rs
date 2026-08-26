@@ -205,7 +205,7 @@ fn installed_extension_dirs(home: &Path) -> anyhow::Result<Vec<PathBuf>> {
     // never checked a provider extension's describe or its designer
     // compatibility — the machine looked healthy because a whole kind was
     // invisible to the diagnostic meant to find problems.
-    for kind in ExtensionKind::ALL {
+    for kind in ExtensionKind::ALL.iter().copied() {
         let kind_dir = storage.kind_dir(kind);
         if !kind_dir.exists() {
             continue;

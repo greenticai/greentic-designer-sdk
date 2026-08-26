@@ -55,6 +55,13 @@ pub fn wit_files() -> Vec<WitFile> {
 /// The `wasix-mcp` WIT dep ships as a `templates/mcp/wit/deps/wasix-mcp/`
 /// template file instead.
 ///
+/// `addon` resolves to `extension-base.wit` + `extension-host.wit` +
+/// `extension-addon.wit` like any other greentic-package kind, even though
+/// `gtdx new --kind addon` cannot scaffold yet (no `scaffold::Kind::Addon`,
+/// no `templates/addon/` tree) — this function is keyed by the kind string,
+/// not by what `gtdx new` currently accepts, so the WIT plumbing is ready
+/// ahead of the scaffold template that will consume it.
+///
 /// # Errors
 ///
 /// A `kind` with no known WIT arm is an error naming the kind, not a silent
@@ -65,7 +72,7 @@ pub fn files_for_kind(kind: &str) -> anyhow::Result<Vec<WitFile>> {
         return Ok(Vec::new());
     }
     let kind_file = match kind {
-        "design" | "bundle" | "deploy" | "provider" => format!("extension-{kind}.wit"),
+        "design" | "bundle" | "deploy" | "provider" | "addon" => format!("extension-{kind}.wit"),
         "wasm-component" | "llm" => "extension-design.wit".to_string(),
         other => anyhow::bail!("no embedded WIT files for scaffold kind `{other}`"),
     };
@@ -211,7 +218,7 @@ mod tests {
     /// `scaffold::template::load_templates_kind`.
     #[test]
     fn files_for_kind_rejects_an_unknown_kind() {
-        let err = match files_for_kind("addon") {
+        let err = match files_for_kind("widget") {
             Ok(files) => panic!(
                 "unknown kind must error, got {:?}",
                 files.iter().map(|f| f.name).collect::<Vec<_>>()
@@ -219,9 +226,25 @@ mod tests {
             Err(e) => e,
         };
         assert!(
-            err.to_string().contains("addon"),
+            err.to_string().contains("widget"),
             "error must name the offending kind: {err}"
         );
+    }
+
+    /// `addon` needs `extension-base.wit` + `extension-host.wit` +
+    /// `extension-addon.wit`, exactly like `design`/`bundle`/`deploy`/`provider`
+    /// need their own package alongside base+host — even though `gtdx new
+    /// --kind addon` cannot scaffold yet (see `scaffold::mod::NON_SCAFFOLDABLE`).
+    #[test]
+    fn files_for_kind_addon_includes_base_host_and_addon() {
+        let files = files_for_kind("addon").expect("addon resolves");
+        let names: Vec<_> = files.iter().map(|f| f.name).collect();
+        assert!(names.contains(&"extension-base.wit"));
+        assert!(names.contains(&"extension-host.wit"));
+        assert!(names.contains(&"extension-addon.wit"));
+        assert!(!names.contains(&"extension-design.wit"));
+        assert!(!names.contains(&"extension-provider.wit"));
+        assert_eq!(names.len(), 3);
     }
 
     /// Every scaffoldable kind (`scaffold::Kind::value_variants()`) either

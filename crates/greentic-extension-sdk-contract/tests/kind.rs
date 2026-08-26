@@ -77,12 +77,26 @@ fn wasix_mcp_router_dir_name() {
     assert_eq!(ExtensionKind::WasixMcpRouter.dir_name(), "mcp");
 }
 
+#[test]
+fn addon_kind_serde_roundtrip() {
+    let original = ExtensionKind::Addon;
+    let json = serde_json::to_string(&original).unwrap();
+    assert_eq!(json, "\"AddonExtension\"");
+    let parsed: ExtensionKind = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed, original);
+}
+
+#[test]
+fn addon_kind_dir_name() {
+    assert_eq!(ExtensionKind::Addon.dir_name(), "addon");
+}
+
 /// `wire_name` must agree with what serde actually emits. If someone adds a
 /// variant and sets `#[serde(rename)]` without updating `wire_name`, this
 /// catches it — the two are separate declarations and will otherwise drift.
 #[test]
 fn wire_name_matches_serde() {
-    for kind in ExtensionKind::ALL {
+    for kind in ExtensionKind::ALL.iter().copied() {
         let json = serde_json::to_string(&kind).expect("kind serializes");
         let expected = format!("\"{}\"", kind.wire_name());
         assert_eq!(
@@ -94,7 +108,7 @@ fn wire_name_matches_serde() {
 
 #[test]
 fn from_wire_round_trips_every_variant() {
-    for kind in ExtensionKind::ALL {
+    for kind in ExtensionKind::ALL.iter().copied() {
         assert_eq!(
             ExtensionKind::from_wire(kind.wire_name()),
             Some(kind),
@@ -105,7 +119,7 @@ fn from_wire_round_trips_every_variant() {
 
 #[test]
 fn from_dir_name_round_trips_every_variant() {
-    for kind in ExtensionKind::ALL {
+    for kind in ExtensionKind::ALL.iter().copied() {
         assert_eq!(
             ExtensionKind::from_dir_name(kind.dir_name()),
             Some(kind),
@@ -116,8 +130,11 @@ fn from_dir_name_round_trips_every_variant() {
 
 #[test]
 fn unknown_strings_are_rejected() {
-    assert_eq!(ExtensionKind::from_wire("AddonExtension"), None);
+    // `AddonExtension`/`addon` used to be the canonical "not a kind yet"
+    // example here; now that `ExtensionKind::Addon` exists, `BogusExtension`/
+    // `bogus` fill that role instead.
+    assert_eq!(ExtensionKind::from_wire("BogusExtension"), None);
     assert_eq!(ExtensionKind::from_wire(""), None);
-    assert_eq!(ExtensionKind::from_dir_name("addon"), None);
+    assert_eq!(ExtensionKind::from_dir_name("bogus"), None);
     assert_eq!(ExtensionKind::from_dir_name(""), None);
 }

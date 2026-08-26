@@ -16,6 +16,8 @@ pub enum KindArg {
     Provider,
     #[value(name = "mcp")]
     Mcp,
+    #[value(name = "addon")]
+    Addon,
     #[value(name = "all")]
     All,
 }
@@ -28,6 +30,7 @@ impl KindArg {
             KindArg::Deploy => Some(ExtensionKind::Deploy),
             KindArg::Provider => Some(ExtensionKind::Provider),
             KindArg::Mcp => Some(ExtensionKind::WasixMcpRouter),
+            KindArg::Addon => Some(ExtensionKind::Addon),
             KindArg::All => None,
         }
     }
@@ -127,7 +130,7 @@ mod tests {
             .filter_map(|k| k.to_extension_kind())
             .collect();
 
-        for kind in ExtensionKind::ALL {
+        for kind in ExtensionKind::ALL.iter().copied() {
             assert!(
                 reachable.contains(&kind),
                 "no KindArg variant maps to {kind:?} — add one, with \

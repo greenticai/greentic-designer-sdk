@@ -20,7 +20,7 @@ pub struct Args {
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     let cfg = super::load_config(home)?;
     let storage = Storage::new(home);
-    let installed = scan_installed(&storage, &ExtensionKind::ALL)?;
+    let installed = scan_installed(&storage, ExtensionKind::ALL)?;
 
     if installed.is_empty() {
         println!("No extensions installed.");

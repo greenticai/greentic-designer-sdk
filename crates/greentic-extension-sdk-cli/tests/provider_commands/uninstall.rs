@@ -104,7 +104,7 @@ fn gtdx_uninstall_respects_the_version_filter() {
 fn gtdx_disable_reaches_every_installed_kind() {
     use greentic_extension_sdk_contract::ExtensionKind;
 
-    for kind in ExtensionKind::ALL {
+    for kind in ExtensionKind::ALL.iter().copied() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp
             .path()

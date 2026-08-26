@@ -17,7 +17,7 @@ pub fn run(args: &Args, home: &Path) -> anyhow::Result<()> {
     // Every kind, not a hand-written subset: this list used to omit
     // `Provider`, so `gtdx uninstall` could never remove a provider extension
     // — and said "nothing to remove" while the extension stayed installed.
-    for kind in ExtensionKind::ALL {
+    for kind in ExtensionKind::ALL.iter().copied() {
         let dir = storage.kind_dir(kind);
         if !dir.exists() {
             continue;
