@@ -182,3 +182,42 @@ impl knowledge::Guest for Component {
 }
 
 bindings::export!(Component with_types_in bindings);
+
+// Unit tests run on the host — no WASM, no designer, milliseconds. This is
+// where most of an extension's testing belongs: the guest exports are plain
+// Rust functions, so call them directly.
+//
+// `cargo test` needs `src/bindings.rs`, which is generated. Build once first
+// (`gtdx dev --once` or `cargo component build`), then test freely.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tool_is_listed() {
+        let tools = <Component as tools::Guest>::list_tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "echo");
+    }
+
+    #[test]
+    fn echo_returns_its_arguments() {
+        let out = <Component as tools::Guest>::invoke_tool(
+            "echo".to_string(),
+            r#"{"message":"hi"}"#.to_string(),
+        )
+        .expect("echo is implemented");
+        assert!(out.contains("echoed"), "got: {out}");
+    }
+
+    /// An unknown name is a caller mistake. Asserting the error keeps the
+    /// dispatch honest — a match arm that silently returned Ok would pass a
+    /// happy-path-only test.
+    #[test]
+    fn an_unknown_tool_is_an_error() {
+        assert!(
+            <Component as tools::Guest>::invoke_tool("nope".to_string(), "{}".to_string())
+                .is_err()
+        );
+    }
+}

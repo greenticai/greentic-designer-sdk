@@ -472,3 +472,44 @@ fn design_template_has_no_stray_placeholder_braces() {
         "template contains doubled braces that are not known placeholders — it will fail to render"
     );
 }
+
+/// `ci/local_check.sh` runs `cargo test`, so a scaffold with no tests makes
+/// that step green while verifying nothing — and nothing told the author host
+/// tests were even possible. Every kind that ships a working example ships
+/// tests for it.
+#[test]
+fn guest_templates_ship_example_tests() {
+    for kind in ["design", "bundle", "deploy", "provider"] {
+        let path = format!(
+            "{}/templates/{kind}/src/lib.rs.tmpl",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let tmpl = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        assert!(
+            tmpl.contains("#[cfg(test)]") && tmpl.contains("#[test]"),
+            "{kind}: no example tests — `cargo test` in the quality gate would verify nothing"
+        );
+        // A happy-path-only example teaches the wrong habit: the error paths
+        // are where a silent `Ok` hides.
+        assert!(
+            tmpl.contains("is_err()"),
+            "{kind}: example tests never assert a failure path"
+        );
+    }
+}
+
+/// The scaffolded AGENTS.md has to say how to test, including the one
+/// prerequisite that otherwise reads as a broken project: `cargo test` needs
+/// generated bindings, so a fresh clone must build once first.
+#[test]
+fn agents_md_explains_testing() {
+    let tmpl = include_str!("../../templates/common/AGENTS.md.tmpl");
+    assert!(
+        tmpl.contains("## Testing"),
+        "AGENTS.md has no Testing section"
+    );
+    assert!(
+        tmpl.contains("cannot find export in bindings"),
+        "AGENTS.md does not warn that cargo test needs a build first"
+    );
+}
