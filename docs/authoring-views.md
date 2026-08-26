@@ -11,8 +11,13 @@ Scaffold one:
 ## What ships
 
     assets/views/<view-id>/index.html
+    assets/views/<view-id>/bridge.js
     assets/views/<view-id>/app.js
     assets/views/<view-id>/style.css
+
+`bridge.js` is the postMessage transport `index.html` loads before `app.js`
+and that `app.js` calls into as `window.greentic`; the scaffold's `index.html`
+hard-requires it, so pruning it from the list above breaks your own page.
 
 The packer copies `assets/` verbatim, and `manifest.json` records a sha256 for
 every file, so your page is tamper-evident without you doing anything.
@@ -20,6 +25,14 @@ every file, so your page is tamper-evident without you doing anything.
 Everything your page loads must ship in that directory. `gtdx lint` rejects a
 remote `<script>` or `<link>` with `E_VIEW_REMOTE_ASSET`: the manifest hash
 would otherwise cover a file that pulls unverified code at runtime.
+
+`--with-view` also fills `views[].tools` for you: it takes the first tool in
+the extension's own `contributions.tools`, whatever the chosen `--kind`
+happens to contribute (`design` → `echo`, `llm` → `complete`, and so on). A
+kind that contributes no tools (`deploy`, `provider`) gets `tools: []` — the
+view still ships, it just can't call one yet. `--with-view` is rejected
+outright for `--kind mcp`: `wasix:mcp/router` artifacts carry no
+`contributions` block at all for a view to attach to.
 
 ## Declaring it
 
