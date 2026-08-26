@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::Args as ClapArgs;
+use greentic_extension_sdk_contract::ExtensionKind;
 use greentic_extension_sdk_registry::lifecycle::{InstallOptions, Installer, TrustPolicy};
 use greentic_extension_sdk_registry::local::LocalFilesystemRegistry;
 use greentic_extension_sdk_registry::storage::Storage;
@@ -141,6 +142,19 @@ fn parse_pack_name(filename: &str) -> anyhow::Result<(String, String)> {
     Err(anyhow::anyhow!("no semver version in filename: {filename}"))
 }
 
+/// Read an installed extension's `describe.json`, whichever kind directory it
+/// landed in.
+///
+/// Sweeps `ExtensionKind::ALL` rather than a hand-written list: this call site
+/// listed four kinds and omitted `Provider`, so provider installs skipped the
+/// designer-compatibility check entirely while still reporting success.
+fn find_installed_describe_bytes(storage: &Storage, name: &str, version: &str) -> Option<Vec<u8>> {
+    let dir_name = format!("{name}-{version}");
+    ExtensionKind::ALL.into_iter().find_map(|kind| {
+        std::fs::read(storage.kind_dir(kind).join(&dir_name).join("describe.json")).ok()
+    })
+}
+
 /// Warn when the designer on this machine cannot load what was just installed.
 ///
 /// Reads the describe back out of the install location rather than trusting
@@ -148,21 +162,7 @@ fn parse_pack_name(filename: &str) -> anyhow::Result<(String, String)> {
 /// on disk. Best-effort throughout: a missing install dir, an unreadable
 /// describe, or no local designer all say nothing.
 fn warn_if_designer_cannot_load(storage: &Storage, name: &str, version: &str) {
-    use greentic_extension_sdk_contract::ExtensionKind;
-
-    let dir_name = format!("{name}-{version}");
-    let describe_bytes = [
-        ExtensionKind::Design,
-        ExtensionKind::Bundle,
-        ExtensionKind::Deploy,
-        ExtensionKind::WasixMcpRouter,
-    ]
-    .into_iter()
-    .find_map(|kind| {
-        std::fs::read(storage.kind_dir(kind).join(&dir_name).join("describe.json")).ok()
-    });
-
-    let Some(bytes) = describe_bytes else {
+    let Some(bytes) = find_installed_describe_bytes(storage, name, version) else {
         return;
     };
     crate::dev::installer::warn_if_designer_cannot_load(&bytes, name);
@@ -170,7 +170,38 @@ fn warn_if_designer_cannot_load(storage: &Storage, name: &str, version: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_pack_name;
+    use super::{find_installed_describe_bytes, parse_pack_name};
+    use greentic_extension_sdk_contract::ExtensionKind;
+    use greentic_extension_sdk_registry::storage::Storage;
+
+    /// The sweep must cover every kind. It hand-listed four and omitted
+    /// `Provider`, so a provider install silently skipped the
+    /// designer-compatibility warning.
+    #[test]
+    fn finds_a_describe_installed_under_any_kind() {
+        for kind in ExtensionKind::ALL {
+            let home = tempfile::tempdir().expect("tempdir");
+            let storage = Storage::new(home.path());
+            let dir = storage.kind_dir(kind).join("greentic.demo-0.1.0");
+            std::fs::create_dir_all(&dir).expect("create install dir");
+            std::fs::write(dir.join("describe.json"), br#"{"marker":"found"}"#)
+                .expect("write describe");
+
+            let found = find_installed_describe_bytes(&storage, "greentic.demo", "0.1.0");
+            assert_eq!(
+                found.as_deref(),
+                Some(&br#"{"marker":"found"}"#[..]),
+                "describe under kind {kind:?} was not found"
+            );
+        }
+    }
+
+    #[test]
+    fn absent_describe_is_none() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::new(home.path());
+        assert!(find_installed_describe_bytes(&storage, "greentic.absent", "0.1.0").is_none());
+    }
 
     #[test]
     fn parses_simple_name_and_version() {
