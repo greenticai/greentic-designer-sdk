@@ -29,9 +29,19 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.9 or newer.** It is the first release where every kind scaffolds
-with example tests, not just four of them. `ci/local_check.sh` has always run
-`cargo test`; on `llm` and `mcp` there was still nothing for it to run.
+**Use 1.2.10 or newer.** It is the first release where an extension can
+contribute a page, not just parts of one: `contributions.views[]` ships an
+author's own HTML/JS/CSS inside the pack, and `gtdx new --with-view` scaffolds
+a working one. No host renders views yet — that lands in the Designer and the
+Admin console separately — so a view-bearing extension declares, lints,
+validates and packs today, and displays once the hosts catch up. Read
+[docs/authoring-views.md](docs/authoring-views.md) before publishing one: the
+`views` key makes a describe unparseable to designers older than that host
+support, so the compat floor is not what `min_designer_version` currently says.
+
+1.2.9 before it made every kind scaffold with example tests, not just four of
+them. `ci/local_check.sh` has always run `cargo test`; on `llm` and `mcp` there
+was still nothing for it to run.
 
 1.2.8 before it gave `design`, `bundle`, `deploy` and `provider` their tests,
 and added a Testing section to the scaffolded `AGENTS.md` — including the one
