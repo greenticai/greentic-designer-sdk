@@ -187,6 +187,35 @@ and `runtime.permissions.ui` entries in `describe.json`. See
 guide — what ships, what the sandboxed page can and can't reach, and the
 `E_VIEW_*` / `W_VIEW_SLOT_UNKNOWN` lint codes.
 
+#### Contribute an addon (a managed service like Qdrant, Redis, Postgres)
+
+> **Phase 1 (SDK-only):** you can declare, validate, lint and pack an addon
+> today — nothing in the platform reconciles it yet, and an addon-bearing
+> `describe.json` is unloadable on every designer released so far (see
+> [`docs/authoring-addons.md`](./docs/authoring-addons.md#authoring-addons)
+> for why). Treat `contributions.addons[]` as something you develop and
+> validate locally, not something you ship.
+
+```json
+"contributions": {
+  "addons": [{
+    "id": "qdrant",
+    "family": "vector-db",
+    "display_name": "Qdrant",
+    "description": "Vector database for embeddings and similarity search.",
+    "config_schema": "{\"type\":\"object\"}",
+    "desired_state_schema": "{\"type\":\"object\"}"
+  }]
+}
+```
+
+There's no `gtdx new --with-addon` scaffold in phase 1; you hand-write
+`contributions.addons[]` and validate it with `gtdx validate` and
+`gtdx lint`. See [`docs/authoring-addons.md`](./docs/authoring-addons.md)
+for the full authoring guide — every field, why secrets never belong in
+`desired_state_schema`, and the `E_ADDON_*` / `W_ADDON_FAMILY_UNKNOWN`
+lint codes.
+
 #### MCP kinds: `wasix:mcp/router` vs agent-only design-extension MCPs
 
 `gtdx new --kind mcp` scaffolds a `wasix:mcp/router` WASM component. This is a

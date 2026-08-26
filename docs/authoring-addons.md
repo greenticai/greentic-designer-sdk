@@ -29,6 +29,19 @@ That declaration ships inside your `.gtxpack` as `contributions.addons[]`.
 >
 > Read only the schema and you would reasonably conclude that declaring an
 > addon provisions one. It doesn't, yet.
+>
+> **There is also a compat trap, and it is the more serious half of this
+> note.** `Contributions` is `#[serde(deny_unknown_fields)]`. A designer
+> built against a pre-addons contract crate does not skip an unrecognised
+> `addons` key — it fails to parse your `describe.json` at all, so the
+> whole extension refuses to load. Meanwhile `gtdx new` fills
+> `compat.min_designer_version` from this SDK's `MIN_DESIGNER_VERSION`
+> constant, currently `1.2.0`. So an addon-bearing describe *claims*
+> `>=1.2.0` while actually being unloadable on every designer released to
+> date — the entire released line as of this writing. Do not publish an
+> `addons[]`-carrying extension for general use until a host release that
+> understands it has shipped; until then, `contributions.addons[]` is
+> something you develop and validate locally, not something you ship.
 
 The worked example below is Qdrant throughout, because Qdrant is the addon
 spec §9.3 names as the first one built.
