@@ -50,4 +50,40 @@ mod tests {
     fn llm_kind_str() {
         assert_eq!(Kind::Llm.as_str(), "llm");
     }
+
+    /// A sixth `ExtensionKind` compiles and passes every kind-dependent
+    /// guard in the contract and CLI crates (install, list, search,
+    /// validate) without a matching `scaffold::Kind` variant, template
+    /// tree, embedded WIT, or wizard entry — `gtdx new --kind <it>` would
+    /// simply reject it as an unknown value, with no test saying so.
+    ///
+    /// This ties the two enums together: every `ExtensionKind::ALL` entry
+    /// must be scaffoldable via some `scaffold::Kind` (matched by
+    /// `dir_name()` == `as_str()`), unless explicitly exempted below with a
+    /// comment explaining why. All five are scaffoldable today.
+    #[test]
+    fn every_extension_kind_is_scaffoldable() {
+        use clap::ValueEnum as _;
+        use greentic_extension_sdk_contract::ExtensionKind;
+
+        // Deliberately non-scaffoldable `ExtensionKind`s go here, with a
+        // comment saying why `gtdx new` cannot produce them. Empty today —
+        // every kind that can be installed can also be scaffolded.
+        const NON_SCAFFOLDABLE: &[ExtensionKind] = &[];
+
+        let scaffoldable: Vec<&'static str> =
+            Kind::value_variants().iter().map(|k| k.as_str()).collect();
+
+        for kind in ExtensionKind::ALL {
+            if NON_SCAFFOLDABLE.contains(&kind) {
+                continue;
+            }
+            assert!(
+                scaffoldable.contains(&kind.dir_name()),
+                "ExtensionKind::{kind:?} (dir_name {:?}) has no matching scaffold::Kind — \
+                 it can install/list/search/validate but `gtdx new --kind <it>` would reject it",
+                kind.dir_name(),
+            );
+        }
+    }
 }
