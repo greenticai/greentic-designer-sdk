@@ -475,11 +475,14 @@ fn design_template_has_no_stray_placeholder_braces() {
 
 /// `ci/local_check.sh` runs `cargo test`, so a scaffold with no tests makes
 /// that step green while verifying nothing — and nothing told the author host
-/// tests were even possible. Every kind that ships a working example ships
-/// tests for it.
+/// tests were even possible.
+///
+/// Every guest template is covered. What each can assert differs: `mcp`'s
+/// `call_tool` is pure and its success path is testable, while `llm`'s reaches
+/// host imports and can only be tested up to that boundary.
 #[test]
 fn guest_templates_ship_example_tests() {
-    for kind in ["design", "bundle", "deploy", "provider"] {
+    for kind in ["design", "bundle", "deploy", "provider", "llm", "mcp"] {
         let path = format!(
             "{}/templates/{kind}/src/lib.rs.tmpl",
             env!("CARGO_MANIFEST_DIR")

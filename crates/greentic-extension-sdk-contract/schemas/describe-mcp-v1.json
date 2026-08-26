@@ -245,6 +245,48 @@
               "items": {
                 "type": "string"
               }
+            },
+            "ui": {
+              "description": "Grants that apply to browser-executed view code, not to the WASM guest. Kept separate from `network` on purpose: `network` authorises `http.fetch` from inside the guest, where the caller is the extension's own logic, while these authorise requests a human clicking in a browser can trigger, whose responses land in browser-executed code.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fetchHosts": {
+                  "description": "Hosts a view may reach through the host's server-side proxy. The view never issues these itself: an iframe without `allow-same-origin` sends `Origin: null`, which most third-party APIs reject at CORS. Same address rules as `network` - https only, loopback and link-local rejected.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "platformApi": {
+                  "description": "Platform REST endpoints a view may call through the bridge. The host intersects this with the calling user's own RBAC, so it can only narrow what that user could already do by hand - never widen it.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "method",
+                      "path_pattern"
+                    ],
+                    "properties": {
+                      "method": {
+                        "description": "HTTP method of the grant. Constrained here rather than by a Rust enum so a describe naming a method the current SDK does not know still round-trips instead of failing the whole parse.",
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE"
+                        ]
+                      },
+                      "path_pattern": {
+                        "description": "The platform endpoint path this grant covers, e.g. `/api/flows` or `/api/admin/tenants/*`. The host intersects the grant with the calling user's own RBAC, so it can only narrow what that user could already do by hand, never widen it.",
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },
