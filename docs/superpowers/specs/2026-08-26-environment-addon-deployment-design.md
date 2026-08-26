@@ -596,7 +596,13 @@ Ship in `greentic-extension-sdk-testing` so every addon inherits it:
 
 ## 9. Prerequisites
 
-### 9.1 Independently shippable, should land first
+### 9.1 Independently shippable, should land first — DONE 2026-08-26
+
+> Delivered by `docs/superpowers/plans/2026-08-26-kind-registry-hardening.md`.
+> All five stale lists now derive from `ExtensionKind::ALL`, both silent
+> fallbacks are hard errors, and two tripwire tests (`schema_kind_enum`,
+> `kind_arg_covers_every_extension_kind`) fail when a sixth kind is added
+> without updating the schema or the CLI.
 
 These are bug fixes with standalone value. They also make the new kind
 markedly cheaper, because each one is a place a sixth kind would otherwise be
