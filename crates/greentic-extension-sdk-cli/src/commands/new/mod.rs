@@ -153,12 +153,17 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     run_preflight(&target, resolved.force)?;
     prepare_target(&target, resolved.force)?;
 
-    let ctx = build_context(&resolved);
+    let mut ctx = build_context(&resolved);
 
     let files_written = if let Some(spec) = resolved.from_openapi.as_deref() {
         scaffold_from_openapi(&ctx, spec, &target)?
     } else {
-        let mut n = render_templates(&ctx, resolved.kind.as_str(), &target, resolved.with_view)?;
+        let mut n = render_templates(
+            &mut ctx,
+            resolved.kind.as_str(),
+            &target,
+            resolved.with_view,
+        )?;
         n += write_wit_and_lock(resolved.kind.as_str(), &target)?;
         n
     };
@@ -412,7 +417,7 @@ fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::R
 }
 
 fn render_templates(
-    ctx: &Context,
+    ctx: &mut Context,
     kind: &str,
     target: &Path,
     with_view: bool,
@@ -431,17 +436,23 @@ fn render_templates(
         files_written += 1;
     }
     if with_view {
+        // The describe must be read and patched *before* the view-addon
+        // templates render: the example page's `{{view_tool}}` placeholder
+        // needs the tool name this kind actually contributes (or none), and
+        // that is only known once `contributions.tools` has been inspected.
+        let describe_path = target.join("describe.json");
+        let current = std::fs::read_to_string(&describe_path)
+            .map_err(|e| anyhow::anyhow!("read {}: {e}", describe_path.display()))?;
+        let (authored, tool_name) = view_addon::add_view_to_describe(&current, "hello")?;
+        template::write_file(&describe_path, authored.as_bytes())?;
+
+        ctx.set("view_tool", tool_name.unwrap_or_default());
         for entry in template::load_templates_view_addon() {
             let dst = target.join(&entry.dst_rel);
             let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;
             template::write_file(&dst, rendered.as_bytes())?;
             files_written += 1;
         }
-        let describe_path = target.join("describe.json");
-        let current = std::fs::read_to_string(&describe_path)
-            .map_err(|e| anyhow::anyhow!("read {}: {e}", describe_path.display()))?;
-        let authored = view_addon::add_view_to_describe(&current, "hello")?;
-        template::write_file(&describe_path, authored.as_bytes())?;
     }
     Ok(files_written)
 }

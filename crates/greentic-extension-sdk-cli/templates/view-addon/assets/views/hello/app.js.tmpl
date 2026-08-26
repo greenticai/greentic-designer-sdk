@@ -2,6 +2,10 @@
 (async function () {
   const status = document.getElementById("status");
   const output = document.getElementById("output");
+  // Bound at scaffold time to the first tool this extension actually
+  // contributes (see contributions.tools in describe.json). Empty when the
+  // chosen --kind contributes none yet.
+  const TOOL = "{{view_tool}}";
 
   const init = await window.greentic.ready;
   status.textContent =
@@ -9,8 +13,14 @@
   window.greentic.resize(document.body.scrollHeight);
 
   document.getElementById("ping").addEventListener("click", async () => {
+    if (!TOOL) {
+      output.textContent =
+        "This extension contributes no tools yet. Add one under contributions.tools in describe.json, then call it from here.";
+      window.greentic.resize(document.body.scrollHeight);
+      return;
+    }
     try {
-      const result = await window.greentic.invokeTool("echo", { message: "hello" });
+      const result = await window.greentic.invokeTool(TOOL, { message: "hello" });
       output.textContent = JSON.stringify(result, null, 2);
     } catch (err) {
       output.textContent = "Tool call failed: " + err.message;
