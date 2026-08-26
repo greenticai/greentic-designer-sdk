@@ -194,7 +194,7 @@
                 "pattern": "^[a-z0-9][a-z0-9-]*$"
               },
               "family": {
-                "description": "What kind of thing this is - `vector-db`, `cache`, `sql`. A flow asks for the family, not the vendor, so a deployment can substitute one implementation for another. An open string on purpose: describe.json is signed and immutable once published, so a closed enum in it rots. `gtdx lint` warns on an unfamiliar family instead.",
+                "description": "What kind of thing this is - `vector-db`, `cache`, `sql`. A catalogue grouping label a flow author can browse or filter by - not a substitutability guarantee: two addons sharing a family are not promised compatible outputs, so this field alone is not a basis for automatically swapping one for the other. An open string on purpose: describe.json is signed and immutable once published, so a closed enum in it rots. `gtdx lint` warns on an unfamiliar family instead.",
                 "type": "string"
               },
               "display_name": { "type": "string" },

@@ -74,6 +74,7 @@ fn wit_files_declare_consistent_package_version() {
         ("extension-host.wit", "0.1.0"),
         ("extension-dw-composer.wit", "0.2.0"),
         ("runtime-side.wit", "0.2.0"),
+        ("extension-addon.wit", "0.1.0"),
     ];
     for (name, want) in expected {
         let path = wit_root.join(name);
