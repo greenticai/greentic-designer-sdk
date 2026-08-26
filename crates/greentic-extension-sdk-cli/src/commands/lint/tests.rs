@@ -1127,3 +1127,58 @@ fn a_property_literally_named_properties_is_evaluated_as_a_property_not_a_keywor
         "a property literally named `properties` is not itself a secret: {v:?}"
     );
 }
+/// Every row of the review table in item 5: none of these are credentials,
+/// and every one of them must NOT be flagged.
+#[test]
+fn legitimate_day_2_properties_are_not_flagged() {
+    for ok in [
+        "password_encryption",
+        "scram_password_iterations",
+        "password_policy",
+        "min_password_length",
+        "require_password",
+        "api_key_id",
+        "secret_ref",
+        "secret_name",
+        "secretKeyRef",
+        "admin_secret_ref",
+        "credential_rotation_days",
+        "allow_credentials",
+        "secrets_backend",
+    ] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{ok}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            !v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "legitimate property {ok:?} must not be flagged, got: {v:?}"
+        );
+    }
+}
+
+/// The narrowing in item 5 must not weaken the positives item 5 explicitly
+/// says to keep firing.
+#[test]
+fn narrowing_does_not_weaken_the_existing_positives() {
+    for bad in [
+        "password",
+        "admin_password",
+        "apiKey",
+        "clientSecret",
+        "auth_token",
+    ] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{bad}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "{bad:?} must still be flagged, got: {v:?}"
+        );
+    }
+}

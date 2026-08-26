@@ -29,6 +29,37 @@ const KNOWN_FAMILIES: [&str; 6] = [
 /// is handled separately below - see `looks_like_a_secret`.
 const SECRET_MARKERS: [&str; 5] = ["password", "secret", "apikey", "credential", "passwd"];
 
+/// Final segments (the head noun) that make a property name benign even
+/// though an earlier segment contains a marker word. `password_policy` is a
+/// policy *about* passwords, not a password; `secret_ref` is a reference to
+/// where a secret lives, which is the shape spec D16 recommends *instead of*
+/// the secret itself. Same head-noun trick as the `token` check below,
+/// generalised to every marker.
+const BENIGN_HEAD_NOUNS: [&str; 14] = [
+    "ref",
+    "name",
+    "id",
+    "policy",
+    "length",
+    "days",
+    "iterations",
+    "encryption",
+    "backend",
+    "limit",
+    "rotation",
+    "count",
+    "enabled",
+    "required",
+];
+
+/// First segments that turn a credential noun into a policy question about
+/// it, rather than the credential's value: `require_password` asks "is a
+/// password required", `allow_credentials` asks "are credentials allowed"
+/// (the CORS-header sense). Mirrors `BENIGN_HEAD_NOUNS` from the other end
+/// of the name - both exist because a property can name a credential concept
+/// without holding a credential value.
+const PREDICATE_PREFIXES: [&str; 2] = ["require", "allow"];
+
 fn is_valid_addon_id(id: &str) -> bool {
     !id.is_empty()
         && id.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
@@ -46,15 +77,9 @@ fn is_env_var_safe(name: &str) -> bool {
 }
 
 /// Splits `property` into segments on `-`, `_`, and camelCase boundaries (a
-/// lowercase-to-uppercase transition), and returns the last one. Used only
-/// by the `token` check in `looks_like_a_secret`: unlike the other markers,
-/// `token` is matched only when it names the *final* segment - the head
-/// noun of the property - not a modifier earlier in the name. That is what
-/// tells apart `auth_token` (a token, held in the `auth` slot) from
-/// `token_limit` (a limit, on tokens) and `max_tokens` (a count, of
-/// tokens - "tokens" plural is a different segment than "token", which is
-/// exactly why this can't be loosened back to a substring check).
-fn last_segment(property: &str) -> String {
+/// lowercase-to-uppercase transition). Shared by `last_segment` and the
+/// head-noun exemptions in `looks_like_a_secret`.
+fn segments(property: &str) -> Vec<String> {
     let mut segments: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut prev_lower = false;
@@ -75,10 +100,45 @@ fn last_segment(property: &str) -> String {
     if !current.is_empty() {
         segments.push(current);
     }
-    segments.pop().unwrap_or_default()
+    segments
+}
+
+/// The last segment of `property` - the head noun. Used by the `token`
+/// check in `looks_like_a_secret`: unlike the other markers, `token` is
+/// matched only when it names the *final* segment, not a modifier earlier
+/// in the name. That is what tells apart `auth_token` (a token, held in the
+/// `auth` slot) from `token_limit` (a limit, on tokens) and `max_tokens` (a
+/// count, of tokens - "tokens" plural is a different segment than "token",
+/// which is exactly why this can't be loosened back to a substring check).
+fn last_segment(property: &str) -> String {
+    segments(property).pop().unwrap_or_default()
 }
 
 fn looks_like_a_secret(property: &str) -> bool {
+    let segs = segments(property);
+
+    // A benign head noun (the final segment) means the property is a
+    // policy/reference/count *about* a credential concept, not the
+    // credential's value - `password_policy`, `secret_ref`, `api_key_id`.
+    if let Some(last) = segs.last()
+        && BENIGN_HEAD_NOUNS
+            .iter()
+            .any(|noun| last.eq_ignore_ascii_case(noun))
+    {
+        return false;
+    }
+
+    // A predicate-prefix first segment means the property asks a yes/no
+    // question about the credential concept, not the credential's value -
+    // `require_password`, `allow_credentials`.
+    if let Some(first) = segs.first()
+        && PREDICATE_PREFIXES
+            .iter()
+            .any(|prefix| first.eq_ignore_ascii_case(prefix))
+    {
+        return false;
+    }
+
     let flat: String = property
         .chars()
         .filter(|c| *c != '-' && *c != '_')

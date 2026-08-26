@@ -148,24 +148,42 @@ nested two levels deep inside `items.properties`.
 
 A property name is checked against a list of markers — `password`, `secret`,
 `apikey`, `credential`, `passwd` — matched case-insensitively with `-` and
-`_` stripped, so `api_key`, `apiKey`, and `api-key` all trip it. `token` is
-handled separately and more narrowly: it only matches when `token` is the
-*final* segment of the property name, split on `-`, `_`, and camelCase
-boundaries. That's deliberate — `auth_token` is a token, held in the `auth`
+`_` stripped, so `api_key`, `apiKey`, and `api-key` all trip it. But the raw
+marker match is narrowed by the property name's *head noun* (its final
+segment, split on `-`, `_`, and camelCase boundaries) and, separately, by a
+predicate first segment:
+
+- A benign head noun exempts the whole name, even when an earlier segment
+  contains a marker: `password_policy` (`policy`), `min_password_length`
+  (`length`), `password_encryption` (`encryption`), `secret_ref` (`ref`),
+  `secret_name` (`name`), `secretKeyRef` (`ref`), `api_key_id` (`id`),
+  `credential_rotation_days` (`days`), `secrets_backend` (`backend`) — none
+  of these hold a credential's value.
+- A predicate-prefix first segment exempts the whole name too:
+  `require_password`, `allow_credentials` — these ask a yes/no question
+  about a credential concept, not the value.
+
+`token` is handled the same head-noun way, on its own: it only matches when
+`token` is the final segment. `auth_token` is a token, held in the `auth`
 slot, and gets flagged; `max_tokens` (segment "tokens", plural) and
-`tokenizer` (no segment boundary at all, the whole word is "tokenizer") are
+`tokenizer` (no segment boundary at all — the whole word is "tokenizer") are
 not, because they aren't credentials, they're a count and a component name
-that happen to contain the letters. `config_schema` is never checked by this
-rule — config isn't reconciled against observed state, so it can't diff.
+that happen to contain the letters.
+
+`config_schema` is never checked by this rule — config isn't reconciled
+against observed state, so it can't diff.
 
 Fix by removing the property from `desired_state_schema` and moving the
-credential to wherever your addon's runtime binding delivers it:
+credential to wherever your addon's runtime binding delivers it. If day-2
+state needs to *reference* where a credential lives — the shape D16
+recommends — name the property with a `ref`/`name` head noun rather than the
+credential itself:
 
     // Before — flagged as E_ADDON_SECRET_IN_DESIRED_STATE
     "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"admin_password\":{\"type\":\"string\"}}}"
 
-    // After
-    "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"collections\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}"
+    // After — either drop it entirely, or reference where it lives
+    "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"collections\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"admin_secret_ref\":{\"type\":\"string\"}}}"
 
 ## The `sensitive` flag
 
