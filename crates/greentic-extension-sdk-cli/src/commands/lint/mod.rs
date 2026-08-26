@@ -33,10 +33,19 @@
 //!   resolution and must be renamed by the author.
 //!
 //! View rules (August 2026), for `contributions.views[]`:
+//! - `E_VIEW_ID_PATTERN` — `id` does not match `^[a-z0-9][a-z0-9._-]*$`, the
+//!   same pattern the schema declares. Checked before the id is joined into
+//!   an asset path, so a traversal attempt is reported as an invalid id
+//!   rather than surfacing as a confusing missing-file error.
 //! - `E_VIEW_ENTRY_PATH` — `entry` escapes `assets/views/<id>/`
 //! - `E_VIEW_ENTRY_MISSING` — `entry` names a file that is not in the project
-//! - `E_VIEW_REMOTE_ASSET` — the entry HTML pulls a script or stylesheet from
-//!   a remote origin, which would defeat the pack manifest's integrity
+//! - `E_VIEW_ENTRY_UNREADABLE` — `entry` names a file that exists but could
+//!   not be read (not valid UTF-8, or a permissions error) — distinct from
+//!   `E_VIEW_ENTRY_MISSING`, which only ever means the file was not found
+//! - `E_VIEW_REMOTE_ASSET` — the entry HTML has a `<script src>`/`<img src>`
+//!   or `<link href>` pointing at a remote origin, which would defeat the
+//!   pack manifest's integrity. Scoped to the tag that owns the attribute, so
+//!   an ordinary `<a href="https://…">` hyperlink does not trip it.
 //! - `W_VIEW_SLOT_UNKNOWN` — `placement.slot` is not in the CLI's snapshot of
 //!   host slots. A warning, because the snapshot goes stale by construction.
 
