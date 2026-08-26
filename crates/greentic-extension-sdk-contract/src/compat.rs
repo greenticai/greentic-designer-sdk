@@ -17,6 +17,19 @@ use serde::{Deserialize, Serialize};
 /// Grounded in designer history: designer adopted contract 1.2.x at package
 /// version `1.2.3-research`. Anything older (the 1.1.x lineage, contract
 /// `0.4.x`) skips a v2 describe at boot.
+///
+/// **Exception, as of `contributions.views[]` (Phase 1, August 2026):**
+/// `Contributions` is `#[serde(deny_unknown_fields)]`, so a designer built
+/// against a pre-views contract crate does not ignore a `views` key it
+/// doesn't recognise — it fails to parse `describe.json` entirely, and the
+/// extension does not load. That makes the claim above false for a
+/// view-bearing describe on any designer in the 1.2.0–1.2.8 range: it
+/// declares `>=1.2.0` while actually requiring a designer that has both
+/// adopted contract 1.2.x *and* learned the `views` field, which is a later,
+/// currently-unshipped designer release (Phase 4 of the extension-views
+/// work). This constant is not raised yet because that floor isn't knowable
+/// until a host version ships view support — raise it then, and drop this
+/// note once every describe this SDK can emit is safe again at `1.2.0`.
 pub const MIN_DESIGNER_VERSION: &str = "1.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
