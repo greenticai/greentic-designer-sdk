@@ -6,4 +6,5 @@ mod icon;
 mod openapi;
 mod scaffold_kinds;
 mod scaffold_validation;
+mod views;
 mod wasm_component;

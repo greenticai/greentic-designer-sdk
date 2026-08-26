@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{name}}</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <h1 id="title">{{name}}</h1>
+      <p id="status">Connecting to the host…</p>
+      <button id="ping" type="button">Call the extension</button>
+      <pre id="output"></pre>
+    </main>
+    <script src="bridge.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
