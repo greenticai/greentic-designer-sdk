@@ -17,8 +17,8 @@ constant_time_eq = { workspace = true }
 dialoguer = { workspace = true }
 ed25519-dalek = { workspace = true }
 fs2 = { workspace = true }
-greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "=1.3.0-research.3" }
-greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "=1.3.0-research.3" }
+greentic-extension-sdk-contract = { path = "../greentic-extension-sdk-contract", version = "=1.3.0-research.4" }
+greentic-extension-sdk-state = { path = "../greentic-extension-sdk-state", version = "=1.3.0-research.4" }
 oci-client = { workspace = true }
 reqwest = { workspace = true }
 semver = { workspace = true }
@@ -33,7 +33,7 @@ tracing = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
-greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "=1.3.0-research.3" }
+greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", version = "=1.3.0-research.4" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 wiremock = "0.6"
 
