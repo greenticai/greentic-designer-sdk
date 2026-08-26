@@ -18,18 +18,27 @@ use serde::{Deserialize, Serialize};
 /// version `1.2.3-research`. Anything older (the 1.1.x lineage, contract
 /// `0.4.x`) skips a v2 describe at boot.
 ///
-/// **Exception, as of `contributions.views[]` (Phase 1, August 2026):**
-/// `Contributions` is `#[serde(deny_unknown_fields)]`, so a designer built
-/// against a pre-views contract crate does not ignore a `views` key it
-/// doesn't recognise — it fails to parse `describe.json` entirely, and the
-/// extension does not load. That makes the claim above false for a
-/// view-bearing describe on any designer in the 1.2.0–1.2.8 range: it
-/// declares `>=1.2.0` while actually requiring a designer that has both
-/// adopted contract 1.2.x *and* learned the `views` field, which is a later,
-/// currently-unshipped designer release (Phase 4 of the extension-views
-/// work). This constant is not raised yet because that floor isn't knowable
-/// until a host version ships view support — raise it then, and drop this
-/// note once every describe this SDK can emit is safe again at `1.2.0`.
+/// **Exception, as of `contributions.views[]` (Phase 1, August 2026) and
+/// `contributions.addons[]` (Phase 1, August 2026):** `Contributions` is
+/// `#[serde(deny_unknown_fields)]`, so a designer built against a
+/// pre-views (respectively pre-addons) contract crate does not ignore a
+/// `views` or `addons` key it doesn't recognise — it fails to parse
+/// `describe.json` entirely, and the extension does not load. That makes
+/// the claim above false for a view-bearing or addon-bearing describe on
+/// any designer in the 1.2.0–1.2.9 range: it declares `>=1.2.0` while
+/// actually requiring a designer that has both adopted contract 1.2.x *and*
+/// learned the field in question, which is a later, currently-unshipped
+/// designer release (Phase 4 of the extension-views work; the addon
+/// equivalent has no phase number assigned yet). The hazard is doubled for
+/// addons versus views: `describe-v2.json`'s `contributions` node is
+/// `additionalProperties: false`, so an older consumer rejects an `addons`
+/// key at both the schema layer and the serde layer, not just one.
+///
+/// This constant is not raised yet because that floor isn't knowable until
+/// a host version ships support for both fields. **Do not drop this note
+/// when views support ships and addons has not, or vice versa — raise the
+/// constant, and only remove this note, once every describe this SDK can
+/// emit (views *and* addons, together) is safe again at the new floor.**
 pub const MIN_DESIGNER_VERSION: &str = "1.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

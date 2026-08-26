@@ -910,3 +910,275 @@ fn a_traversal_id_is_rejected_as_an_invalid_id_not_a_missing_entry() {
         "must not also report the wrong error: {v:?}"
     );
 }
+
+// --- contributions.addons ---
+
+use rules_addons::check_addons;
+
+fn describe_with_addon(addon: &serde_json::Value) -> serde_json::Value {
+    json!({ "contributions": { "addons": [addon] } })
+}
+
+fn base_addon() -> serde_json::Value {
+    json!({
+        "id": "qdrant",
+        "family": "vector-db",
+        "display_name": "Qdrant",
+        "description": "Vector database.",
+        "config_schema": "{\"type\":\"object\"}",
+        "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"collections\":{\"type\":\"array\"}}}",
+        "outputs": [{ "name": "QDRANT_URL", "type": "text" }]
+    })
+}
+
+#[test]
+fn a_well_formed_addon_produces_no_violations() {
+    let v = check_addons(&describe_with_addon(&base_addon()));
+    assert!(v.is_empty(), "expected no violations, got: {v:?}");
+}
+
+#[test]
+fn an_id_with_uppercase_or_underscores_is_an_error() {
+    for bad in ["Qdrant", "qdrant_db", "-qdrant", ""] {
+        let mut a = base_addon();
+        a["id"] = json!(bad);
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter().any(|x| x.code == "E_ADDON_ID_PATTERN"),
+            "id {bad:?} should be rejected, got: {v:?}"
+        );
+    }
+}
+
+/// Output names become environment variables on the consuming service, so a
+/// name that is not a valid identifier breaks at injection time.
+#[test]
+fn an_output_name_that_is_not_env_var_safe_is_an_error() {
+    for bad in ["qdrant-url", "1url", "url!", ""] {
+        let mut a = base_addon();
+        a["outputs"] = json!([{ "name": bad, "type": "text" }]);
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter().any(|x| x.code == "E_ADDON_OUTPUT_NAME"),
+            "output name {bad:?} should be rejected, got: {v:?}"
+        );
+    }
+}
+
+/// Spec D16. A credential in desired state can never be read back by
+/// `observe`, so it diffs forever and no plan is ever clean. Catching it here
+/// is cheaper than discovering it when the first reconcile never converges.
+#[test]
+fn a_secret_looking_property_in_desired_state_is_an_error() {
+    for bad in [
+        "password",
+        "apiKey",
+        "api_key",
+        "auth_token",
+        "clientSecret",
+        "credentials",
+        "token",
+        "authToken",
+        "refresh-token",
+    ] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{bad}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "desired-state property {bad:?} should be rejected, got: {v:?}"
+        );
+    }
+}
+
+/// The same word in `config_schema` is fine — config is not reconciled
+/// against observed state, so it does not diff forever.
+#[test]
+fn a_secret_looking_property_in_config_schema_is_not_flagged() {
+    let mut a = base_addon();
+    a["config_schema"] = json!(r#"{"type":"object","properties":{"password":{"type":"string"}}}"#);
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        !v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "config_schema must not be flagged, got: {v:?}"
+    );
+}
+
+/// `token` only names a credential when it is the final segment of the
+/// property name — the head noun, not a modifier earlier in the name.
+/// `max_tokens` and `token_limit` are about tokens (a count, a limit), not
+/// a token itself, so they must not be flagged. Note `max_tokens` is
+/// plural: the last segment is `tokens`, a different segment than `token`,
+/// which is exactly why this can't be loosened back to a substring check.
+#[test]
+fn properties_where_token_is_a_modifier_not_the_head_noun_are_not_flagged() {
+    for ok in ["max_tokens", "token_limit", "tokenizer"] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{ok}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            !v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "desired-state property {ok:?} must not be flagged, got: {v:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unfamiliar_family_is_a_warning_not_an_error() {
+    let mut a = base_addon();
+    a["family"] = json!("quantum-db");
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "W_ADDON_FAMILY_UNKNOWN")
+        .unwrap_or_else(|| panic!("expected W_ADDON_FAMILY_UNKNOWN, got: {v:?}"));
+    assert!(
+        matches!(hit.severity, Severity::Warning),
+        "an unfamiliar family must warn, not fail the run: {hit:?}"
+    );
+}
+
+#[test]
+fn a_describe_with_no_addons_produces_no_violations() {
+    let v = check_addons(&json!({ "contributions": {} }));
+    assert!(v.is_empty(), "expected no violations, got: {v:?}");
+}
+
+/// D16 cites `rediscloud_acl_user` by name - Redis ACL users, a list of
+/// managed objects each carrying a `password`. The old top-level-only check
+/// never looked inside `items.properties` and so never fired on the exact
+/// case it was written for.
+#[test]
+fn a_secret_nested_under_items_properties_is_caught_with_a_path() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{
+            "acl_users":{"type":"array","items":{"type":"object",
+                "properties":{"username":{"type":"string"},"password":{"type":"string"}}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("acl_users[].password"),
+        "message should carry the full path to the offending property: {hit:?}"
+    );
+    assert!(
+        !v.iter().any(|x| x.message.contains("username")),
+        "username is not a secret and must not be flagged: {v:?}"
+    );
+}
+
+/// A secret defined inside `$defs` (reachable only by `$ref` elsewhere in
+/// the schema) must still be caught - the walk covers `$defs` unconditionally
+/// rather than trying to resolve `$ref`.
+#[test]
+fn a_secret_reachable_only_through_defs_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r##"{"type":"object","$defs":{"credentials":{"type":"object",
+            "properties":{"password":{"type":"string"}}}},
+            "properties":{"admin":{"$ref":"#/$defs/credentials"}}}"##
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "a secret nested inside $defs must be caught: {v:?}"
+    );
+}
+
+/// A secret defined inside an `allOf` branch must be caught.
+#[test]
+fn a_secret_inside_an_all_of_branch_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","allOf":[{"type":"object",
+            "properties":{"admin_password":{"type":"string"}}}]}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "a secret nested inside an allOf branch must be caught: {v:?}"
+    );
+}
+
+/// A JSON Schema may legally have a property literally named `properties`.
+/// The keyword itself must never be treated as a candidate name - only
+/// values that appear as a key *inside* a `properties` map are.
+#[test]
+fn a_property_literally_named_properties_is_evaluated_as_a_property_not_a_keyword() {
+    let mut a = base_addon();
+    a["desired_state_schema"] =
+        json!(r#"{"type":"object","properties":{"properties":{"type":"string"}}}"#);
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "a property literally named `properties` is not itself a secret: {v:?}"
+    );
+}
+/// Every row of the review table in item 5: none of these are credentials,
+/// and every one of them must NOT be flagged.
+#[test]
+fn legitimate_day_2_properties_are_not_flagged() {
+    for ok in [
+        "password_encryption",
+        "scram_password_iterations",
+        "password_policy",
+        "min_password_length",
+        "require_password",
+        "api_key_id",
+        "secret_ref",
+        "secret_name",
+        "secretKeyRef",
+        "admin_secret_ref",
+        "credential_rotation_days",
+        "allow_credentials",
+        "secrets_backend",
+    ] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{ok}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            !v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "legitimate property {ok:?} must not be flagged, got: {v:?}"
+        );
+    }
+}
+
+/// The narrowing in item 5 must not weaken the positives item 5 explicitly
+/// says to keep firing.
+#[test]
+fn narrowing_does_not_weaken_the_existing_positives() {
+    for bad in [
+        "password",
+        "admin_password",
+        "apiKey",
+        "clientSecret",
+        "auth_token",
+    ] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{bad}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "{bad:?} must still be flagged, got: {v:?}"
+        );
+    }
+}
