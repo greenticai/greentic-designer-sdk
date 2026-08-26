@@ -214,6 +214,7 @@
         },
         "permissions": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "network": {
               "type": "array",
@@ -234,6 +235,12 @@
               }
             },
             "llmRoles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "oauthProviders": {
               "type": "array",
               "items": {
                 "type": "string"

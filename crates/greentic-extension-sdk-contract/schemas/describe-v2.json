@@ -376,6 +376,7 @@
         "permissions": {
           "description": "Host permissions the extension requests. `gtdx install` prints the network, secrets and cross-extension requests and asks for confirmation before installing, unless the install was pre-approved (`--yes` / CI).",
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "network": {
               "description": "URL patterns the extension may reach, e.g. `https://api.example.com/*`. `gtdx publish` requires `https://`, with one exception: plain `http://` is accepted for loopback hosts (`127.0.0.1`, `localhost`, `[::1]`) only. This mirrors the extension runtime, which honours plain http for loopback hosts and drops non-loopback http patterns.",
@@ -404,6 +405,13 @@
                 "type": "string"
               },
               "description": "LLM roles (wire names, e.g. sorla_composer) this extension may request from the host greentic:extension-host/llm import."
+            },
+            "oauthProviders": {
+              "description": "OAuth provider ids (e.g. `hubspot`) this extension may request tokens for via the host `greentic:oauth-broker/broker-v1` import. The host rejects `get-token` for any provider not listed here.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
