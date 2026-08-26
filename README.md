@@ -178,6 +178,12 @@ since 1.2.0-research; runtime install verifies it.
 
 #### Contribute a view (a UI page in the Designer or Admin console)
 
+> **Phase 1 (SDK-only):** you can declare, scaffold, lint, validate and pack a
+> view today — no host renders one yet, and a view-bearing `describe.json` is
+> unloadable on every designer released so far (see
+> [`docs/authoring-views.md`](./docs/authoring-views.md#authoring-views) for
+> why). Treat `--with-view` as local development, not something to publish.
+
 ```bash
 gtdx new my-ext --kind design --with-view   # adds a working example page
 ```
