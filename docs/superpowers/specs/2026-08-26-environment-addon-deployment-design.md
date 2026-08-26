@@ -67,6 +67,10 @@ know whether a changed circumstance invalidates it.
 | D11 | The host **enforces plan/apply consistency, fatally, with no escape hatch.** Every known leaf in the planned state must equal the corresponding leaf observed after apply. | This is what separates a plan from a dry run. Terraform enforces it via `objchange.AssertObjectCompatible` and emits "Provider produced inconsistent result after apply". Its one escape hatch, `legacy_type_system`, is a decade-old compatibility wart its own proto comments shout at people not to use. We are greenfield and must not ship one. |
 | D12 | The BYOC renderer does **not** run Terraform. The candidates are OpenTofu and Pulumi Automation API; OpenTofu is the default pending §9.2 sign-off. | Terraform is BUSL-1.1 under IBM. The grant excludes offering it "on a hosted or embedded basis in order to compete", and the licence defines *Embedded* to include "packaging the competitive offering in such a way that the Licensed Work must be accessed or downloaded for the competitive offering to operate" — which names the wrapper shape itself, not just vendoring the source. OpenTofu is the MPL-2.0 Linux Foundation fork and adds state encryption at rest, which Terraform lacks and which matters because state holds secrets in plaintext. Pulumi Automation API is the other real candidate (§6.3). |
 | D13 | The contract carries a **`deferred` signal** (`absent-prereq`, `config-unknown`) from day one. | A three-call interface has no way to say "I cannot plan this yet". Terraform had to bolt `Deferred` on later and negotiate it behind a capability flag. We hit this immediately: day-2 config cannot be planned before the instance exists. |
+| D14 | **Delivery is phased.** Phase 1 ships the addon catalogue as a declarative `contributions.addons` block with first-party reconcilers implemented in-process *against the public interface*. The `AddonExtension` kind and its WASM vessel arrive with the `extension-base@0.3.0` contract release. | **This reverses the earlier reading that the kind ships first**, and it reverses it on new information, not on second thoughts. When that call was made the kind's cost was estimated at roughly six lifecycle paths. It is ~40 touch points (§10) **plus** a breaking WIT contract release that forces the runtime to serve `manifest@0.2.0` and `@0.3.0` concurrently across repos (§9.2). Meanwhile the part that is genuinely hard to change later — the desired-state schema, the binding model, `outputs` — needs no WIT change at all. Doing the easy-to-replace half first was the wrong order. |
+| D15 | An `AddonExtension` **may** contribute `node_types`, and only node types, and only ones bound to a resource it declares. | Question §11.1, decided. An addon that provisions Qdrant should be able to contribute a "Qdrant search" node. The alternative — every addon needing a paired design extension to be useful from a flow — is worse for authors and creates two artifacts that must be versioned together. Restricting it to node types bound to its own resources keeps the coupling one-directional. |
+| D16 | Secrets are **excluded from `desired-state` entirely** and injected through `binding`. | Question §11.5, decided. A password inside desired state can never be read back by `observe`, so it diffs forever and no plan is ever clean. Terraform needed a protocol capability flag plus a dedicated plan-time check to survive this; `rediscloud_acl_user` sidesteps it by forcing replacement on every password change. We can simply not have the problem: `desired-state` describes shape, `binding` carries credentials. |
+| D17 | v0.1.0 ships `observe` / `plan` / `apply`, plus `validate-*` and a **`schema-version` on `resource-spec`**. Import and move are deferred. | Question §11.6, decided. Of the RPCs Terraform needed beyond the core three, exactly one is certain to bite us early: schema migration, when an addon's v2 changes its `desired-state-schema` under instances already running v1. That gets a version field now. Import (adopting a resource created outside the platform) and move (rename without destroy/recreate) are recoverable by hand at this scale and can be added additively. |
 
 ### 2.1 Non-goals
 
@@ -596,9 +600,10 @@ Ship in `greentic-extension-sdk-testing` so every addon inherits it:
 
 ## 9. Prerequisites
 
-### 9.1 Independently shippable, should land first — DONE 2026-08-26
+### 9.1 Independently shippable, should land first — DONE 2026-08-26, merged
 
-> Delivered by `docs/superpowers/plans/2026-08-26-kind-registry-hardening.md`.
+> Delivered by `docs/superpowers/plans/2026-08-26-kind-registry-hardening.md`,
+> merged to `main` as PR #134 (merge commit `091338a`).
 > All five stale lists now derive from `ExtensionKind::ALL`, both silent
 > fallbacks are hard errors, and two tripwire tests (`schema_kind_enum`,
 > `kind_arg_covers_every_extension_kind`) fail when a sixth kind is added
@@ -669,7 +674,43 @@ and must be planned as a contract release, not folded into a feature branch.
 Addons cannot use that escape: they need `diagnostic` and `extension-error`
 from `extension-base/types`.
 
+### 9.3 Delivery phases
+
+Per D14. Each phase is useful on its own; each later one is gated on something
+outside this repo.
+
+| Phase | What ships | Gated on |
+|---|---|---|
+| 1 | `contributions.addons` — the declarative catalogue (id, family, `config-schema`, `desired-state-schema`, `outputs`). Platform-side reconcilers for Qdrant, Redis, Postgres, written against the public interface. Hosted placement only. | **Nothing.** Startable now. |
+| 2 | `ExtensionKind::Addon` + the `extension-addon` WIT world — third parties ship their own reconcilers as WASM. | `extension-base@0.3.0` (§9.2) |
+| 3 | Third-party addon marketplace. | Production trust root (§9.2) |
+| — | BYOC placement. | Engine sign-off, legal and engineering (§9.2, §6.3) |
+
+**Phase 1 is the product.** An environment with addons, config forms rendered
+from the schemas, Qdrant and Redis running — that is the question this spec was
+opened to answer. Phases 2 and 3 open it to third parties.
+
+**What phase 1 must not do is give first-party addons a private path.** D4
+stands: the in-process reconcilers implement the same `observe` / `plan` /
+`apply` interface that phase 2 exposes over WIT. Only the vessel differs. An
+interface its own authors bypass decays, and this repo already carries that
+scar.
+
+**The first thing to build in phase 1 is Redis, and it should be built before
+the contract is frozen.** It is the only candidate that simultaneously has real
+prior art (`rediscloud`'s ACL resources, the Redis Enterprise operator's
+`REUSER`/`REACL` CRDs) and stresses the design's weakest joint — RESP is not
+HTTP, so it forces the §5.4 socket-import decision to be real rather than
+hypothetical. It also tests the claim §5.5 rests on: that D6 keeps the simple
+case cheap. If Redis — the most ordinary addon there is — needs substantial
+`plan` logic for what amounts to "provision it, hand back a URL", then the
+rejection of an OSB-shaped contract has failed and a simple tier is the honest
+answer. Better to learn that from one prototype than from five shipped addons.
+
 ## 10. Cost of the new kind
+
+This is **phase 2's** cost (D14), not phase 1's. Phase 1 adds a contribution
+type and touches none of it.
 
 Roughly 40 touch points across five crates. Beyond §9.1, the notable ones:
 
@@ -698,31 +739,23 @@ Roughly 40 touch points across five crates. Beyond §9.1, the notable ones:
 
 ## 11. Open questions
 
-1. May an `AddonExtension` carry `contributions`? Addons plausibly contribute
-   node types (a "Qdrant search" node bound to the addon), which would couple
-   this kind to the design surface.
-2. Does the hosted renderer expose a resource-quota model per environment, and
+Three of the original seven are now decided and have moved into §2 as D15
+(contributions), D16 (secrets in desired state) and D17 (the v0.1.0 RPC set).
+What remains:
+
+1. Does the hosted renderer expose a resource-quota model per environment, and
    does the addon declare requests/limits, or does the platform impose them?
-3. Snapshot/restore is declared via `supports-backup` but has no interface
+2. Snapshot/restore is declared via `supports-backup` but has no interface
    yet. Is backup a reconciler action, or a separate interface?
-4. Should `family` be a closed vocabulary? An open string lets two addons claim
+3. Should `family` be a closed vocabulary? An open string lets two addons claim
    `vector-db` with incompatible outputs, which defeats the point of flows
    requiring a family rather than a vendor.
-5. **Write-only fields in desired state.** A password in `desired-state` cannot
-   be read back by `observe`, so it can never be shown consistent and will
-   diff forever. Terraform needed both a protocol capability flag and a
-   dedicated plan-time check for this; `rediscloud_acl_user` sidesteps it by
-   forcing replacement on any password change. Decide before v0.1.0 whether
-   `desired-state-schema` marks fields write-only, or whether secrets are
-   excluded from desired state entirely and injected via `binding`.
-6. **Which of the RPCs beyond observe/plan/apply do we need at v0.1.0?**
-   Terraform's lifecycle needs ten, and the extra ones are not decoration:
-   schema migration when an addon version changes its `desired-state-schema`,
-   importing a resource created outside the platform, renaming without
-   destroy/recreate, and validate-before-touch. Every one is a problem this
-   system will have. Shipping only three means retrofitting the rest.
-7. **When does the OSB rejection get revisited?** §5.5 rejects an
+4. **When does the OSB rejection get revisited?** §5.5 rejects an
    OSB/Heroku-shaped contract on the argument that D6 keeps the simple case
-   cheap. That claim is testable: if the first five first-party addons need
-   substantial `plan` logic for what is really "provision and hand back a
-   URL", the argument has failed and a simple tier is the honest answer.
+   cheap. That claim is testable, and §9.3 names the test: build Redis first.
+   If it needs substantial `plan` logic for "provision and hand back a URL",
+   the argument has failed and a simple tier is the honest answer.
+
+None of these block phase 1. Questions 1 and 2 belong to the platform repo;
+question 3 wants one real third-party addon before it can be answered
+honestly; question 4 is answered by building, not by deciding.
