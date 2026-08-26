@@ -635,3 +635,26 @@ fn the_scaffold_default_id_passes_the_id_rule() {
         );
     }
 }
+
+/// `kind_dir_name` re-implemented `dir_name()` from the wire string and
+/// omitted `wasix:mcp/router`, so `W_DESCRIBE_DIFF_BREAKING` silently skipped
+/// every MCP router. A lint that reports nothing is indistinguishable from a
+/// lint that found nothing.
+#[test]
+fn kind_dir_name_resolves_every_kind() {
+    use greentic_extension_sdk_contract::ExtensionKind;
+
+    for kind in ExtensionKind::ALL {
+        assert_eq!(
+            super::rules::kind_dir_name(kind.wire_name()),
+            Some(kind.dir_name()),
+            "kind_dir_name failed for wire name {}",
+            kind.wire_name()
+        );
+    }
+}
+
+#[test]
+fn kind_dir_name_rejects_an_unknown_wire_name() {
+    assert_eq!(super::rules::kind_dir_name("AddonExtension"), None);
+}

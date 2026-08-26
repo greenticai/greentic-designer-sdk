@@ -93,14 +93,13 @@ pub(super) fn check_capability_cycle(describe: &serde_json::Value) -> Vec<Violat
 
 /// Map a v1/v2 `kind` string (`"DesignExtension"` etc.) to the on-disk
 /// directory name (`"design"` etc.) the installer writes into.
-fn kind_dir_name(kind: &str) -> Option<&'static str> {
-    match kind {
-        "DesignExtension" => Some("design"),
-        "BundleExtension" => Some("bundle"),
-        "DeployExtension" => Some("deploy"),
-        "ProviderExtension" => Some("provider"),
-        _ => None,
-    }
+///
+/// Derived from the contract rather than re-listed here: the hand-written
+/// version omitted `wasix:mcp/router` and returned `None`, which made
+/// `W_DESCRIBE_DIFF_BREAKING` skip every MCP router without saying so.
+pub(super) fn kind_dir_name(kind: &str) -> Option<&'static str> {
+    greentic_extension_sdk_contract::ExtensionKind::from_wire(kind)
+        .map(greentic_extension_sdk_contract::ExtensionKind::dir_name)
 }
 
 /// Pull the set of "named contribution items" (tools, nodeTypes) and
