@@ -78,3 +78,15 @@ fn unparseable_input_is_an_error_not_a_pass() {
         errs[0]
     );
 }
+
+#[test]
+fn unparseable_observed_input_is_also_an_error() {
+    let errs = assert_apply_consistent(r"{}", "{not json")
+        .expect_err("unparseable observed state must not silently pass");
+    assert_eq!(errs.len(), 1);
+    assert!(
+        errs[0].path.is_empty(),
+        "a parse failure has no path: {:?}",
+        errs[0]
+    );
+}

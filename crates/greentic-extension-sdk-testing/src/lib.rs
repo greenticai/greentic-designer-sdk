@@ -11,7 +11,9 @@ mod gtxpack;
 pub mod mock_host;
 mod provider_fixtures;
 
-pub use self::conformance::{Inconsistency, assert_apply_consistent};
+pub use self::conformance::{
+    Inconsistency, PlanResult, assert_apply_consistent, assert_plan_idempotent, assert_plan_stable,
+};
 pub use self::fixture::{ExtensionFixture, ExtensionFixtureBuilder};
 pub use self::gtxpack::{pack_directory, unpack_to_dir};
 pub use self::provider_fixtures::{
