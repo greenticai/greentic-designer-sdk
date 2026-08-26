@@ -475,8 +475,11 @@ fn design_template_has_no_stray_placeholder_braces() {
 
 /// `ci/local_check.sh` runs `cargo test`, so a scaffold with no tests makes
 /// that step green while verifying nothing — and nothing told the author host
-/// tests were even possible. Every kind that ships a working example ships
-/// tests for it.
+/// tests were even possible.
+///
+/// Covers the four kinds whose examples were written here. `llm` and `mcp`
+/// ship working examples from earlier work but no tests yet; they belong in
+/// this list once they have some.
 #[test]
 fn guest_templates_ship_example_tests() {
     for kind in ["design", "bundle", "deploy", "provider"] {
