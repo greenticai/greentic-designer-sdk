@@ -59,9 +59,12 @@ pub struct Addon {
     /// `<extension_id>/<id>`.
     pub id: String,
 
-    /// What kind of thing this is — `vector-db`, `cache`, `sql`. A flow that
-    /// needs a vector database asks for the family, not the vendor, so a
-    /// deployment can substitute one implementation for another.
+    /// What kind of thing this is — `vector-db`, `cache`, `sql`. A catalogue
+    /// grouping label a flow author can browse or filter by. It is not a
+    /// substitutability guarantee: two addons sharing a family are not
+    /// promised compatible `outputs`, so nothing can automatically swap one
+    /// for the other on the strength of this field alone (spec D20 withdrew
+    /// that claim).
     ///
     /// An open string rather than a closed enum, for the same reason `View`
     /// keeps `slot` open: `describe.json` is signed and immutable once

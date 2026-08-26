@@ -70,7 +70,7 @@ know whether a changed circumstance invalidates it.
 | D14 | **Delivery is phased.** Phase 1 ships the addon catalogue as a declarative `contributions.addons` block with first-party reconcilers implemented in-process *against the public interface*. The `AddonExtension` kind and its WASM vessel arrive with the `extension-base@0.3.0` contract release. | **This reverses the earlier reading that the kind ships first**, and it reverses it on new information, not on second thoughts. When that call was made the kind's cost was estimated at roughly six lifecycle paths. It is ~40 touch points (§10) **plus** a breaking WIT contract release that forces the runtime to serve `manifest@0.2.0` and `@0.3.0` concurrently across repos (§9.2). Meanwhile the part that is genuinely hard to change later — the desired-state schema, the binding model, `outputs` — needs no WIT change at all. Doing the easy-to-replace half first was the wrong order. |
 | D15 | An `AddonExtension` **may** contribute `node_types`, and only node types, and only ones bound to a resource it declares. | Originally an open question in §11, decided. An addon that provisions Qdrant should be able to contribute a "Qdrant search" node. The alternative — every addon needing a paired design extension to be useful from a flow — is worse for authors and creates two artifacts that must be versioned together. Restricting it to node types bound to its own resources keeps the coupling one-directional. |
 | D16 | Secrets are **excluded from `desired-state` entirely** and injected through `binding`. | Originally an open question in §11, decided. A password inside desired state can never be read back by `observe`, so it diffs forever and no plan is ever clean. Terraform needed a protocol capability flag plus a dedicated plan-time check to survive this; `rediscloud_acl_user` sidesteps it by forcing replacement on every password change. We can simply not have the problem: `desired-state` describes shape, `binding` carries credentials. |
-| D17 | v0.1.0 ships `observe` / `plan` / `apply`, plus `validate-*` and a **`schema-version` on `resource-spec`**. Import and move are deferred. | Originally an open question in §11, decided. Of the RPCs Terraform needed beyond the core three, exactly one is certain to bite us early: schema migration, when an addon's v2 changes its `desired-state-schema` under instances already running v1. That gets a version field now. Import (adopting a resource created outside the platform) and move (rename without destroy/recreate) are recoverable by hand at this scale and can be added additively. |
+| D17 | v0.1.0 ships `observe` / `plan` / `apply`, plus `validate-*` and a **`schema-version` on every desired-state document**. Import and move are deferred. | Originally an open question in §11, decided. Of the RPCs Terraform needed beyond the core three, exactly one is certain to bite us early: schema migration, when an addon's v2 changes its `desired-state-schema` under instances already running v1. That gets a version field now — not on a `resource-spec` record (D18 removed that type), but on `versioned-state`, the `{schema-version, json}` pair that crosses the WIT boundary everywhere a desired-state document does: `validate-desired-state`'s `desired`, `plan`'s `current`/`desired` and its `planned-change.planned`, `apply`'s `current`/`planned`, and `apply-report.observed`. During a migration `current` and `desired` can be *different* versions, which is why the field travels with the document rather than living once per call. The catalogue's `Addon.schema_version` (`contributions.addons[].schema_version`) is a related but distinct field, not the same one: it is the addon's *declared current* version, while `versioned-state.schema-version` is what a specific document, in flight, is shaped for. Import (adopting a resource created outside the platform) and move (rename without destroy/recreate) are recoverable by hand at this scale and can be added additively. |
 | D18 | There is **no `list-resources`**. `contributions.addons` is the only place an addon's resources are declared; the WIT takes a `resource-id` the catalogue already names. | The catalogue shipped in 1.2.11 already carries id, family, both schemas and outputs. A WIT enumeration would be a second source of truth for the same data, in a second signed artifact, free to drift. `tools` already has this duplication (`contributions.tools` and `list-tools()`) and it is a wart to avoid repeating, not a precedent to follow. The counter-case — an addon whose resource *count* varies with config — does not exist: config changes a resource's shape, not how many an addon offers. |
 | D19 | Backup splits in two. **Scheduled/retained backups are desired state** and get no new interface. **Snapshot-before-destroy** gets its own optional `backup` interface. | The two look alike and behave nothing alike. A retention policy is observable, diffable and convergent — ordinary desired state. A snapshot taken before a destructive change has no desired state at all: no `observe` returns "a snapshot was taken before the thing that has not happened yet". Modelling it as desired state means inventing an entry that diffs forever — the exact D16 failure, reintroduced. |
 | D20 | `family` stays an **open string, demoted to a catalogue grouping label**. The claim that flows can require a family rather than a vendor is withdrawn. | Substitutability needs two addons claiming `vector-db` to have compatible `outputs`, and an open string guarantees nothing of the sort. A closed WIT enum would guarantee it and is exactly the trap now blocking phase 2 — `extension-base`'s closed `kind` enum needs a cross-repo contract release to gain a variant, and `View.slot` was left open for that stated reason. If real substitutability is wanted, it is a platform-side family contract validated at bind time, which does not change this WIT. Better to admit the label is a label. |
@@ -167,8 +167,9 @@ New WIT package `greentic:extension-addon@0.1.0`, new `ExtensionKind::Addon`.
 
 ### 5.1 Interfaces
 
-`greentic:extension-addon@0.1.0`. Four interfaces, two of them pure, one
-optional.
+`greentic:extension-addon@0.1.0`. Five interfaces: a package-level `types`
+interface carrying shared value shapes, plus `validation`, `workload` and
+`reconciler` — two of the latter three pure — and the optional `backup`.
 
 **What is deliberately absent: `list-resources`.** An earlier draft had a
 `resources` interface that enumerated the addon's own resources. D18 removes
@@ -182,40 +183,114 @@ selects.
 ```wit
 package greentic:extension-addon@0.1.0;
 
+/// Shared value shapes used by `validation`, `workload` and `reconciler`.
+/// Package-level so more than one interface can depend on it without
+/// depending on each other — the shape `extension-provider.wit` already uses
+/// for its own `types` interface.
+interface types {
+  /// A value that may be a literal or a reference the platform resolves.
+  ///
+  /// `secret-ref` carries a secrets URI for `extension-host/secrets.get`.
+  /// This is how a sensitive value reaches an addon without ever appearing
+  /// in a plan document, a plan UI or a support bundle: the platform hands
+  /// over the reference, the guest fetches the value.
+  variant value-ref {
+    literal(string),
+    secret-ref(string),
+  }
+
+  /// A desired-state or observed-state document, tagged with the schema
+  /// version it is shaped for.
+  ///
+  /// An addon's `desired_state_schema` can change between versions (D17).
+  /// During a migration `current` and `desired` may be *different*
+  /// versions, so a bare JSON string is not enough for the addon to know
+  /// which shape it is looking at. The catalogue's `Addon.schema_version` is
+  /// the addon's *declared current* version; `schema-version` here is what
+  /// this specific document, in flight, is shaped for.
+  record versioned-state {
+    schema-version: u32,
+    json: string,
+  }
+}
+
+/// Behavioural validation the JSON Schema cannot express.
+///
+/// `contributions.addons[].config_schema` already checked shape. This checks
+/// meaning: that a collection's vector size matches the embedding model the
+/// config selects, that a name is free in this instance. Shape is a schema's
+/// job; meaning needs code.
 interface validation {
   use greentic:extension-base/types@0.2.0.{diagnostic};
+  use types.{versioned-state};
 
-  /// Behavioural validation the JSON Schema cannot express. Diagnostic-only,
-  /// no `result<>` wrapper: there is no failure mode distinct from "here is
-  /// what is wrong". Mirrors `bundling.validate-config`.
+  /// Returns `[]` when the config is usable. Diagnostic-only rather than
+  /// `result<>`: there is no failure mode distinct from "here is what is
+  /// wrong". Mirrors `bundling.validate-config`.
   validate-config: func(resource-id: string, config-json: string) -> list<diagnostic>;
 
-  /// Takes `config-json` as well as the desired state, because the most
-  /// common thing wrong with desired state is disagreement with config — a
-  /// collection's vector size against the model the config selects. Without
-  /// config the addon cannot check it, and the error surfaces at apply.
+  /// Takes `config-json` as well as the desired state. The most common thing
+  /// wrong with desired state is disagreement with config — a collection's
+  /// vector size against the model config selects — and without config the
+  /// addon cannot check it, so the error surfaces at apply instead.
   validate-desired-state: func(
-    resource-id: string, config-json: string, desired-json: string,
+    resource-id: string,
+    config-json: string,
+    desired: versioned-state,
   ) -> list<diagnostic>;
 }
 
+/// What the addon needs run on its behalf. The addon never provisions; the
+/// platform does. That split is what lets one declaration serve both hosted
+/// and bring-your-own-cloud placement.
 interface workload {
-  record port { name: string, number: u16 }
-  record volume { name: string, size-gb: u32, mount-path: string }
+  use greentic:extension-base/types@0.2.0.{extension-error};
+  use types.{value-ref};
+
+  record port {
+    name: string,
+    number: u16,
+  }
+
+  record volume {
+    name: string,
+    size-gb: u32,
+    mount-path: string,
+  }
+
+  record http-probe {
+    path: string,
+    /// Names an entry in `container.ports`. Ordering-independent on purpose:
+    /// an addon serving HTTP and gRPC has two ports and the probe must say
+    /// which.
+    port-name: string,
+  }
+
+  variant probe-kind {
+    http(http-probe),
+    /// Names an entry in `container.ports`. Readiness is a successful TCP
+    /// connect — what Redis and most wire protocols can actually offer.
+    tcp(string),
+    /// Argv run inside the primary container; exit 0 means ready.
+    /// `pg_isready` is the motivating case.
+    exec(list<string>),
+    /// Ready as soon as the container runs. Honest for a process with no
+    /// readiness signal; a poor default for anything with one.
+    process,
+  }
 
   record probe {
-    /// Readiness path on the primary container's first port. `none` means
-    /// ready when the container runs.
-    http-path: option<string>,
+    kind: probe-kind,
     initial-delay-seconds: u32,
+    /// Must be non-zero; the platform rejects 0 at plan time.
     period-seconds: u32,
   }
 
   record resource-request {
-    /// What the addon needs to function at all (D21). The platform refuses
-    /// at plan time when the environment's cap is below this, naming both
-    /// numbers — rather than scheduling a container that OOMs and reads as
-    /// an infrastructure fault.
+    /// What the addon needs to function at all. The platform refuses at plan
+    /// time when the environment's cap is below this, naming both numbers —
+    /// rather than scheduling a container that OOMs, which reads as an
+    /// infrastructure fault and points at everything except the cause.
     min-memory-mb: u32,
     min-cpu-millis: u32,
     /// What the addon would prefer. Advisory; the platform may grant less.
@@ -224,13 +299,20 @@ interface workload {
   }
 
   record container {
-    /// OCI reference, digest-pinned. `gtdx lint` rejects a tag: a mutable
-    /// tag means the workload the plan approved is not necessarily the
-    /// workload that runs, which drains D11's guarantee through the one
-    /// field D11 does not cover.
+    /// OCI reference, digest-pinned. A mutable tag means the workload the
+    /// plan approved is not necessarily the workload that runs, which drains
+    /// the plan/apply consistency guarantee through the one field that
+    /// guarantee does not cover.
     image: string,
     args: list<string>,
-    env: list<tuple<string, string>>,
+    /// Literal values and secret references landing as environment
+    /// variables. `render-workload` is PURE, so a sensitive value — a
+    /// generated `POSTGRES_PASSWORD`, say — cannot originate here as a
+    /// literal: the addon can neither generate one (purity), nor embed one
+    /// (that puts it in the plan document), nor self-reference one (a
+    /// cycle). It arrives instead as `value-ref::secret-ref`, which the
+    /// platform resolves before the container starts.
+    env: list<tuple<string, value-ref>>,
     ports: list<port>,
   }
 
@@ -240,14 +322,23 @@ interface workload {
     volumes: list<volume>,
     resources: resource-request,
     readiness: probe,
+    /// Renderer-specific settings the contract does not model — node
+    /// selectors, anti-affinity, storage class, security context. Opaque
+    /// here; each renderer interprets what it understands and reports what
+    /// it does not at plan time rather than dropping it silently.
+    ///
+    /// Present in 0.1.0 deliberately: a WIT record cannot gain a field
+    /// without a breaking bump, and `managed-workload` already has its
+    /// equivalent.
+    extra-json: option<string>,
   }
 
   record managed-workload {
-    /// Vendor-neutral class the BYOC renderer maps to a cloud resource
-    /// (`postgres`, `redis`). The hosted renderer refuses it at plan time
-    /// with an explicit message rather than silently substituting a
-    /// container — an addon asking for a managed Postgres wants managed
-    /// backups and failover, which a container does not provide.
+    /// Vendor-neutral class the BYOC renderer maps to a cloud resource —
+    /// `postgres`, `redis`. The hosted renderer refuses it at plan time with
+    /// an explicit message rather than silently substituting a container: an
+    /// addon asking for a managed Postgres wants managed backups and
+    /// failover, which a container does not provide.
     service-class: string,
     params-json: string,
   }
@@ -257,92 +348,164 @@ interface workload {
     managed(managed-workload),
   }
 
-  /// PURE. No network, no side effects. Called at plan time, cacheable.
-  /// This is the split that lets one declaration serve both hosted and
-  /// bring-your-own-cloud placement (D6).
+  /// PURE. No network, no side effects. Called at plan time and cacheable.
   render-workload: func(resource-id: string, config-json: string)
     -> result<workload-spec, extension-error>;
 }
 
+/// Day-2 state inside a running instance: Qdrant collections, Redis ACL
+/// users. Level-triggered — the platform re-derives everything from observed
+/// state rather than remembering which step it was on.
 interface reconciler {
   use greentic:extension-base/types@0.2.0.{extension-error};
+  use types.{value-ref, versioned-state};
 
   /// How to reach the live instance. Every value the addon needs in order to
-  /// authenticate arrives here and nowhere else — credentials never appear
-  /// in desired state, because a value `observe` cannot read back diffs
-  /// forever (D16).
-  record binding { outputs: list<tuple<string, string>> }
+  /// authenticate arrives here and nowhere else. Credentials never appear in
+  /// desired state, because a value `observe` cannot read back diffs forever
+  /// and no plan is ever clean.
+  ///
+  /// An output whose `OutputSpec.sensitive` is true arrives as a
+  /// `value-ref::secret-ref`, never as a `literal`: the guest resolves it by
+  /// calling `extension-host/secrets.get` with the carried URI, which is why
+  /// both worlds import `extension-host/secrets` — this is the only place
+  /// this contract expects that import to be used.
+  record binding {
+    outputs: list<tuple<string, value-ref>>,
+  }
 
   /// Why no plan could be produced yet. Present from v0.1.0 rather than
-  /// retrofitted (D13).
-  enum deferred-reason {
-    absent-prereq,   // the instance is not up; ask again after readiness
-    config-unknown,  // a referenced output is not resolved yet
+  /// retrofitted: day-2 config genuinely cannot be planned before the
+  /// instance is reachable, and "I cannot plan this yet" must be a
+  /// first-class answer rather than an error or a lie.
+  variant deferred-reason {
+    /// The instance is not up. Ask again after readiness.
+    absent-prereq,
+    /// A referenced output is not resolved yet.
+    config-unknown,
+    /// Anything this contract version did not anticipate. Present because
+    /// §7.4's argument against closed vocabularies for third-party-reported
+    /// state applies here too.
+    other(string),
+  }
+
+  record deferred-detail {
+    reason: deferred-reason,
+    /// Names the specific thing that is missing — which output, which
+    /// prerequisite. `config-unknown` with no message is not actionable.
+    message: string,
   }
 
   record planned-change {
-    /// The addon's own desired-state JSON, amended with defaults it knows.
-    /// The platform diffs `current-json` against this to render the plan —
-    /// the addon never names an action (D10).
-    planned-json: string,
-    /// JSON Pointer paths whose change cannot be applied in place. This is
-    /// what surfaces as destructive and what gates approval.
+    /// The addon's own desired-state document, amended with any defaults the
+    /// addon knows. The platform diffs `current` against this to render the
+    /// plan — the addon never names an action. An opaque action payload
+    /// would mean only the addon could say what an apply will do, and the
+    /// platform would have to take its word.
+    planned: versioned-state,
+    /// JSON Pointer paths whose change cannot be applied in place and require
+    /// destroy-and-recreate. This is what surfaces as destructive in the plan
+    /// UI and what gates approval — a list the platform reads, not a boolean
+    /// the addon asserts.
     requires-replace: list<string>,
   }
 
-  variant plan-outcome { planned(planned-change), deferred(deferred-reason) }
+  variant plan-outcome {
+    planned(planned-change),
+    deferred(deferred-detail),
+  }
 
-  enum outcome { applied, failed-retryable, failed-terminal }
+  /// What an `apply` did to the live instance.
+  ///
+  /// Deliberately closed, unlike `deferred-reason` above. `applied` /
+  /// `failed-retryable` / `failed-terminal` is genuinely exhaustive for what
+  /// an apply can conclude — it worked, or it failed in one of the two ways
+  /// a caller must react to differently — and `apply-report.message` already
+  /// carries whatever detail a specific failure needs, so there is no
+  /// third-party-unanticipated case to leave room for. `deferred-reason` is
+  /// open because it describes state an addon *discovers*, which this
+  /// contract version cannot fully enumerate in advance (§7.4); `outcome`
+  /// describes the fixed set of things `apply` itself is capable of
+  /// concluding, which is a different kind of vocabulary and does not need
+  /// the same escape hatch.
+  enum outcome {
+    applied,
+    /// A connection reset. The platform may retry.
+    failed-retryable,
+    /// A schema violation. Retrying changes nothing.
+    failed-terminal,
+  }
 
   record apply-report {
-    /// State actually reached. The host asserts every known leaf of
-    /// `planned-json` is present and equal here, and fails the apply if not
-    /// (D11).
-    observed-json: string,
+    /// State actually reached. When `outcome` is `applied`, the host asserts
+    /// every leaf of `planned` is present and equal here and fails the apply
+    /// if not: without that assertion a plan is a dry run — a suggestion,
+    /// not a contract. When `outcome` is `failed-retryable` or
+    /// `failed-terminal`, `observed` is not required to match `planned` —
+    /// by definition it does not, and asserting otherwise would turn every
+    /// connection reset into "the addon is buggy".
+    observed: versioned-state,
     outcome: outcome,
     message: string,
   }
 
-  /// Deliberately does NOT receive desired state: an observer that can see
+  /// Deliberately does NOT receive desired state. An observer that can see
   /// intent will reconcile toward it, and drift detection becomes
   /// unfalsifiable. Terraform withholds config from `ReadResource` for the
   /// same reason.
   observe: func(resource-id: string, binding: binding)
-    -> result<string, extension-error>;
+    -> result<versioned-state, extension-error>;
 
   /// PURE. No network, no side effects.
-  plan: func(resource-id: string, current-json: string, desired-json: string)
-    -> result<plan-outcome, extension-error>;
+  plan: func(
+    resource-id: string,
+    current: versioned-state,
+    desired: versioned-state,
+  ) -> result<plan-outcome, extension-error>;
 
-  apply: func(resource-id: string, binding: binding,
-              current-json: string, planned-json: string)
-    -> result<apply-report, extension-error>;
+  apply: func(
+    resource-id: string,
+    binding: binding,
+    current: versioned-state,
+    planned: versioned-state,
+  ) -> result<apply-report, extension-error>;
 }
 
-/// OPTIONAL. A world exports this only when the addon can genuinely snapshot.
+/// OPTIONAL. Exported only by `addon-extension-with-backup`.
+///
+/// A retention schedule is NOT here — that is observable, diffable and
+/// convergent, so it is ordinary desired state and belongs in
+/// `desired_state_schema`. What is here has no desired state at all: no
+/// `observe` returns "a snapshot was taken before the thing that has not
+/// happened yet". Modelling it as desired state would make it diff forever.
 interface backup {
-  use reconciler.{binding};
   use greentic:extension-base/types@0.2.0.{extension-error};
+  use reconciler.{binding};
 
   record backup-handle {
     /// Opaque to the platform, meaningful to the addon. The platform stores
-    /// it against the revision that triggered the backup and hands it back
-    /// to `restore` unchanged.
+    /// it against the revision that triggered the backup and hands it back to
+    /// `restore` unchanged.
     id: string,
     /// Shown next to the destructive change it guarded.
     summary: string,
     size-bytes: option<u64>,
   }
 
-  /// Snapshot before a destructive change. The PLATFORM calls this; an
-  /// author never schedules it. A retention schedule is desired state and
-  /// belongs in `desired_state_schema` (D19).
+  /// Snapshot before a destructive change. The PLATFORM calls this; an author
+  /// never schedules it.
   backup: func(resource-id: string, binding: binding)
     -> result<backup-handle, extension-error>;
 
-  /// Destructive by definition; the platform gates it the way it gates a
+  /// Destructive by definition. The platform gates it the way it gates a
   /// `requires-replace` path.
   restore: func(resource-id: string, binding: binding, handle: backup-handle)
+    -> result<_, extension-error>;
+
+  /// Release a snapshot this addon produced. Without this, pre-destroy
+  /// snapshots accumulate forever: they are platform-initiated, so by D19
+  /// they have no desired state and no reconcile reclaims them.
+  delete-backup: func(resource-id: string, binding: binding, handle: backup-handle)
     -> result<_, extension-error>;
 }
 ```
@@ -376,8 +539,8 @@ but necessary.
 **`plan` returns state, not actions** (D10). This is the correction that
 matters most. An action list with an opaque `payload-json` would mean the
 platform cannot say what an apply will do — only the addon could, and the
-platform would have to take its word. Because `current-json` and
-`planned-json` are both documents of a schema the addon published, the
+platform would have to take its word. Because `current` and `planned` are
+both `versioned-state` documents of a schema the addon published, the
 platform diffs them generically and renders the plan itself. `requires-replace`
 is what makes a change destructive, and it is a list of paths the platform can
 read, not a boolean the addon asserts.
@@ -609,10 +772,14 @@ workers reconcile the same addon concurrently.
 
 ### 7.2 Plan/apply consistency
 
-After `apply`, the host compares `apply-report.observed-json` against the
-`planned-json` it approved. **Every known leaf in the plan must be present and
-equal in the result.** A mismatch fails the apply and is reported as an addon
-defect, not a user error.
+After `apply` reports `outcome: applied`, the host compares
+`apply-report.observed` against the `planned` state it approved. **Every
+known leaf in the plan must be present and equal in the result.** A mismatch
+fails the apply and is reported as an addon defect, not a user error. When
+`outcome` is `failed-retryable` or `failed-terminal`, `observed` is not
+required to match `planned` — by definition it does not, and the consistency
+check does not apply to those reports; asserting it unconditionally would
+turn every connection reset into "the addon is buggy".
 
 This is not optional polish. Without it, the plan the user approved has no
 relationship to what happened, and "plan" is a marketing word for "dry run".
@@ -725,20 +892,34 @@ Ship in `greentic-extension-sdk-testing` so every addon inherits it:
   as prose:
 
   ```rust
-  assert_apply_consistent(&planned_json, &report.observed_json)?;
+  if report.outcome == Outcome::Applied {
+      assert_apply_consistent(&planned_json, &report.observed_json)?;
+  }
   ```
 
-  **The platform calls the same function in production.** Not a reimplementation
-  of the rule, not a test that resembles it — the rule itself, exported so an
-  author can run it before deploying. Today D11 is host behaviour an author
-  cannot check until their addon is live; this is what makes it checkable at
-  `cargo test` time.
+  **The platform calls the same function, gated the same way, in production.**
+  The assertion only holds when `outcome` is `applied` — a `failed-retryable`
+  or `failed-terminal` report is not required to reach the planned state, and
+  calling this unconditionally would turn a legitimate failure into a false
+  report of addon misbehaviour (§7.2). Not a reimplementation of the rule, not
+  a test that resembles it — the rule itself, exported so an author can run it
+  before deploying. Today D11 is host behaviour an author cannot check until
+  their addon is live; this is what makes it checkable at `cargo test` time.
 - Round-trip: `plan → apply → observe` must equal desired.
 
-Two lint rules fall out of the contract's shape and belong with it:
-`E_ADDON_IMAGE_NOT_PINNED` (a `container.image` naming a tag rather than a
-digest — see §5.1 for why that drains D11) and `E_ADDON_BACKUP_MISMATCH`
-(`supports_backup` disagreeing with the declared world).
+One lint rule and one host-side check fall out of the contract's shape.
+`E_ADDON_BACKUP_MISMATCH` (`supports_backup` disagreeing with the declared
+world) is a `gtdx lint` rule: both fields are static in `describe.json`, the
+same reason the three existing addon rules work. `E_ADDON_IMAGE_NOT_PINNED`
+(a `container.image` naming a tag rather than a digest — see §5.1 for why
+that drains D11) is **not** a lint rule: `container.image` is returned by
+`render-workload`, a runtime function called at plan time with a config
+`gtdx lint` does not have — the linter reads only `describe.json`, and no
+static field there names the image. It belongs instead as a host-side check
+performed at plan time, when the platform actually has a rendered `container`
+to inspect. Shipping it as a lint rule would mean a rule that can never fire,
+which is the exact defect `docs/superpowers/plans/2026-08-26-kind-registry-hardening.md`
+spent a fix wave removing (`W_DESCRIBE_DIFF_BREAKING`'s silent skip).
 
 ## 9. Prerequisites
 
