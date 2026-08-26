@@ -1,7 +1,12 @@
 // Bundle extension guest for {{id}}.
 //
-// This scaffold implements every export required by the extension-bundle
-// contract as a TODO stub. Replace each body with real logic before shipping.
+// This scaffold ships one working recipe — `starter` — so a fresh build has
+// something to show: the designer lists the recipe and renders its config
+// form from the schema below.
+//
+// `render` is the one export left unimplemented, deliberately. It must return
+// the artifact bytes *and* their sha256, and returning a wrong digest is worse
+// than returning an error — see the note on that function.
 
 #[allow(warnings)]
 mod bindings;
@@ -33,61 +38,95 @@ impl manifest::Guest for Component {
 
 // ---- extension-base/lifecycle ----
 impl lifecycle::Guest for Component {
+    /// Returning `Err` stops the extension loading at all — reserve it for
+    /// configuration that is genuinely unusable.
     fn init(_config_json: String) -> Result<(), types::ExtensionError> {
-        // TODO: initialize any state the extension needs.
         Ok(())
     }
 
     fn shutdown() {
-        // TODO: release any resources the extension owns.
+        // Release anything `init` acquired that outlives the component.
     }
 }
 
 // ---- extension-bundle/recipes ----
+// A recipe is one way this extension can turn a designer session into a
+// shippable artifact. The designer lists them and renders their config schema
+// as the form the user fills in before bundling.
 impl recipes::Guest for Component {
     fn list_recipes() -> Vec<recipes::RecipeSummary> {
-        // TODO: return every recipe this extension can bundle.
-        Vec::new()
+        vec![recipes::RecipeSummary {
+            id: "starter".to_string(),
+            display_name: "Starter bundle".to_string(),
+            description: "A minimal recipe to build on.".to_string(),
+            // Path inside the pack, e.g. "assets/icon.svg". `None` uses the
+            // designer's default icon.
+            icon_path: None,
+        }]
     }
 
-    fn recipe_config_schema(
-        recipe_id: String,
-    ) -> Result<String, types::ExtensionError> {
-        // TODO: return a JSON Schema for the recipe's config.
-        Err(types::ExtensionError::InvalidInput(format!(
-            "unknown recipe: {recipe_id}"
-        )))
+    /// JSON Schema for the recipe's configuration. The designer renders it as
+    /// the bundling form and validates input against it, so a precise schema
+    /// here means fewer bad configs reaching `render`.
+    fn recipe_config_schema(recipe_id: String) -> Result<String, types::ExtensionError> {
+        match recipe_id.as_str() {
+            "starter" => Ok(r#"{
+                "type": "object",
+                "properties": {
+                    "bundle_name": {
+                        "type": "string",
+                        "title": "Bundle name"
+                    }
+                },
+                "required": ["bundle_name"]
+            }"#
+            .to_string()),
+            _ => Err(types::ExtensionError::NotFound(recipe_id)),
+        }
     }
 
-    fn supported_capabilities(
-        recipe_id: String,
-    ) -> Result<Vec<String>, types::ExtensionError> {
-        // TODO: list capabilities the recipe can satisfy.
-        Err(types::ExtensionError::InvalidInput(format!(
-            "unknown recipe: {recipe_id}"
-        )))
+    /// Capabilities this recipe can satisfy, as `namespace:name` patterns.
+    /// The designer uses them to decide which recipes can bundle a given
+    /// session — a session needing `greentic:flows/*` will not offer a recipe
+    /// that does not claim it.
+    fn supported_capabilities(recipe_id: String) -> Result<Vec<String>, types::ExtensionError> {
+        match recipe_id.as_str() {
+            "starter" => Ok(vec!["greentic:flows/*".to_string()]),
+            _ => Err(types::ExtensionError::NotFound(recipe_id)),
+        }
     }
 }
 
 // ---- extension-bundle/bundling ----
 impl bundling::Guest for Component {
-    fn validate_config(
-        _recipe_id: String,
-        _config_json: String,
-    ) -> Vec<types::Diagnostic> {
-        // TODO: emit configuration diagnostics.
+    /// Check the config before `render` runs, so mistakes surface in the form
+    /// rather than part-way through building.
+    ///
+    /// `Severity::Error` blocks bundling; `Warning` lets the user proceed. An
+    /// empty list means "looks usable".
+    fn validate_config(_recipe_id: String, _config_json: String) -> Vec<types::Diagnostic> {
         Vec::new()
     }
 
+    /// Turn the session into an artifact.
+    ///
+    /// Left unimplemented on purpose. `BundleArtifact` carries `filename`,
+    /// `bytes`, and the **sha256 of those bytes** — consumers verify that
+    /// digest, so a placeholder or a wrong hash fails later and further away
+    /// than an honest error here. The scaffold ships no hashing crate; add
+    /// `sha2` to Cargo.toml, build your bytes, hash them, and return all three
+    /// together.
+    ///
+    /// `session` is the designer state to bundle: read what the recipe needs
+    /// from it rather than trusting the config alone.
     fn render(
         recipe_id: String,
         _config_json: String,
         _session: bundling::DesignerSession,
     ) -> Result<bundling::BundleArtifact, types::ExtensionError> {
-        // TODO: render the recipe into a bundle artifact.
-        Err(types::ExtensionError::Internal(format!(
-            "render not implemented for recipe: {recipe_id}"
-        )))
+        Err(types::ExtensionError::Internal(
+            ["render not implemented for recipe: ", &recipe_id].concat(),
+        ))
     }
 }
 

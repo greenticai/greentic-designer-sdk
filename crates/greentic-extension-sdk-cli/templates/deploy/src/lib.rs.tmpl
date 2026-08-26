@@ -1,7 +1,10 @@
 // Deploy extension guest for {{id}}.
 //
-// This scaffold implements every export required by the extension-deploy
-// contract as a TODO stub. Replace each body with real logic before shipping.
+// This scaffold ships one working target — `dry-run` — so a fresh build has
+// something to show: the designer lists the target, renders its credential
+// and config forms from the schemas below, and the deploy/poll cycle
+// completes. It provisions nothing; it exists so you can see the shape of a
+// deployment before writing a real one.
 
 #[allow(warnings)]
 mod bindings;
@@ -44,56 +47,119 @@ impl lifecycle::Guest for Component {
 }
 
 // ---- extension-deploy/targets ----
+// A target is somewhere a bundle can be deployed. The designer lists them and
+// renders their schemas as the credential and configuration forms.
 impl targets::Guest for Component {
+    /// Every target this extension supports.
+    ///
+    /// `supports_rollback` is a promise: declare `true` only if `rollback`
+    /// below can genuinely undo a deployment. The designer offers the button
+    /// on the strength of this flag.
     fn list_targets() -> Vec<targets::TargetSummary> {
-        // TODO: return every deploy target this extension supports.
-        Vec::new()
+        vec![targets::TargetSummary {
+            id: "dry-run".to_string(),
+            display_name: "Dry run".to_string(),
+            description: "Validate the request and report success without deploying anything."
+                .to_string(),
+            icon_path: None,
+            supports_rollback: false,
+        }]
     }
 
-    fn credential_schema(
-        target_id: String,
-    ) -> Result<String, types::ExtensionError> {
-        // TODO: return the JSON Schema describing required credentials.
-        Err(types::ExtensionError::InvalidInput(format!(
-            "unknown target: {target_id}"
-        )))
+    /// JSON Schema for the target's credentials. The designer renders it as
+    /// the credential form; the runtime injects the stored values at deploy
+    /// time. Return the *shape* only, never values.
+    fn credential_schema(target_id: String) -> Result<String, types::ExtensionError> {
+        match target_id.as_str() {
+            // A dry run reaches nothing, so it needs nothing. A real target
+            // would describe its API token, subscription id, and so on.
+            "dry-run" => Ok(r#"{"type":"object","properties":{}}"#.to_string()),
+            _ => Err(types::ExtensionError::NotFound(target_id)),
+        }
     }
 
+    /// JSON Schema for per-deployment configuration — region, instance size,
+    /// the settings a user picks per environment.
     fn config_schema(target_id: String) -> Result<String, types::ExtensionError> {
-        // TODO: return the JSON Schema describing required config.
-        Err(types::ExtensionError::InvalidInput(format!(
-            "unknown target: {target_id}"
-        )))
+        match target_id.as_str() {
+            "dry-run" => Ok(r#"{
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "title": "Note",
+                        "description": "Echoed back in the job message"
+                    }
+                }
+            }"#
+            .to_string()),
+            _ => Err(types::ExtensionError::NotFound(target_id)),
+        }
     }
 
+    /// Check credentials before a deploy is attempted, so a typo surfaces in
+    /// the form rather than half-way through provisioning.
+    ///
+    /// Return `Severity::Error` diagnostics to block, `Warning` to let the
+    /// user proceed anyway. An empty list means "looks usable".
     fn validate_credentials(
         _target_id: String,
         _credentials_json: String,
     ) -> Vec<types::Diagnostic> {
-        // TODO: emit credential diagnostics.
         Vec::new()
     }
 }
 
 // ---- extension-deploy/deployment ----
+// The deploy cycle is asynchronous by design: `deploy` starts work and returns
+// a handle, the designer polls until the status settles, and `rollback` undoes
+// it if the target supports that.
 impl deployment::Guest for Component {
+    /// Start a deployment and return a handle immediately. Long work belongs
+    /// behind `poll`, not here — the designer expects this call to return
+    /// promptly.
+    ///
+    /// `req` carries the artifact bytes, the resolved credentials, the config,
+    /// and the deployment name.
     fn deploy(
-        _req: deployment::DeployRequest,
+        req: deployment::DeployRequest,
     ) -> Result<deployment::DeployJob, types::ExtensionError> {
-        // TODO: launch the deployment and return a job handle.
-        Err(types::ExtensionError::Internal("deploy not implemented".into()))
+        match req.target_id.as_str() {
+            "dry-run" => Ok(deployment::DeployJob {
+                // Your own handle. The designer passes it back to `poll` and
+                // `rollback` verbatim, so encode whatever you need to resume.
+                id: req.deployment_name.clone(),
+                status: deployment::DeployStatus::Running,
+                message: ["validated ", &req.deployment_name].concat(),
+                // Anything the user can open once the deployment is live.
+                endpoints: Vec::new(),
+            }),
+            other => Err(types::ExtensionError::NotFound(other.to_string())),
+        }
     }
 
+    /// Report the current status of `job_id`. The designer calls this
+    /// repeatedly until the status reaches a terminal state — `Running`,
+    /// `Failed`, or `RolledBack`.
+    ///
+    /// A status that never settles leaves the UI polling forever, so make sure
+    /// every path eventually reaches one of those three.
     fn poll(job_id: String) -> Result<deployment::DeployJob, types::ExtensionError> {
-        // TODO: fetch current status for `job_id`.
-        Err(types::ExtensionError::InvalidInput(format!(
-            "unknown job: {job_id}"
-        )))
+        Ok(deployment::DeployJob {
+            id: job_id,
+            status: deployment::DeployStatus::Running,
+            message: "dry run complete".to_string(),
+            endpoints: Vec::new(),
+        })
     }
 
+    /// Undo a deployment. Only reachable when the target declared
+    /// `supports_rollback: true`, so this stub refuses — matching the `false`
+    /// declared above.
     fn rollback(_job_id: String) -> Result<(), types::ExtensionError> {
-        // TODO: roll back the deployment.
-        Err(types::ExtensionError::Internal("rollback not implemented".into()))
+        Err(types::ExtensionError::Internal(
+            "the dry-run target does not support rollback".to_string(),
+        ))
     }
 }
 
