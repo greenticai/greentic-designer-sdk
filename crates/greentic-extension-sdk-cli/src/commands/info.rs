@@ -38,13 +38,9 @@ fn find_installed(
     name: &str,
     version: Option<&str>,
 ) -> anyhow::Result<Option<(ExtensionKind, DescribeJson)>> {
-    let all_kinds = [
-        ExtensionKind::Design,
-        ExtensionKind::Bundle,
-        ExtensionKind::Deploy,
-        ExtensionKind::Provider,
-        ExtensionKind::WasixMcpRouter,
-    ];
+    // Derived, not hand-listed: a kind missing from this sweep makes
+    // `gtdx info` report an installed extension as absent.
+    let all_kinds = ExtensionKind::ALL;
 
     let mut candidates: Vec<(ExtensionKind, semver::Version, DescribeJson)> = Vec::new();
 
@@ -106,18 +102,11 @@ fn find_installed(
     }
 }
 
-fn format_kind_display(kind: ExtensionKind) -> &'static str {
-    match kind {
-        ExtensionKind::Design => "DesignExtension",
-        ExtensionKind::Bundle => "BundleExtension",
-        ExtensionKind::Deploy => "DeployExtension",
-        ExtensionKind::Provider => "ProviderExtension",
-        ExtensionKind::WasixMcpRouter => "wasix:mcp/router",
-    }
-}
-
 fn render_info(kind: ExtensionKind, d: &DescribeJson) {
-    println!("Kind: {}", format_kind_display(kind));
+    // Delegates to `ExtensionKind::wire_name()` rather than re-listing the
+    // wire strings here: a second copy would let `gtdx info` silently keep
+    // printing the old string after `wire_name` changes.
+    println!("Kind: {}", kind.wire_name());
     println!("Name: {}", d.metadata.id);
     println!("Version: {}", d.metadata.version);
     println!("License: {}", d.metadata.license);

@@ -3,12 +3,17 @@ use std::sync::LazyLock;
 use jsonschema::{Draft, Validator};
 
 use crate::error::ContractError;
+use crate::kind::ExtensionKind;
 
 const SCHEMA_V2: &str = include_str!("../schemas/describe-v2.json");
 const SCHEMA_MCP_V1: &str = include_str!("../schemas/describe-mcp-v1.json");
 
-/// `kind` value identifying a local-WASM MCP component.
-const WASIX_MCP_ROUTER_KIND: &str = "wasix:mcp/router";
+/// `kind` value identifying a local-WASM MCP component. Delegates to
+/// `ExtensionKind::WasixMcpRouter::wire_name()` (a `const fn`, so this stays
+/// a `const`) rather than repeating the literal — a second copy would let
+/// the wire string drift out of sync with the enum without either test
+/// noticing.
+const WASIX_MCP_ROUTER_KIND: &str = ExtensionKind::WasixMcpRouter.wire_name();
 
 static VALIDATOR_V2: LazyLock<Validator> = LazyLock::new(|| {
     let schema: serde_json::Value =

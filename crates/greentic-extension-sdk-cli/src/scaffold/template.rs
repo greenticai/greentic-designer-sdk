@@ -89,8 +89,13 @@ fn overlay(base: Vec<TemplateEntry>, over: Vec<TemplateEntry>) -> Vec<TemplateEn
     out
 }
 
-pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
-    match kind {
+/// Load the template tree for a scaffold kind.
+///
+/// Errors on an unknown kind rather than returning an empty set: the previous
+/// `_ => Vec::new()` meant a kind whose match arm was forgotten scaffolded the
+/// common overlay and nothing else, then reported success.
+pub fn load_templates_kind(kind: &str) -> anyhow::Result<Vec<TemplateEntry>> {
+    let entries = match kind {
         "design" => collect(&TEMPLATES_DESIGN),
         "bundle" => collect(&TEMPLATES_BUNDLE),
         "deploy" => collect(&TEMPLATES_DEPLOY),
@@ -109,8 +114,9 @@ pub fn load_templates_kind(kind: &str) -> Vec<TemplateEntry> {
         "llm" => collect(&TEMPLATES_LLM),
         "mcp" => collect(&TEMPLATES_MCP),
         "openapi-connector" => collect(&TEMPLATES_OPENAPI_CONNECTOR),
-        _ => Vec::new(),
-    }
+        other => anyhow::bail!("no scaffold templates for kind `{other}`"),
+    };
+    Ok(entries)
 }
 
 pub struct Context {
@@ -174,6 +180,20 @@ pub fn render_and_write(ctx: &Context, template: &str, path: &Path) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every `scaffold::Kind` variant's wire string, sourced from
+    /// `Kind::value_variants()` rather than hand-listed — the idiom
+    /// `commands::list.rs:126` already established. A hand-written list here
+    /// would pass vacuously for a newly added `Kind` variant nobody
+    /// remembered to add to the list, which is exactly the failure mode
+    /// these guards exist to catch.
+    fn all_kind_strs() -> Vec<&'static str> {
+        use clap::ValueEnum as _;
+        crate::scaffold::Kind::value_variants()
+            .iter()
+            .map(|k| k.as_str())
+            .collect()
+    }
 
     #[test]
     fn render_substitutes_placeholder() {
@@ -294,7 +314,7 @@ mod tests {
 
     #[test]
     fn load_kind_design_returns_cargo_toml() {
-        let entries = load_templates_kind("design");
+        let entries = load_templates_kind("design").expect("design templates resolve");
         assert!(entries.iter().any(|e| e.dst_rel == "Cargo.toml"));
         assert!(entries.iter().any(|e| e.dst_rel == "describe.json"));
         assert!(entries.iter().any(|e| e.dst_rel == "src/lib.rs"));
@@ -306,16 +326,9 @@ mod tests {
     /// produces wasm with the wrong feature set.
     #[test]
     fn every_kind_template_ships_rust_toolchain_pinned_to_1_95_0() {
-        for kind in [
-            "design",
-            "bundle",
-            "deploy",
-            "provider",
-            "wasm-component",
-            "llm",
-            "mcp",
-        ] {
-            let entries = load_templates_kind(kind);
+        for kind in all_kind_strs() {
+            let entries = load_templates_kind(kind)
+                .unwrap_or_else(|e| panic!("kind {kind} templates resolve: {e}"));
             let toolchain = entries
                 .iter()
                 .find(|e| e.dst_rel == "rust-toolchain.toml")
@@ -339,7 +352,8 @@ mod tests {
     #[test]
     fn every_kind_template_ships_wit_bindgen_rt_0_41() {
         for kind in ["design", "bundle", "deploy", "provider", "llm"] {
-            let entries = load_templates_kind(kind);
+            let entries = load_templates_kind(kind)
+                .unwrap_or_else(|e| panic!("kind {kind} templates resolve: {e}"));
             let cargo_toml = entries
                 .iter()
                 .find(|e| e.dst_rel == "Cargo.toml")
@@ -357,7 +371,7 @@ mod tests {
     /// not the older `wit-bindgen-rt` shim.
     #[test]
     fn mcp_kind_template_ships_wit_bindgen_macros() {
-        let entries = load_templates_kind("mcp");
+        let entries = load_templates_kind("mcp").expect("mcp templates resolve");
         let cargo_toml = entries
             .iter()
             .find(|e| e.dst_rel == "Cargo.toml")
@@ -380,7 +394,8 @@ mod tests {
     /// (audit cycle-2 N12).
     #[test]
     fn wasm_component_cargo_toml_has_no_workspace_inherits() {
-        let entries = load_templates_kind("wasm-component");
+        let entries =
+            load_templates_kind("wasm-component").expect("wasm-component templates resolve");
         let cargo_toml = entries
             .iter()
             .find(|e| e.dst_rel.ends_with("Cargo.toml"))
@@ -404,16 +419,9 @@ mod tests {
     /// future template that regresses to v1 shape.
     #[test]
     fn every_kind_describe_template_is_v2() {
-        for kind in [
-            "design",
-            "bundle",
-            "deploy",
-            "provider",
-            "wasm-component",
-            "llm",
-            "mcp",
-        ] {
-            let entries = load_templates_kind(kind);
+        for kind in all_kind_strs() {
+            let entries = load_templates_kind(kind)
+                .unwrap_or_else(|e| panic!("kind {kind} templates resolve: {e}"));
             let describe = entries
                 .iter()
                 .find(|e| e.dst_rel == "describe.json")
@@ -442,7 +450,7 @@ mod tests {
     /// and ships the canonical 5-file design-extension skeleton.
     #[test]
     fn load_kind_llm_returns_full_template_set() {
-        let entries = load_templates_kind("llm");
+        let entries = load_templates_kind("llm").expect("llm templates resolve");
         let names: Vec<&str> = entries.iter().map(|e| e.dst_rel.as_str()).collect();
         assert!(
             names.contains(&"Cargo.toml"),
@@ -472,7 +480,7 @@ mod tests {
     /// interface.
     #[test]
     fn load_kind_mcp_returns_full_template_set() {
-        let entries = load_templates_kind("mcp");
+        let entries = load_templates_kind("mcp").expect("mcp templates resolve");
         let names: Vec<&str> = entries.iter().map(|e| e.dst_rel.as_str()).collect();
         for expected in [
             "Cargo.toml",
@@ -483,6 +491,35 @@ mod tests {
             "rust-toolchain.toml",
         ] {
             assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        }
+    }
+
+    /// A kind with no match arm used to scaffold zero kind files and report
+    /// success — the user got the common overlay and nothing else: no
+    /// src/lib.rs, no describe.json, no Cargo.toml.
+    #[test]
+    fn an_unknown_kind_is_an_error() {
+        let err = load_templates_kind("addon").expect_err("unknown kind must error");
+        assert!(
+            err.to_string().contains("addon"),
+            "the error should name the offending kind, got: {err}"
+        );
+    }
+
+    /// Every kind the scaffold CLI can produce must resolve to a non-empty
+    /// template set. `openapi-connector` is included because `gtdx openapi`
+    /// loads it directly, without going through `Kind`.
+    #[test]
+    fn every_scaffoldable_kind_resolves_to_files() {
+        // `openapi-connector` is appended explicitly: it bypasses `Kind` by
+        // design (`gtdx openapi` loads it directly), so it is not — and must
+        // not be — in `Kind::value_variants()`.
+        let mut kinds = all_kind_strs();
+        kinds.push("openapi-connector");
+        for kind in kinds {
+            let entries =
+                load_templates_kind(kind).unwrap_or_else(|e| panic!("{kind} must resolve: {e}"));
+            assert!(!entries.is_empty(), "{kind} resolved to zero files");
         }
     }
 }

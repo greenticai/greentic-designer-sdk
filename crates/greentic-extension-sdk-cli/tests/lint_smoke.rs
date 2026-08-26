@@ -9,8 +9,8 @@
 //!   `E_CAP_CYCLE` — extension requires a capability it itself offers
 //!   `W_DESCRIBE_DIFF_BREAKING` — current describe removes a tool/nodeType/
 //!                     offered capability vs the installed copy at
-//!                     `<home>/extensions/<kind>/<id>/describe.json` AND
-//!                     metadata.version unchanged (warning, exit zero)
+//!                     `<home>/extensions/<kind>/<id>-<version>/describe.json`
+//!                     AND metadata.version unchanged (warning, exit zero)
 
 use std::process::Command;
 
@@ -103,15 +103,19 @@ fn capability_self_cycle_fails_with_e_cap_cycle() {
 #[test]
 fn breaking_change_without_bump_warns_and_exits_zero() {
     // The breaking-change rule diffs against an installed describe under
-    // <home>/extensions/<kind>/<id>/describe.json. Build a synthetic home
-    // by copying the `installed` fixture into the right path, then point
-    // gtdx at the `current` fixture and pass --home.
+    // <home>/extensions/<kind>/<id>-<version>/describe.json (flat install
+    // layout — see registry/src/storage.rs::extension_dir). Build a
+    // synthetic home by copying the `installed` fixture into the right
+    // path, then point gtdx at the `current` fixture and pass --home. The
+    // installed fixture's metadata.version is "0.1.0".
     let gtdx = env!("CARGO_BIN_EXE_gtdx");
     let fixture_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/lint/breaking_no_bump");
 
     let home_tmp = tempfile::tempdir().expect("tempdir");
-    let installed_target = home_tmp.path().join("extensions/design/greentic.breaks");
+    let installed_target = home_tmp
+        .path()
+        .join("extensions/design/greentic.breaks-0.1.0");
     std::fs::create_dir_all(&installed_target).expect("mkdir installed target");
     std::fs::copy(
         fixture_root.join("installed/describe.json"),
