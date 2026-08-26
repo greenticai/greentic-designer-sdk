@@ -526,7 +526,8 @@ fn describe_with(views: serde_json::Value, tools: serde_json::Value) -> serde_js
                     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "world": "greentic:example/extension@1.0.0"
                 }
-            }
+            },
+            "permissions": { "network": [], "secrets": [], "callExtensionKinds": [] }
         },
         "contributions": { "views": views, "tools": tools }
     })
