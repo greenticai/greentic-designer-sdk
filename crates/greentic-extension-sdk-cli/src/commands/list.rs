@@ -143,6 +143,33 @@ mod tests {
         assert_eq!(super::kinds_for(KindArg::All), ExtensionKind::ALL.to_vec());
     }
 
+    /// `kind_arg_covers_every_extension_kind` only asserts every
+    /// `ExtensionKind` is *reachable* from some `KindArg`; it never checks
+    /// that the clap flag value (`#[value(name = "...")]`) equals the
+    /// on-disk directory name it claims to match. Renaming a `dir_name`
+    /// compiles and passes every other test while silently splitting the
+    /// CLI flag from the install directory it is supposed to select.
+    #[test]
+    fn kind_arg_value_name_matches_dir_name() {
+        for arg in KindArg::value_variants() {
+            let Some(kind) = arg.to_extension_kind() else {
+                continue; // `all` has no single dir_name to match.
+            };
+            let value_name = arg
+                .to_possible_value()
+                .expect("every non-skipped KindArg variant has a possible value")
+                .get_name()
+                .to_string();
+            assert_eq!(
+                value_name,
+                kind.dir_name(),
+                "KindArg::{arg:?}'s #[value(name = \"{value_name}\")] must equal \
+                 ExtensionKind::{kind:?}::dir_name() (\"{}\")",
+                kind.dir_name(),
+            );
+        }
+    }
+
     #[test]
     fn a_specific_kind_expands_to_just_that_kind() {
         assert_eq!(
