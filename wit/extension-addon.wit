@@ -5,12 +5,32 @@ package greentic:extension-addon@0.1.0;
 /// depending on each other — the shape `extension-provider.wit` already uses
 /// for its own `types` interface.
 interface types {
+  /// Identifies one resource an addon manages — the value
+  /// `contributions.addons[].id` declares in the catalogue (D18). Not any
+  /// string: every function below that takes a `resource-id` is being told
+  /// which cataloged addon it is operating on.
+  type resource-id = string;
+
   /// A value that may be a literal or a reference the platform resolves.
+  /// Same variant, two directions, and the direction — which interface a
+  /// `value-ref` travels through — is what disambiguates it. A value the
+  /// guest *returns* cannot point at something the guest already has, so
+  /// there is no ambiguity in practice, but say the two directions
+  /// explicitly so neither is later "fixed" into two variants:
   ///
-  /// `secret-ref` carries a secrets URI for `extension-host/secrets.get`.
-  /// This is how a sensitive value reaches an addon without ever appearing
-  /// in a plan document, a plan UI or a support bundle: the platform hands
-  /// over the reference, the guest fetches the value.
+  /// - **Passed to the guest** (`reconciler.binding.outputs`):
+  ///   `secret-ref` carries a secrets URI for `extension-host/secrets.get`.
+  ///   It is a POINTER to a value that already exists. This is how a
+  ///   sensitive value reaches an addon without ever appearing in a plan
+  ///   document, a plan UI or a support bundle: the platform hands over the
+  ///   reference, the guest fetches the value.
+  /// - **Returned by the guest** (`workload.container.env`): `secret-ref`
+  ///   carries a logical secret name, not a URI. It is a REQUEST — the
+  ///   guest is asking the platform to materialise a secret it needs (a
+  ///   `POSTGRES_PASSWORD` it cannot itself generate, since `render-workload`
+  ///   is pure). The platform materialises it — generating a value if none
+  ///   exists — before the workload runs, and injects the real value into
+  ///   the container's environment. The guest never sees it.
   variant value-ref {
     literal(string),
     secret-ref(string),
@@ -39,19 +59,19 @@ interface types {
 /// job; meaning needs code.
 interface validation {
   use greentic:extension-base/types@0.2.0.{diagnostic};
-  use types.{versioned-state};
+  use types.{resource-id, versioned-state};
 
   /// Returns `[]` when the config is usable. Diagnostic-only rather than
   /// `result<>`: there is no failure mode distinct from "here is what is
   /// wrong". Mirrors `bundling.validate-config`.
-  validate-config: func(resource-id: string, config-json: string) -> list<diagnostic>;
+  validate-config: func(resource-id: resource-id, config-json: string) -> list<diagnostic>;
 
   /// Takes `config-json` as well as the desired state. The most common thing
   /// wrong with desired state is disagreement with config — a collection's
   /// vector size against the model config selects — and without config the
   /// addon cannot check it, so the error surfaces at apply instead.
   validate-desired-state: func(
-    resource-id: string,
+    resource-id: resource-id,
     config-json: string,
     desired: versioned-state,
   ) -> list<diagnostic>;
@@ -62,7 +82,7 @@ interface validation {
 /// and bring-your-own-cloud placement.
 interface workload {
   use greentic:extension-base/types@0.2.0.{extension-error};
-  use types.{value-ref};
+  use types.{resource-id, value-ref};
 
   record port {
     name: string,
@@ -127,8 +147,13 @@ interface workload {
     /// generated `POSTGRES_PASSWORD`, say — cannot originate here as a
     /// literal: the addon can neither generate one (purity), nor embed one
     /// (that puts it in the plan document), nor self-reference one (a
-    /// cycle). It arrives instead as `value-ref::secret-ref`, which the
-    /// platform resolves before the container starts.
+    /// cycle). It arrives instead as `value-ref::secret-ref` — here, a
+    /// REQUEST naming the logical secret this workload needs, not a pointer
+    /// to one that already exists (contrast `reconciler.binding.outputs`,
+    /// where the guest receives rather than requests). The platform
+    /// resolves the request before the container starts — generating a
+    /// value if none exists — and injects the real value into the
+    /// container's environment. The guest never sees it.
     env: list<tuple<string, value-ref>>,
     ports: list<port>,
   }
@@ -166,7 +191,7 @@ interface workload {
   }
 
   /// PURE. No network, no side effects. Called at plan time and cacheable.
-  render-workload: func(resource-id: string, config-json: string)
+  render-workload: func(resource-id: resource-id, config-json: string)
     -> result<workload-spec, extension-error>;
 }
 
@@ -175,7 +200,7 @@ interface workload {
 /// state rather than remembering which step it was on.
 interface reconciler {
   use greentic:extension-base/types@0.2.0.{extension-error};
-  use types.{value-ref, versioned-state};
+  use types.{resource-id, value-ref, versioned-state};
 
   /// How to reach the live instance. Every value the addon needs in order to
   /// authenticate arrives here and nowhere else. Credentials never appear in
@@ -195,21 +220,37 @@ interface reconciler {
   /// retrofitted: day-2 config genuinely cannot be planned before the
   /// instance is reachable, and "I cannot plan this yet" must be a
   /// first-class answer rather than an error or a lie.
+  /// The CATEGORY of why no plan could be produced yet. Paired with
+  /// `deferred-detail.message`, which carries the SPECIFICS: this variant
+  /// says *what kind* of thing is missing, `message` says *which* one. That
+  /// division holds for the two built-in reasons too — `absent-prereq` and
+  /// `config-unknown` are the category, `message` names the specific
+  /// prerequisite or output.
   variant deferred-reason {
-    /// The instance is not up. Ask again after readiness.
+    /// The instance is not up. Ask again after readiness. `message` names
+    /// which prerequisite is missing.
     absent-prereq,
-    /// A referenced output is not resolved yet.
+    /// A referenced output is not resolved yet. `message` names which
+    /// output.
     config-unknown,
     /// Anything this contract version did not anticipate. Present because
     /// §7.4's argument against closed vocabularies for third-party-reported
     /// state applies here too.
+    ///
+    /// The payload is a short, stable CATEGORY token — `"quota-exhausted"`,
+    /// not `"quota exhausted for tenant acme, 4 of 4 collections used"` —
+    /// stable across occurrences so a platform can group and count by it.
+    /// The specifics for a human belong in `deferred-detail.message`, not
+    /// here.
     other(string),
   }
 
   record deferred-detail {
     reason: deferred-reason,
-    /// Names the specific thing that is missing — which output, which
-    /// prerequisite. `config-unknown` with no message is not actionable.
+    /// The SPECIFICS, for a human: which output is unresolved, which
+    /// prerequisite is missing. Free to vary on every occurrence, unlike
+    /// `reason`'s category. `config-unknown` with an empty message is not
+    /// actionable, which is why this field is not optional.
     message: string,
   }
 
@@ -270,18 +311,18 @@ interface reconciler {
   /// intent will reconcile toward it, and drift detection becomes
   /// unfalsifiable. Terraform withholds config from `ReadResource` for the
   /// same reason.
-  observe: func(resource-id: string, binding: binding)
+  observe: func(resource-id: resource-id, binding: binding)
     -> result<versioned-state, extension-error>;
 
   /// PURE. No network, no side effects.
   plan: func(
-    resource-id: string,
+    resource-id: resource-id,
     current: versioned-state,
     desired: versioned-state,
   ) -> result<plan-outcome, extension-error>;
 
   apply: func(
-    resource-id: string,
+    resource-id: resource-id,
     binding: binding,
     current: versioned-state,
     planned: versioned-state,
@@ -297,6 +338,7 @@ interface reconciler {
 /// happened yet". Modelling it as desired state would make it diff forever.
 interface backup {
   use greentic:extension-base/types@0.2.0.{extension-error};
+  use types.{resource-id};
   use reconciler.{binding};
 
   record backup-handle {
@@ -311,18 +353,18 @@ interface backup {
 
   /// Snapshot before a destructive change. The PLATFORM calls this; an author
   /// never schedules it.
-  backup: func(resource-id: string, binding: binding)
+  backup: func(resource-id: resource-id, binding: binding)
     -> result<backup-handle, extension-error>;
 
   /// Destructive by definition. The platform gates it the way it gates a
   /// `requires-replace` path.
-  restore: func(resource-id: string, binding: binding, handle: backup-handle)
+  restore: func(resource-id: resource-id, binding: binding, handle: backup-handle)
     -> result<_, extension-error>;
 
   /// Release a snapshot this addon produced. Without this, pre-destroy
   /// snapshots accumulate forever: they are platform-initiated, so by D19
   /// they have no desired state and no reconcile reclaims them.
-  delete-backup: func(resource-id: string, binding: binding, handle: backup-handle)
+  delete-backup: func(resource-id: resource-id, binding: binding, handle: backup-handle)
     -> result<_, extension-error>;
 }
 
