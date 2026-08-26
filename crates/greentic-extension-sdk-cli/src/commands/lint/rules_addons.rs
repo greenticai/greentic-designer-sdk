@@ -155,9 +155,16 @@ fn looks_like_a_secret(property: &str) -> bool {
 /// object, at any depth reachable through `properties`, `items`, `$defs`,
 /// `definitions`, `patternProperties`, `additionalProperties`, `allOf`,
 /// `anyOf`, `oneOf`. `path` accumulates a human-readable pointer through
-/// `properties`/`items` nesting only (`acl_users[].password`), not through
-/// schema-composition keywords (`$defs`, `allOf`, ...), since those don't
-/// correspond to a position in the *data* shape.
+/// `properties`/`items` nesting (`acl_users[].password`) and most
+/// schema-composition keywords add nothing (`allOf`, `anyOf`, `oneOf`,
+/// `patternProperties` all pass `path` through unchanged, since they don't
+/// correspond to a position of their own in the *data* shape). `$defs` and
+/// `definitions` are the exception: a def has no data position at all, since
+/// it is reachable only through a `$ref` this walk deliberately never
+/// resolves. So instead of passing `path` through, they insert a
+/// `$defs/<name>` (or `definitions/<name>`) marker, keeping the reported
+/// path honest about being a definition rather than implying a data
+/// position that may not exist.
 ///
 /// Only names appearing as property keys are ever candidates: the keys of
 /// `patternProperties` are regexes, not property names, and the keys of
@@ -232,14 +239,46 @@ fn walk_schema_properties(
         }
     }
 
-    // `$defs`/`definitions` keys are def names, and `patternProperties` keys
-    // are regexes - neither names a property, so `path` passes through
-    // unchanged and only the values are walked.
-    for key in ["$defs", "definitions", "patternProperties"] {
-        if let Some(map) = obj.get(key).and_then(|v| v.as_object()) {
-            for subschema in map.values() {
-                walk_schema_properties(subschema, path, on_property);
-            }
+    // `$defs`/`definitions` keys are def names, not property names, so they
+    // are never passed to `on_property` - but unlike every other keyword
+    // walked here, a def is not inlined at `path`: it is only ever reached
+    // through a `$ref` this walk deliberately never resolves (see the
+    // "unbounded recursion" note above), so it has no data position at all.
+    // Passing `path` through unchanged would report a violation at, e.g.,
+    // `foo.password` when the def sits under `properties.foo.$defs` - a
+    // position that does not exist in the addon's actual desired state and
+    // would send the author looking in the wrong place. Insert a `$defs/
+    // <name>` marker instead, so the reported path is honest about being a
+    // definition rather than data.
+    if let Some(map) = obj.get("$defs").and_then(|v| v.as_object()) {
+        for (name, subschema) in map {
+            let def_path = if path.is_empty() {
+                format!("$defs/{name}")
+            } else {
+                format!("{path}.$defs/{name}")
+            };
+            walk_schema_properties(subschema, &def_path, on_property);
+        }
+    }
+    if let Some(map) = obj.get("definitions").and_then(|v| v.as_object()) {
+        for (name, subschema) in map {
+            let def_path = if path.is_empty() {
+                format!("definitions/{name}")
+            } else {
+                format!("{path}.definitions/{name}")
+            };
+            walk_schema_properties(subschema, &def_path, on_property);
+        }
+    }
+
+    // `patternProperties` keys are regexes, not property names, so `path`
+    // passes through unchanged and only the values are walked. Unlike
+    // `$defs`/`definitions`, a `patternProperties` value schema *is* inlined
+    // at the parent's data position - it is just that the specific matching
+    // key is unknown - so no marker is needed here.
+    if let Some(map) = obj.get("patternProperties").and_then(|v| v.as_object()) {
+        for subschema in map.values() {
+            walk_schema_properties(subschema, path, on_property);
         }
     }
 

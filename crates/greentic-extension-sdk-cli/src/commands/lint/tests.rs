@@ -1113,6 +1113,56 @@ fn a_secret_inside_an_all_of_branch_is_caught() {
     );
 }
 
+/// A `$defs` nested under a real data position must not report a path that
+/// looks like it lives there. `foo.password` would send the author looking
+/// for a `password` property directly under `foo`, when none exists - the
+/// `password` here only exists inside a definition, reachable (if at all)
+/// through a `$ref` this walk never resolves.
+#[test]
+fn a_secret_inside_nested_defs_reports_a_defs_marker_not_a_fake_data_path() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"foo":{"type":"object",
+            "$defs":{"credentials":{"type":"object",
+                "properties":{"password":{"type":"string"}}}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("foo.$defs/credentials.password"),
+        "path should carry a $defs marker rather than a fake data position: {hit:?}"
+    );
+    assert!(
+        !hit.message.contains("\"foo.password\""),
+        "must not report the nonexistent data position foo.password: {hit:?}"
+    );
+}
+
+/// The same fix at the root: `$defs` there already had a usable path before
+/// this change (a bare `password`), but the marker format must still apply
+/// consistently rather than only kicking in once nesting is involved.
+#[test]
+fn a_secret_inside_root_defs_also_carries_the_defs_marker() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r##"{"type":"object","$defs":{"credentials":{"type":"object",
+            "properties":{"password":{"type":"string"}}}},
+            "properties":{"admin":{"$ref":"#/$defs/credentials"}}}"##
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("$defs/credentials.password"),
+        "path should carry the $defs marker: {hit:?}"
+    );
+}
+
 /// A JSON Schema may legally have a property literally named `properties`.
 /// The keyword itself must never be treated as a candidate name - only
 /// values that appear as a key *inside* a `properties` map are.
