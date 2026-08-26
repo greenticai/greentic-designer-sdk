@@ -29,10 +29,24 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.10 or newer.** It is the first release where a decode failure says
-what actually went wrong. `gtdx install` against a store serving a newer
-describe used to fail with reqwest's `error decoding response body` — no
-field, no position, no endpoint — which reads as a network fault. The real
+**Use 1.2.10 or newer.** Two things landed in it.
+
+It is the first release where an extension can contribute a page, not just
+parts of one: `contributions.views[]` ships an author's own HTML, JS and CSS
+inside the pack, and `gtdx new --with-view` scaffolds a working example. No
+host renders views yet — the Designer and the Admin console land separately —
+so a view-bearing extension declares, lints, validates and packs today, and
+displays once the hosts catch up. Read
+[docs/authoring-views.md](docs/authoring-views.md) before publishing one:
+`Contributions` is `deny_unknown_fields`, so a `views` key makes the whole
+describe unparseable to every designer released so far, and
+`min_designer_version` cannot yet say so.
+
+That is the same mechanism behind the release's second change. It is also the
+first release where a decode failure says what actually went wrong. `gtdx
+install` against a store serving a newer describe used to fail with reqwest's
+`error decoding response body` — no field, no position, no endpoint — which
+reads as a network fault. The real
 cause is a version skew: `DescribeJson`'s nested types are
 `deny_unknown_fields`, so one unrecognised field fails the whole parse. The
 message now names the endpoint, the field, and the fix.
