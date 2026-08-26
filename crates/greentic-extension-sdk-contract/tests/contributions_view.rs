@@ -58,7 +58,11 @@ fn minimal_view_parses_and_stays_minimal() {
         "placement": { "slot": "designer.sidebar" }
     });
     let v: View = serde_json::from_value(minimal.clone()).expect("parses");
-    assert_eq!(v.min_visibility, Visibility::Member, "default floor is member");
+    assert_eq!(
+        v.min_visibility,
+        Visibility::Member,
+        "default floor is member"
+    );
     assert!(v.icon.is_none());
     assert!(v.tools.is_empty());
     assert!(v.placement.path.is_empty());
