@@ -190,7 +190,8 @@
             "properties": {
               "id": {
                 "description": "Unique within the extension. The platform namespaces it as `<extension_id>/<id>`.",
-                "type": "string"
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
               },
               "family": {
                 "description": "What kind of thing this is - `vector-db`, `cache`, `sql`. A flow asks for the family, not the vendor, so a deployment can substitute one implementation for another. An open string on purpose: describe.json is signed and immutable once published, so a closed enum in it rots. `gtdx lint` warns on an unfamiliar family instead.",
@@ -217,7 +218,8 @@
                   "properties": {
                     "name": {
                       "description": "Referenced as `${resources.<id>.outputs.<name>}`. `gtdx lint` constrains this to characters that survive becoming an environment variable, because that is what the platform does with it.",
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
                     },
                     "type": {
                       "description": "Scalar only. An output is interpolated into another resource's configuration, where a structured value has no meaningful rendering; an addon wanting structure exposes several outputs.",

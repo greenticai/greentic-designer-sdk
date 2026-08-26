@@ -134,6 +134,49 @@ fn an_unknown_addon_field_is_rejected() {
     );
 }
 
+/// The schema is the layer that gates `gtdx publish`, install, signature
+/// verification and OCI pull — `gtdx lint` is opt-in and nothing invokes it
+/// automatically. An id the lint rejects (`E_ADDON_ID_PATTERN`) must be
+/// rejected here too, or it sails through every enforced call site and only
+/// becomes ambiguous once namespaced to `<extension_id>/<id>`.
+#[test]
+fn an_addon_id_that_the_lint_rejects_is_also_rejected_by_the_schema() {
+    let d = describe_with_addons(
+        r#"[{
+            "id": "Qdrant/Primary",
+            "family": "vector-db",
+            "display_name": "Qdrant",
+            "description": "Vector database.",
+            "config_schema": "{\"type\":\"object\"}",
+            "desired_state_schema": "{\"type\":\"object\"}"
+        }]"#,
+    );
+    assert!(
+        validate(&d).is_err(),
+        "an id containing '/' and uppercase must be rejected by the schema"
+    );
+}
+
+/// Same dual-enforcement requirement as the id, for `outputs[].name`.
+#[test]
+fn an_addon_output_name_that_the_lint_rejects_is_also_rejected_by_the_schema() {
+    let d = describe_with_addons(
+        r#"[{
+            "id": "qdrant",
+            "family": "vector-db",
+            "display_name": "Qdrant",
+            "description": "Vector database.",
+            "config_schema": "{\"type\":\"object\"}",
+            "desired_state_schema": "{\"type\":\"object\"}",
+            "outputs": [{ "name": "qdrant-url", "type": "text" }]
+        }]"#,
+    );
+    assert!(
+        validate(&d).is_err(),
+        "an output name with a hyphen must be rejected by the schema"
+    );
+}
+
 #[test]
 fn an_unknown_output_type_is_rejected() {
     let d = describe_with_addons(
