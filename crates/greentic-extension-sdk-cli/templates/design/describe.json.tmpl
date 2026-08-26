@@ -45,7 +45,8 @@
       {
         "export": "greentic:extension-design/tools.invoke-tool",
         "name": "echo",
-        "runtime_ref": "{{runtime_ref_key}}"
+        "runtime_ref": "{{runtime_ref_key}}",
+        "input_schema": "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"title\":\"Message\"}},\"required\":[\"message\"]}"
       }
     ]
   }
