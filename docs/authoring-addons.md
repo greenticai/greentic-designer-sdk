@@ -84,7 +84,13 @@ spec §9.3 names as the first one built.
   know about. `gtdx lint` warns rather than errors on an unfamiliar family —
   see `W_ADDON_FAMILY_UNKNOWN` below.
 
-- **`display_name`**, **`description`** — presentation only.
+- **`display_name`**, **`description`** — presentation only. These render in
+  the Designer's catalogue, the most user-facing surface an addon appears on,
+  but they are plain `String` today, unlike `Recipe.display_name` and
+  `NodeType.label` (`LocalizedString`) or `View.title_key`/`title_fallback`.
+  Addon catalogue strings are not localizable yet; expect that to change.
+  `LocalizedString` deserializes a bare string transparently, so the switch
+  will be wire-compatible in both directions when it happens.
 
 - **`icon`** — optional, presentation only. A **host-resolved icon name**,
   matching `View.icon` — not a file path. The host looks the name up in its
