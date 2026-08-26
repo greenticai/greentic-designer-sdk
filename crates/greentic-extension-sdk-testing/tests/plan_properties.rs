@@ -58,12 +58,64 @@ fn a_no_op_plan_that_requires_replace_fails() {
 
 /// `deferred` is a legitimate answer, but not to `plan(x, x)`: nothing is
 /// missing when current and desired already agree.
+/// B3: an unparseable `planned_json` used to surface twice — once from the
+/// "removed" direction, once from "added" — each carrying a leading space
+/// from the empty pointer path. It must now be reported once.
+#[test]
+fn an_unparseable_planned_json_is_reported_once_not_twice() {
+    let broken = |_c: &str, _d: &str| {
+        Some(PlanResult {
+            planned_json: "{not json".to_string(),
+            requires_replace: Vec::new(),
+        })
+    };
+    let err =
+        assert_plan_idempotent(r#"{"a":1}"#, broken).expect_err("unparseable plan output fails");
+    let occurrences = err.matches("not valid JSON").count();
+    assert_eq!(
+        occurrences, 1,
+        "the parse failure must be reported once, not once per direction: {err}"
+    );
+}
+
 #[test]
 fn deferring_an_identity_plan_fails() {
     let deferring = |_c: &str, _d: &str| None;
     let err = assert_plan_idempotent(r#"{"a":1}"#, deferring)
         .expect_err("deferring an identity plan must fail");
     assert!(err.contains("deferred"), "got: {err}");
+}
+
+/// B1: the addon adds an empty `opts: {}` container on every plan, an
+/// ordinary way to write "normalize an absent key to `{}`". Before the
+/// `walk` fix, an empty object was never compared to anything and this
+/// churn was invisible.
+#[test]
+fn a_plan_that_adds_an_empty_container_every_time_fails() {
+    let adds_empty_container = |_c: &str, _d: &str| {
+        Some(PlanResult {
+            planned_json: r#"{"a":1,"opts":{}}"#.to_string(),
+            requires_replace: Vec::new(),
+        })
+    };
+    let err = assert_plan_idempotent(r#"{"a":1}"#, adds_empty_container)
+        .expect_err("adding an empty container on every plan is churn");
+    assert!(err.contains("opts"), "the message should name it: {err}");
+}
+
+/// The mirror image: the addon drops an empty `opts: {}` container on every
+/// plan.
+#[test]
+fn a_plan_that_drops_an_empty_container_every_time_fails() {
+    let drops_empty_container = |_c: &str, _d: &str| {
+        Some(PlanResult {
+            planned_json: r#"{"a":1}"#.to_string(),
+            requires_replace: Vec::new(),
+        })
+    };
+    let err = assert_plan_idempotent(r#"{"a":1,"opts":{}}"#, drops_empty_container)
+        .expect_err("dropping an empty container on every plan is churn");
+    assert!(err.contains("opts"), "the message should name it: {err}");
 }
 
 #[test]
