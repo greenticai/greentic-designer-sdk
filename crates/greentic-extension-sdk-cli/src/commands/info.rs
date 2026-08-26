@@ -38,13 +38,9 @@ fn find_installed(
     name: &str,
     version: Option<&str>,
 ) -> anyhow::Result<Option<(ExtensionKind, DescribeJson)>> {
-    let all_kinds = [
-        ExtensionKind::Design,
-        ExtensionKind::Bundle,
-        ExtensionKind::Deploy,
-        ExtensionKind::Provider,
-        ExtensionKind::WasixMcpRouter,
-    ];
+    // Derived, not hand-listed: a kind missing from this sweep makes
+    // `gtdx info` report an installed extension as absent.
+    let all_kinds = ExtensionKind::ALL;
 
     let mut candidates: Vec<(ExtensionKind, semver::Version, DescribeJson)> = Vec::new();
 

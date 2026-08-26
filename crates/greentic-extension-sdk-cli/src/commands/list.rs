@@ -33,6 +33,15 @@ impl KindArg {
     }
 }
 
+/// Expand the `--kind` argument into the set of kinds to sweep.
+///
+/// `All` derives from `ExtensionKind::ALL`; it used to be a hand-written vec,
+/// which is the same pattern that left `gtdx search` unable to see providers.
+fn kinds_for(arg: KindArg) -> Vec<ExtensionKind> {
+    arg.to_extension_kind()
+        .map_or_else(|| ExtensionKind::ALL.to_vec(), |kind| vec![kind])
+}
+
 #[derive(ClapArgs, Debug, Copy, Clone)]
 pub struct Args {
     #[arg(long, value_enum, default_value_t = KindArg::All)]
@@ -45,17 +54,7 @@ pub struct Args {
 pub fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     let storage = Storage::new(home);
 
-    let kinds: Vec<ExtensionKind> = if let Some(kind) = args.kind.to_extension_kind() {
-        vec![kind]
-    } else {
-        vec![
-            ExtensionKind::Design,
-            ExtensionKind::Bundle,
-            ExtensionKind::Deploy,
-            ExtensionKind::Provider,
-            ExtensionKind::WasixMcpRouter,
-        ]
-    };
+    let kinds: Vec<ExtensionKind> = kinds_for(args.kind);
 
     let state = if args.status {
         Some(greentic_extension_sdk_state::ExtensionState::load(home).unwrap_or_default())
@@ -109,4 +108,46 @@ pub fn run(args: Args, home: &Path) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KindArg;
+    use clap::ValueEnum;
+    use greentic_extension_sdk_contract::ExtensionKind;
+
+    /// `KindArg` must stay hand-written because clap needs literal variants,
+    /// so it cannot derive from `ExtensionKind::ALL`. This test is the
+    /// substitute: every kind must be reachable from the CLI, or a kind
+    /// exists that `gtdx list --kind` cannot name.
+    #[test]
+    fn kind_arg_covers_every_extension_kind() {
+        let reachable: Vec<ExtensionKind> = KindArg::value_variants()
+            .iter()
+            .filter_map(|k| k.to_extension_kind())
+            .collect();
+
+        for kind in ExtensionKind::ALL {
+            assert!(
+                reachable.contains(&kind),
+                "no KindArg variant maps to {kind:?} — add one, with \
+                 #[value(name = \"{}\")]",
+                kind.dir_name()
+            );
+        }
+    }
+
+    /// The `--kind all` branch must sweep every kind, not a frozen list.
+    #[test]
+    fn all_expands_to_every_kind() {
+        assert_eq!(super::kinds_for(KindArg::All), ExtensionKind::ALL.to_vec());
+    }
+
+    #[test]
+    fn a_specific_kind_expands_to_just_that_kind() {
+        assert_eq!(
+            super::kinds_for(KindArg::Provider),
+            vec![ExtensionKind::Provider]
+        );
+    }
 }
