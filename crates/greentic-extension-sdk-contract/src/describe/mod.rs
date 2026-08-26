@@ -114,8 +114,10 @@ struct DescribeJsonRaw {
 /// duplicate makes one of the two unaddressable. Outputs are addressed by
 /// name from other resources' bindings, so a duplicate means
 /// `${resources.x.outputs.url}` resolves to whichever entry the platform saw
-/// last. A schema that is not JSON renders as an empty form with no error —
-/// the worst place to discover the typo. And `schema_version` is `u32` in
+/// last. A schema that is not JSON — or that parses as JSON but isn't a JSON
+/// *object* (`"42"`, `"null"`) — renders as an empty form with no error, the
+/// worst place to discover the typo; both are rejected here. And
+/// `schema_version` is `u32` in
 /// the struct but `"minimum": 1` in `describe-v2.json`; reject `0` here so
 /// the two layers agree instead of the schema silently being the stricter
 /// one.
@@ -150,11 +152,21 @@ fn validate_addons(addons: &[contributions::Addon]) -> Result<(), String> {
             ("config_schema", &addon.config_schema),
             ("desired_state_schema", &addon.desired_state_schema),
         ] {
-            if serde_json::from_str::<serde_json::Value>(text).is_err() {
-                return Err(format!(
-                    "addon {:?} has a {field} that is not valid JSON",
-                    addon.id
-                ));
+            match serde_json::from_str::<serde_json::Value>(text) {
+                Ok(serde_json::Value::Object(_)) => {}
+                Ok(_) => {
+                    return Err(format!(
+                        "addon {:?} has a {field} that parses as JSON but is not a JSON \
+                         object - a JSON Schema for a form must be an object",
+                        addon.id
+                    ));
+                }
+                Err(_) => {
+                    return Err(format!(
+                        "addon {:?} has a {field} that is not valid JSON",
+                        addon.id
+                    ));
+                }
             }
         }
     }

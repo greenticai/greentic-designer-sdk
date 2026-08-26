@@ -165,3 +165,34 @@ fn a_desired_state_schema_that_is_not_json_is_rejected() {
         "error should name the field: {err}"
     );
 }
+
+/// `"42"` is valid JSON but not a JSON *object* - the same "renders as an
+/// empty form with no error" rationale that rejects non-JSON applies to it
+/// verbatim, so it must be rejected too, not just accepted because
+/// `serde_json::from_str` succeeds.
+#[test]
+fn a_config_schema_that_is_json_but_not_an_object_is_rejected() {
+    let mut a = addon("qdrant", &serde_json::json!([]));
+    a["config_schema"] = serde_json::json!("42");
+    let d = describe_with(&serde_json::json!([a]));
+    let err = parse(d).expect_err("a bare JSON number must be rejected as config_schema");
+    assert!(
+        err.to_string().contains("config_schema"),
+        "error should name the field: {err}"
+    );
+}
+
+/// `"null"` is the sharper case: it currently makes the lint's secret rule
+/// silently no-op (nothing to walk), which is a worse failure mode than an
+/// empty form.
+#[test]
+fn a_desired_state_schema_of_null_is_rejected() {
+    let mut a = addon("qdrant", &serde_json::json!([]));
+    a["desired_state_schema"] = serde_json::json!("null");
+    let d = describe_with(&serde_json::json!([a]));
+    let err = parse(d).expect_err("a bare JSON null must be rejected as desired_state_schema");
+    assert!(
+        err.to_string().contains("desired_state_schema"),
+        "error should name the field: {err}"
+    );
+}
