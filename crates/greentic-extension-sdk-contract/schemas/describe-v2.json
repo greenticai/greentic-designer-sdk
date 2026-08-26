@@ -153,9 +153,19 @@
                 "additionalProperties": false,
                 "required": ["slot"],
                 "properties": {
-                  "slot": { "type": "string" },
-                  "path": { "type": "array", "items": { "type": "string" } },
-                  "order": { "type": "integer" }
+                  "slot": {
+                    "description": "Host-defined mount point naming where the view appears, e.g. `designer.sidebar`, `admin.sidebar`, `admin.tenantDetail`. Free string rather than an enum because the hosts' navigation changes with the product while a published describe is signed and immutable; `gtdx lint` warns on an unknown slot rather than erroring, and a host that cannot resolve a slot mounts the view under an \"Extensions\" section with a diagnostic rather than dropping it.",
+                    "type": "string"
+                  },
+                  "path": {
+                    "description": "The section/group path beneath the slot, e.g. `[\"Governance\"]` or `[\"access\", \"teams\"]`. Empty or absent means the top level of the slot.",
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "order": {
+                    "description": "Sort hint among siblings under the same parent. Hosts break ties by extension id then view id, so ordering stays total and stable even when two extensions pick the same number.",
+                    "type": "integer"
+                  }
                 }
               },
               "min_visibility": {
@@ -479,8 +489,14 @@
                     "additionalProperties": false,
                     "required": ["method", "path_pattern"],
                     "properties": {
-                      "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
-                      "path_pattern": { "type": "string" }
+                      "method": {
+                        "description": "HTTP method of the grant. Constrained here rather than by a Rust enum so a describe naming a method the current SDK does not know still round-trips instead of failing the whole parse.",
+                        "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                      },
+                      "path_pattern": {
+                        "description": "The platform endpoint path this grant covers, e.g. `/api/flows` or `/api/admin/tenants/*`. The host intersects the grant with the calling user's own RBAC, so it can only narrow what that user could already do by hand, never widen it.",
+                        "type": "string"
+                      }
                     }
                   }
                 }
