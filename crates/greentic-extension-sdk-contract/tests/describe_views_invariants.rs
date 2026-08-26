@@ -4,7 +4,7 @@
 
 use greentic_extension_sdk_contract::describe::DescribeJson;
 
-fn describe_with(views: serde_json::Value, tools: serde_json::Value) -> serde_json::Value {
+fn describe_with(views: &serde_json::Value, tools: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "apiVersion": "greentic.ai/v2",
         "kind": "DesignExtension",
@@ -41,7 +41,7 @@ fn describe_with(views: serde_json::Value, tools: serde_json::Value) -> serde_js
     })
 }
 
-fn view(id: &str, tools: serde_json::Value) -> serde_json::Value {
+fn view(id: &str, tools: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "id": id,
         "surface": "designer",
@@ -64,8 +64,8 @@ fn tool(name: &str) -> serde_json::Value {
 #[test]
 fn valid_views_accepted() {
     let d = describe_with(
-        serde_json::json!([view("a", serde_json::json!(["fetch_usage"]))]),
-        serde_json::json!([tool("fetch_usage")]),
+        &serde_json::json!([view("a", &serde_json::json!(["fetch_usage"]))]),
+        &serde_json::json!([tool("fetch_usage")]),
     );
     let parsed: DescribeJson = serde_json::from_value(d).expect("parses");
     assert_eq!(parsed.contributions.views.len(), 1);
@@ -74,23 +74,30 @@ fn valid_views_accepted() {
 #[test]
 fn duplicate_view_id_rejected() {
     let d = describe_with(
-        serde_json::json!([
-            view("dash", serde_json::json!([])),
-            view("dash", serde_json::json!([]))
+        &serde_json::json!([
+            view("dash", &serde_json::json!([])),
+            view("dash", &serde_json::json!([]))
         ]),
-        serde_json::json!([]),
+        &serde_json::json!([]),
     );
-    let err = serde_json::from_value::<DescribeJson>(d).unwrap_err().to_string();
-    assert!(err.contains("dash"), "the duplicate id should be named: {err}");
+    let err = serde_json::from_value::<DescribeJson>(d)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("dash"),
+        "the duplicate id should be named: {err}"
+    );
 }
 
 #[test]
 fn view_naming_an_undeclared_tool_rejected() {
     let d = describe_with(
-        serde_json::json!([view("dash", serde_json::json!(["ghost_tool"]))]),
-        serde_json::json!([tool("fetch_usage")]),
+        &serde_json::json!([view("dash", &serde_json::json!(["ghost_tool"]))]),
+        &serde_json::json!([tool("fetch_usage")]),
     );
-    let err = serde_json::from_value::<DescribeJson>(d).unwrap_err().to_string();
+    let err = serde_json::from_value::<DescribeJson>(d)
+        .unwrap_err()
+        .to_string();
     assert!(
         err.contains("ghost_tool"),
         "the dangling tool should be named: {err}"

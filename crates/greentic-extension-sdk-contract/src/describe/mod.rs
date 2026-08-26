@@ -338,11 +338,7 @@ pub struct UiPermissions {
     /// Platform REST endpoints a view may call through the bridge. The host
     /// intersects this with the calling user's own RBAC, so the list can only
     /// ever narrow what that user could already do by hand.
-    #[serde(
-        rename = "platformApi",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(rename = "platformApi", default, skip_serializing_if = "Vec::is_empty")]
     pub platform_api: Vec<ApiGrant>,
 }
 
