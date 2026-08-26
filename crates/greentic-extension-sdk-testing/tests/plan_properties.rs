@@ -56,8 +56,6 @@ fn a_no_op_plan_that_requires_replace_fails() {
     assert!(err.contains("requires-replace"), "got: {err}");
 }
 
-/// `deferred` is a legitimate answer, but not to `plan(x, x)`: nothing is
-/// missing when current and desired already agree.
 /// B3: an unparseable `planned_json` used to surface twice — once from the
 /// "removed" direction, once from "added" — each carrying a leading space
 /// from the empty pointer path. It must now be reported once.
@@ -78,6 +76,8 @@ fn an_unparseable_planned_json_is_reported_once_not_twice() {
     );
 }
 
+/// `deferred` is a legitimate answer, but not to `plan(x, x)`: nothing is
+/// missing when current and desired already agree.
 #[test]
 fn deferring_an_identity_plan_fails() {
     let deferring = |_c: &str, _d: &str| None;

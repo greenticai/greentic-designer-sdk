@@ -81,13 +81,15 @@ spec §9.3 names as the first one built.
   paths, while `gtdx lint` is opt-in.
 
 - **`family`** — what kind of thing this is, e.g. `vector-db`, not which
-  vendor. A flow that needs a vector database asks for the family, so a
-  deployment can substitute one implementation for another. It's an open
-  string, not a closed enum, for the same reason a view's `slot` is open:
-  `describe.json` is signed and immutable once published, so a closed enum
-  baked into it rots the moment the platform adds a family this SDK didn't
-  know about. `gtdx lint` warns rather than errors on an unfamiliar family —
-  see `W_ADDON_FAMILY_UNKNOWN` below.
+  vendor. A catalogue grouping label a flow author can browse or filter by —
+  not a substitutability guarantee: two addons sharing a family are not
+  promised compatible outputs, so this field alone is not a basis for
+  automatically swapping one for the other (spec D20 withdrew that claim).
+  It's an open string, not a closed enum, for the same reason a view's `slot`
+  is open: `describe.json` is signed and immutable once published, so a
+  closed enum baked into it rots the moment the platform adds a family this
+  SDK didn't know about. `gtdx lint` warns rather than errors on an
+  unfamiliar family — see `W_ADDON_FAMILY_UNKNOWN` below.
 
 - **`display_name`**, **`description`** — presentation only. These render in
   the Designer's catalogue, the most user-facing surface an addon appears on,

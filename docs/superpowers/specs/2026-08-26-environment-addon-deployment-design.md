@@ -548,9 +548,11 @@ read, not a boolean the addon asserts.
 This is also the provisioner lesson in contract form: an imperative payload the
 system cannot model is precisely what HashiCorp regrets shipping (§5.5).
 
-**`apply` returns the state it reached**, and the host asserts compatibility
-with the plan (D11). Without that assertion the plan is a dry run — a
-suggestion, not a contract.
+**`apply` returns the state it reached**, and when it reports `outcome:
+applied`, the host asserts compatibility with the plan (D11). A
+`failed-retryable` or `failed-terminal` report is not held to that assertion
+— by definition it did not reach the planned state. Without the assertion,
+the plan is a dry run — a suggestion, not a contract.
 
 **`failed-retryable` vs `failed-terminal`** is the addon's call. A connection
 reset and a schema violation are different classes and the platform cannot
@@ -893,7 +895,7 @@ Ship in `greentic-extension-sdk-testing` so every addon inherits it:
 
   ```rust
   if report.outcome == Outcome::Applied {
-      assert_apply_consistent(&planned_json, &report.observed_json)?;
+      assert_apply_consistent(&planned_json, &report.observed.json)?;
   }
   ```
 
