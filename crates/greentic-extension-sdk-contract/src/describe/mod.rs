@@ -286,6 +286,44 @@ pub struct Permissions {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub oauth_providers: Vec<String>,
+    /// What a contributed `contributions.views[]` page may reach. Absent means
+    /// the extension contributes no view, or contributes one that only renders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<UiPermissions>,
+}
+
+/// Grants that apply to browser-executed view code, not to the WASM guest.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiPermissions {
+    /// Hosts a view may reach through the host's server-side proxy. The view
+    /// never issues these itself: an iframe without `allow-same-origin` sends
+    /// `Origin: null`, which most third-party APIs reject at CORS, and
+    /// proxying keeps any credential on the server. Validated exactly like
+    /// `permissions.network` — https only, loopback and link-local rejected.
+    #[serde(rename = "fetchHosts", default, skip_serializing_if = "Vec::is_empty")]
+    pub fetch_hosts: Vec<String>,
+    /// Platform REST endpoints a view may call through the bridge. The host
+    /// intersects this with the calling user's own RBAC, so the list can only
+    /// ever narrow what that user could already do by hand.
+    #[serde(
+        rename = "platformApi",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub platform_api: Vec<ApiGrant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApiGrant {
+    /// `GET`, `POST`, `PUT`, `PATCH` or `DELETE`. Constrained by the JSON
+    /// Schema rather than by a Rust enum, so a describe naming a method this
+    /// crate version does not know still round-trips instead of failing the
+    /// whole parse.
+    pub method: String,
+    /// Path pattern, e.g. `/api/flows` or `/api/admin/tenants/*`.
+    pub path_pattern: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
