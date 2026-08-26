@@ -1,0 +1,21 @@
+// Example view for {{name}}. Replace this with your own page.
+(async function () {
+  const status = document.getElementById("status");
+  const output = document.getElementById("output");
+
+  const init = await window.greentic.ready;
+  status.textContent =
+    "Connected — surface " + init.surface + ", locale " + init.locale + ".";
+  window.greentic.resize(document.body.scrollHeight);
+
+  document.getElementById("ping").addEventListener("click", async () => {
+    try {
+      const result = await window.greentic.invokeTool("echo", { message: "hello" });
+      output.textContent = JSON.stringify(result, null, 2);
+    } catch (err) {
+      output.textContent = "Tool call failed: " + err.message;
+      window.greentic.toast("error", err.message);
+    }
+    window.greentic.resize(document.body.scrollHeight);
+  });
+})();
