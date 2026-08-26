@@ -71,6 +71,10 @@ know whether a changed circumstance invalidates it.
 | D15 | An `AddonExtension` **may** contribute `node_types`, and only node types, and only ones bound to a resource it declares. | Question §11.1, decided. An addon that provisions Qdrant should be able to contribute a "Qdrant search" node. The alternative — every addon needing a paired design extension to be useful from a flow — is worse for authors and creates two artifacts that must be versioned together. Restricting it to node types bound to its own resources keeps the coupling one-directional. |
 | D16 | Secrets are **excluded from `desired-state` entirely** and injected through `binding`. | Question §11.5, decided. A password inside desired state can never be read back by `observe`, so it diffs forever and no plan is ever clean. Terraform needed a protocol capability flag plus a dedicated plan-time check to survive this; `rediscloud_acl_user` sidesteps it by forcing replacement on every password change. We can simply not have the problem: `desired-state` describes shape, `binding` carries credentials. |
 | D17 | v0.1.0 ships `observe` / `plan` / `apply`, plus `validate-*` and a **`schema-version` on `resource-spec`**. Import and move are deferred. | Question §11.6, decided. Of the RPCs Terraform needed beyond the core three, exactly one is certain to bite us early: schema migration, when an addon's v2 changes its `desired-state-schema` under instances already running v1. That gets a version field now. Import (adopting a resource created outside the platform) and move (rename without destroy/recreate) are recoverable by hand at this scale and can be added additively. |
+| D18 | There is **no `list-resources`**. `contributions.addons` is the only place an addon's resources are declared; the WIT takes a `resource-id` the catalogue already names. | The catalogue shipped in 1.2.11 already carries id, family, both schemas and outputs. A WIT enumeration would be a second source of truth for the same data, in a second signed artifact, free to drift. `tools` already has this duplication (`contributions.tools` and `list-tools()`) and it is a wart to avoid repeating, not a precedent to follow. The counter-case — an addon whose resource *count* varies with config — does not exist: config changes a resource's shape, not how many an addon offers. |
+| D19 | Backup splits in two. **Scheduled/retained backups are desired state** and get no new interface. **Snapshot-before-destroy** gets its own optional `backup` interface. | The two look alike and behave nothing alike. A retention policy is observable, diffable and convergent — ordinary desired state. A snapshot taken before a destructive change has no desired state at all: no `observe` returns "a snapshot was taken before the thing that has not happened yet". Modelling it as desired state means inventing an entry that diffs forever — the exact D16 failure, reintroduced. |
+| D20 | `family` stays an **open string, demoted to a catalogue grouping label**. The claim that flows can require a family rather than a vendor is withdrawn. | Substitutability needs two addons claiming `vector-db` to have compatible `outputs`, and an open string guarantees nothing of the sort. A closed WIT enum would guarantee it and is exactly the trap now blocking phase 2 — `extension-base`'s closed `kind` enum needs a cross-repo contract release to gain a variant, and `View.slot` was left open for that stated reason. If real substitutability is wanted, it is a platform-side family contract validated at bind time, which does not change this WIT. Better to admit the label is a label. |
+| D21 | The addon declares resource **minimums**; the platform imposes the actual caps and **refuses at plan time** when its cap is below the minimum, naming both numbers. | Each side holds half the information: the addon knows Qdrant's memory scales with vector count, the platform knows the tenant's quota. Neither alone is sufficient, and letting the addon set its own limits makes it billable-unbounded on the hosted path. The field must exist in v0.1.0 regardless: WIT records cannot gain fields without a breaking version bump, so deferring it would plant a second blocker shaped exactly like the one holding phase 2 today. |
 
 ### 2.1 Non-goals
 
@@ -163,78 +167,133 @@ New WIT package `greentic:extension-addon@0.1.0`, new `ExtensionKind::Addon`.
 
 ### 5.1 Interfaces
 
+`greentic:extension-addon@0.1.0`. Four interfaces, two of them pure, one
+optional.
+
+**What is deliberately absent: `list-resources`.** An earlier draft had a
+`resources` interface that enumerated the addon's own resources. D18 removes
+it — `contributions.addons` already carries that data in a signed artifact,
+and a second enumeration would be free to drift from the first. Two functions
+from that draft survive, in their own interface, because they are behavioural
+rather than declarative: a JSON Schema can say `collections` is an array, but
+not that a collection's vector size must match the embedding model the config
+selects.
+
 ```wit
 package greentic:extension-addon@0.1.0;
 
-interface resources {
-  record output-spec {
-    name: string,
-    output-type: output-kind,     // text | number | boolean — wire key is
-                                   // `type`, not `output_type`: `type` is a
-                                   // keyword in the Rust binding this shipped
-                                   // against, but the JSON wire form uses the
-                                   // field name as written to the describe.
-                                   // A naive WIT→JSON bridge in phase 2 must
-                                   // emit `type`, or it fails
-                                   // `deny_unknown_fields` on `output_type`.
-    sensitive: bool,
-    description: option<string>,
-  }
+interface validation {
+  use greentic:extension-base/types@0.2.0.{diagnostic};
 
-  record resource-spec {
-    id: string,                   // "qdrant"
-    family: string,               // "vector-db" — flows may require a family, not a vendor
-    display-name: string,
-    description: string,
-    icon: option<string>,         // host-resolved icon name, not a path
-    config-schema: string,        // JSON Schema: user-facing knobs
-    desired-state-schema: string, // JSON Schema: day-2 state
-    outputs: list<output-spec>,
-    supports-backup: bool,
-    schema-version: u32,          // versions desired-state-schema's shape (D17)
-  }
+  /// Behavioural validation the JSON Schema cannot express. Diagnostic-only,
+  /// no `result<>` wrapper: there is no failure mode distinct from "here is
+  /// what is wrong". Mirrors `bundling.validate-config`.
+  validate-config: func(resource-id: string, config-json: string) -> list<diagnostic>;
 
-  list-resources: func() -> list<resource-spec>;
-  validate-config: func(id: string, config-json: string) -> list<diagnostic>;
-  validate-desired-state: func(id: string, desired-json: string) -> list<diagnostic>;
+  /// Takes `config-json` as well as the desired state, because the most
+  /// common thing wrong with desired state is disagreement with config — a
+  /// collection's vector size against the model the config selects. Without
+  /// config the addon cannot check it, and the error surfaces at apply.
+  validate-desired-state: func(
+    resource-id: string, config-json: string, desired-json: string,
+  ) -> list<diagnostic>;
 }
 
 interface workload {
+  record port { name: string, number: u16 }
+  record volume { name: string, size-gb: u32, mount-path: string }
+
+  record probe {
+    /// Readiness path on the primary container's first port. `none` means
+    /// ready when the container runs.
+    http-path: option<string>,
+    initial-delay-seconds: u32,
+    period-seconds: u32,
+  }
+
+  record resource-request {
+    /// What the addon needs to function at all (D21). The platform refuses
+    /// at plan time when the environment's cap is below this, naming both
+    /// numbers — rather than scheduling a container that OOMs and reads as
+    /// an infrastructure fault.
+    min-memory-mb: u32,
+    min-cpu-millis: u32,
+    /// What the addon would prefer. Advisory; the platform may grant less.
+    recommended-memory-mb: option<u32>,
+    recommended-cpu-millis: option<u32>,
+  }
+
+  record container {
+    /// OCI reference, digest-pinned. `gtdx lint` rejects a tag: a mutable
+    /// tag means the workload the plan approved is not necessarily the
+    /// workload that runs, which drains D11's guarantee through the one
+    /// field D11 does not cover.
+    image: string,
+    args: list<string>,
+    env: list<tuple<string, string>>,
+    ports: list<port>,
+  }
+
+  record container-workload {
+    primary: container,
+    sidecars: list<container>,
+    volumes: list<volume>,
+    resources: resource-request,
+    readiness: probe,
+  }
+
+  record managed-workload {
+    /// Vendor-neutral class the BYOC renderer maps to a cloud resource
+    /// (`postgres`, `redis`). The hosted renderer refuses it at plan time
+    /// with an explicit message rather than silently substituting a
+    /// container — an addon asking for a managed Postgres wants managed
+    /// backups and failover, which a container does not provide.
+    service-class: string,
+    params-json: string,
+  }
+
   variant workload-spec {
-    container(container-workload),   // primary + sidecars + volumes + readiness
-    managed(managed-workload),       // { service-class, params-json } — see §5.3
+    container(container-workload),
+    managed(managed-workload),
   }
 
   /// PURE. No network, no side effects. Called at plan time, cacheable.
-  render-workload: func(id: string, config-json: string)
+  /// This is the split that lets one declaration serve both hosted and
+  /// bring-your-own-cloud placement (D6).
+  render-workload: func(resource-id: string, config-json: string)
     -> result<workload-spec, extension-error>;
 }
 
 interface reconciler {
-  /// Why the addon could not produce a plan yet. Mirrors Terraform's
-  /// `Deferred`, present from v0.1.0 rather than retrofitted (D13).
-  enum deferred-reason {
-    absent-prereq,     // the instance is not up; ask again after readiness
-    config-unknown,    // a referenced output is not resolved yet
-  }
+  use greentic:extension-base/types@0.2.0.{extension-error};
 
-  variant plan-outcome {
-    planned(planned-change),
-    deferred(deferred-reason),
+  /// How to reach the live instance. Every value the addon needs in order to
+  /// authenticate arrives here and nowhere else — credentials never appear
+  /// in desired state, because a value `observe` cannot read back diffs
+  /// forever (D16).
+  record binding { outputs: list<tuple<string, string>> }
+
+  /// Why no plan could be produced yet. Present from v0.1.0 rather than
+  /// retrofitted (D13).
+  enum deferred-reason {
+    absent-prereq,   // the instance is not up; ask again after readiness
+    config-unknown,  // a referenced output is not resolved yet
   }
 
   record planned-change {
-    /// The addon's own desired-state JSON, amended with any defaults the
-    /// addon knows. The platform diffs `current-json` against this to render
-    /// the human-readable plan — the addon never names an action (D10).
+    /// The addon's own desired-state JSON, amended with defaults it knows.
+    /// The platform diffs `current-json` against this to render the plan —
+    /// the addon never names an action (D10).
     planned-json: string,
-    /// JSON Pointer paths whose change cannot be applied in place and
-    /// require destroy-and-recreate. This is what surfaces as destructive
-    /// in the plan UI and what gates approval.
+    /// JSON Pointer paths whose change cannot be applied in place. This is
+    /// what surfaces as destructive and what gates approval.
     requires-replace: list<string>,
   }
 
+  variant plan-outcome { planned(planned-change), deferred(deferred-reason) }
+
   enum outcome { applied, failed-retryable, failed-terminal }
+
   record apply-report {
     /// State actually reached. The host asserts every known leaf of
     /// `planned-json` is present and equal here, and fails the apply if not
@@ -244,21 +303,68 @@ interface reconciler {
     message: string,
   }
 
-  /// Observe the live instance. Deliberately does NOT receive desired state:
-  /// an observer that can see intent will reconcile toward it, and drift
-  /// detection becomes unfalsifiable. (Terraform withholds config from
-  /// `ReadResource` for exactly this reason.)
-  observe: func(id: string, binding: binding) -> result<string, extension-error>;
+  /// Deliberately does NOT receive desired state: an observer that can see
+  /// intent will reconcile toward it, and drift detection becomes
+  /// unfalsifiable. Terraform withholds config from `ReadResource` for the
+  /// same reason.
+  observe: func(resource-id: string, binding: binding)
+    -> result<string, extension-error>;
 
   /// PURE. No network, no side effects.
-  plan: func(id: string, current-json: string, desired-json: string)
+  plan: func(resource-id: string, current-json: string, desired-json: string)
     -> result<plan-outcome, extension-error>;
 
-  apply: func(id: string, binding: binding,
+  apply: func(resource-id: string, binding: binding,
               current-json: string, planned-json: string)
     -> result<apply-report, extension-error>;
 }
+
+/// OPTIONAL. A world exports this only when the addon can genuinely snapshot.
+interface backup {
+  use reconciler.{binding};
+  use greentic:extension-base/types@0.2.0.{extension-error};
+
+  record backup-handle {
+    /// Opaque to the platform, meaningful to the addon. The platform stores
+    /// it against the revision that triggered the backup and hands it back
+    /// to `restore` unchanged.
+    id: string,
+    /// Shown next to the destructive change it guarded.
+    summary: string,
+    size-bytes: option<u64>,
+  }
+
+  /// Snapshot before a destructive change. The PLATFORM calls this; an
+  /// author never schedules it. A retention schedule is desired state and
+  /// belongs in `desired_state_schema` (D19).
+  backup: func(resource-id: string, binding: binding)
+    -> result<backup-handle, extension-error>;
+
+  /// Destructive by definition; the platform gates it the way it gates a
+  /// `requires-replace` path.
+  restore: func(resource-id: string, binding: binding, handle: backup-handle)
+    -> result<_, extension-error>;
+}
 ```
+
+**Two worlds, because WIT has no optional export.** `addon-extension` exports
+`manifest`, `lifecycle`, `validation`, `workload` and `reconciler`;
+`addon-extension-with-backup` adds `backup`. This is the shape
+`extension-provider.wit` already uses for its own combinations.
+
+That composition is what makes `supports_backup` stop being a claim. The
+catalogue flag and the declared world are both in `describe.json` — the world
+under `runtime.components.<id>.world` — so `gtdx lint` compares them
+statically and reports `E_ADDON_BACKUP_MISMATCH` when they disagree. Today's
+authoring doc says "declare `true` only when a snapshot genuinely happens",
+which is an admission that the flag is unverified. It stops being unverified.
+
+**`plan` is pure but sits on `reconciler`** alongside two functions that are
+not. That is a deliberate compromise: splitting pure from effectful into
+separate packages was considered and rejected as a second versioning surface
+for no gain that world composition does not already provide. The cost is
+that the one function testable without infrastructure lives on the interface
+that otherwise needs it.
 
 ### 5.2 Why this shape
 
@@ -584,11 +690,24 @@ There is no `Linker`, no `Store`, and no host stub for
 materialize `src/bindings.rs`, then `cargo test` calling the guest impls as
 ordinary Rust traits (`AGENTS.md.tmpl:41-63`).
 
+Five of the contract's nine functions are pure and therefore fully testable
+here. That ratio is not luck — it is what forcing `plan` and `render-workload`
+to be pure (D7) bought. Had `plan` been allowed to reach the network, none of
+this contract's hard logic would be testable in this repo at all.
+
 | Surface | How |
 |---|---|
 | `render-workload`, `plan` | Host-side table tests in the scaffold. Pure, so this is complete coverage of the logic. |
-| `observe`, `apply` | Dependency injection. `MockHttpClient::restrict_to_hosts` seeded from `describe.runtime.permissions`. The SDK will not wire mocks into bindgen free functions (`AGENTS.md.tmpl:73-76`). |
+| `validate-config`, `validate-desired-state` | Same — pure, table tests. |
+| `observe`, `apply`, `backup`, `restore` | Dependency injection. `MockHttpClient::restrict_to_hosts` seeded from `describe.runtime.permissions`. The SDK will not wire mocks into bindgen free functions (`AGENTS.md.tmpl:73-76`). |
 | Renderers | Platform-side snapshot tests: `EnvironmentSpec` → expected `.tf.json` and K8s manifests. |
+
+**Say the limit plainly rather than implying coverage.** `observe` against a
+real Qdrant is not testable in this repo, at all. That is an integration test
+in the addon's own repository, with a container. The SDK's job is to make the
+pure half genuinely testable and to be honest that the other half needs
+infrastructure — not to offer a mock that resembles coverage without being
+it.
 
 ### 8.1 Conformance suite
 
@@ -600,11 +719,26 @@ Ship in `greentic-extension-sdk-testing` so every addon inherits it:
   exists to prevent — at `cargo test` time.
 - **Plan stability:** `plan(current, desired)` called twice on the same inputs
   must produce identical output. A plan that varies cannot be approved.
-- **Plan/apply consistency** (D11), as a harness rather than a unit test: given
-  a recorded `current` and `planned`, assert every known leaf of `planned`
-  appears in `apply`'s `observed-json`. This is the same assertion the host
-  makes in production, so an addon that passes locally passes there.
+- **Workload stability:** `render-workload(config)` twice on the same config
+  must produce the same spec, for the same reason.
+- **Plan/apply consistency** (D11), shipped as a callable assertion rather than
+  as prose:
+
+  ```rust
+  assert_apply_consistent(&planned_json, &report.observed_json)?;
+  ```
+
+  **The platform calls the same function in production.** Not a reimplementation
+  of the rule, not a test that resembles it — the rule itself, exported so an
+  author can run it before deploying. Today D11 is host behaviour an author
+  cannot check until their addon is live; this is what makes it checkable at
+  `cargo test` time.
 - Round-trip: `plan → apply → observe` must equal desired.
+
+Two lint rules fall out of the contract's shape and belong with it:
+`E_ADDON_IMAGE_NOT_PINNED` (a `container.image` naming a tag rather than a
+digest — see §5.1 for why that drains D11) and `E_ADDON_BACKUP_MISMATCH`
+(`supports_backup` disagreeing with the declared world).
 
 ## 9. Prerequisites
 
@@ -690,7 +824,7 @@ outside this repo.
 | Phase | What ships | Gated on |
 |---|---|---|
 | 1 | `contributions.addons` — the declarative catalogue (id, family, `config-schema`, `desired-state-schema`, `outputs`). Platform-side reconcilers for Qdrant, Redis, Postgres, written against the public interface. Hosted placement only. | **Done in the SDK** (catalogue). Reconcilers remain platform-side. |
-| 2 | `ExtensionKind::Addon` + the `extension-addon` WIT world — third parties ship their own reconcilers as WASM. | `extension-base@0.3.0` (§9.2) |
+| 2 | `ExtensionKind::Addon` + the `extension-addon` WIT world — third parties ship their own reconcilers as WASM. **The contract itself is designed (§5.1) and can be reviewed now**; only the world that binds it to `manifest.get-identity()` needs the base bump. | `extension-base@0.3.0` (§9.2) |
 | 3 | Third-party addon marketplace. | Production trust root (§9.2) |
 | — | BYOC placement. | Engine sign-off, legal and engineering (§9.2, §6.3) |
 
@@ -747,23 +881,26 @@ Roughly 40 touch points across five crates. Beyond §9.1, the notable ones:
 
 ## 11. Open questions
 
-Three of the original seven are now decided and have moved into §2 as D15
-(contributions), D16 (secrets in desired state) and D17 (the v0.1.0 RPC set).
-What remains:
+Six of the original seven are now decided and live in §2: D15 (contributions),
+D16 (secrets in desired state), D17 (the v0.1.0 RPC set), D19 (backup), D20
+(`family`) and D21 (resource quota). D18 removed a seventh by deleting the
+interface it was about.
 
-1. Does the hosted renderer expose a resource-quota model per environment, and
-   does the addon declare requests/limits, or does the platform impose them?
-2. Snapshot/restore is declared via `supports-backup` but has no interface
-   yet. Is backup a reconciler action, or a separate interface?
-3. Should `family` be a closed vocabulary? An open string lets two addons claim
-   `vector-db` with incompatible outputs, which defeats the point of flows
-   requiring a family rather than a vendor.
-4. **When does the OSB rejection get revisited?** §5.5 rejects an
-   OSB/Heroku-shaped contract on the argument that D6 keeps the simple case
-   cheap. That claim is testable, and §9.3 names the test: build Redis first.
-   If it needs substantial `plan` logic for "provision and hand back a URL",
-   the argument has failed and a simple tier is the honest answer.
+One remains, and it is not answered by deciding:
 
-None of these block phase 1. Questions 1 and 2 belong to the platform repo;
-question 3 wants one real third-party addon before it can be answered
-honestly; question 4 is answered by building, not by deciding.
+**When does the OSB rejection get revisited?** §5.5 rejects an OSB/Heroku-shaped
+contract on the argument that D6 keeps the simple case cheap. That claim is
+testable, and §9.3 names the test: build Redis first. If it needs substantial
+`plan` logic for what amounts to "provision it and hand back a URL", the
+argument has failed and a simple tier is the honest answer.
+
+Two questions were also **withdrawn rather than answered**, which is worth
+recording because a reader will otherwise look for them:
+
+- *Does the hosted renderer expose a resource-quota model per environment?*
+  Superseded by D21. The addon declares minimums and the platform imposes caps;
+  what the platform's quota model looks like internally is a platform question
+  that does not reach this contract.
+- *Should `family` be a closed vocabulary?* Superseded by D20, which withdrew
+  the substitutability claim that made the question matter. `family` groups a
+  catalogue; it promises nothing a closed vocabulary would need to enforce.
