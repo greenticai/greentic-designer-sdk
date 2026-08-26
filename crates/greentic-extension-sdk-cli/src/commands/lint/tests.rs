@@ -977,6 +977,9 @@ fn a_secret_looking_property_in_desired_state_is_an_error() {
         "auth_token",
         "clientSecret",
         "credentials",
+        "token",
+        "authToken",
+        "refresh-token",
     ] {
         let mut a = base_addon();
         a["desired_state_schema"] = json!(format!(
@@ -1003,6 +1006,28 @@ fn a_secret_looking_property_in_config_schema_is_not_flagged() {
             .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
         "config_schema must not be flagged, got: {v:?}"
     );
+}
+
+/// `token` only names a credential when it is the final segment of the
+/// property name — the head noun, not a modifier earlier in the name.
+/// `max_tokens` and `token_limit` are about tokens (a count, a limit), not
+/// a token itself, so they must not be flagged. Note `max_tokens` is
+/// plural: the last segment is `tokens`, a different segment than `token`,
+/// which is exactly why this can't be loosened back to a substring check.
+#[test]
+fn properties_where_token_is_a_modifier_not_the_head_noun_are_not_flagged() {
+    for ok in ["max_tokens", "token_limit", "tokenizer"] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","properties":{{"{ok}":{{"type":"string"}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            !v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "desired-state property {ok:?} must not be flagged, got: {v:?}"
+        );
+    }
 }
 
 #[test]

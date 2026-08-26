@@ -22,15 +22,12 @@ const KNOWN_FAMILIES: [&str; 6] = [
 
 /// Property names that name a credential. Matched case-insensitively against
 /// the name with `-` and `_` stripped, so `api_key`, `apiKey` and `api-key`
-/// all hit the same entry.
-const SECRET_MARKERS: [&str; 6] = [
-    "password",
-    "secret",
-    "token",
-    "apikey",
-    "credential",
-    "passwd",
-];
+/// all hit the same entry. Deliberately biased toward over-detection: a
+/// false positive here is loud and self-explanatory (the author sees the
+/// property named and renames it), while a false negative means an addon
+/// that diffs forever and never converges, discovered much later. `token`
+/// is handled separately below - see `looks_like_a_secret`.
+const SECRET_MARKERS: [&str; 5] = ["password", "secret", "apikey", "credential", "passwd"];
 
 fn is_valid_addon_id(id: &str) -> bool {
     !id.is_empty()
@@ -48,13 +45,49 @@ fn is_env_var_safe(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Splits `property` into segments on `-`, `_`, and camelCase boundaries (a
+/// lowercase-to-uppercase transition), and returns the last one. Used only
+/// by the `token` check in `looks_like_a_secret`: unlike the other markers,
+/// `token` is matched only when it names the *final* segment - the head
+/// noun of the property - not a modifier earlier in the name. That is what
+/// tells apart `auth_token` (a token, held in the `auth` slot) from
+/// `token_limit` (a limit, on tokens) and `max_tokens` (a count, of
+/// tokens - "tokens" plural is a different segment than "token", which is
+/// exactly why this can't be loosened back to a substring check).
+fn last_segment(property: &str) -> String {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut prev_lower = false;
+    for c in property.chars() {
+        if c == '-' || c == '_' {
+            if !current.is_empty() {
+                segments.push(std::mem::take(&mut current));
+            }
+            prev_lower = false;
+            continue;
+        }
+        if c.is_ascii_uppercase() && prev_lower && !current.is_empty() {
+            segments.push(std::mem::take(&mut current));
+        }
+        current.push(c);
+        prev_lower = c.is_ascii_lowercase();
+    }
+    if !current.is_empty() {
+        segments.push(current);
+    }
+    segments.pop().unwrap_or_default()
+}
+
 fn looks_like_a_secret(property: &str) -> bool {
     let flat: String = property
         .chars()
         .filter(|c| *c != '-' && *c != '_')
         .flat_map(char::to_lowercase)
         .collect();
-    SECRET_MARKERS.iter().any(|m| flat.contains(m))
+    if SECRET_MARKERS.iter().any(|m| flat.contains(m)) {
+        return true;
+    }
+    last_segment(property).eq_ignore_ascii_case("token")
 }
 
 pub(super) fn check_addons(describe: &serde_json::Value) -> Vec<Violation> {
