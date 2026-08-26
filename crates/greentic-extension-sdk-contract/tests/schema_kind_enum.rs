@@ -1,7 +1,9 @@
 //! `describe-v2.json` hand-maintains the `kind` enum. Nothing generates it
 //! from `ExtensionKind`, so a new variant compiles in Rust and then fails
 //! every `gtdx validate` and `gtdx publish` — blaming the descriptor, not the
-//! schema. This test makes the schema fail instead, at build time.
+//! schema. This test makes that failure surface here instead, at test time —
+//! and, thanks to the exhaustive matches elsewhere over `ExtensionKind`,
+//! actually at compile time for a new variant.
 
 use greentic_extension_sdk_contract::ExtensionKind;
 
