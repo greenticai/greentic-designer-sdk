@@ -141,7 +141,8 @@ mod tests {
         assert!(files.iter().any(|f| f.name == "extension-provider.wit"));
         assert!(files.iter().any(|f| f.name == "extension-dw-composer.wit"));
         assert!(files.iter().any(|f| f.name == "runtime-side.wit"));
-        assert_eq!(files.len(), 8);
+        assert!(files.iter().any(|f| f.name == "extension-addon.wit"));
+        assert_eq!(files.len(), 9);
     }
 
     #[test]

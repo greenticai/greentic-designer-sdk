@@ -651,6 +651,7 @@ fn wit_package_subdir_for(filename: &str) -> anyhow::Result<&'static str> {
         "extension-provider.wit" => "extension-provider",
         "runtime-side.wit" => "runtime-side",
         "extension-dw-composer.wit" => "dw-composer",
+        "extension-addon.wit" => "extension-addon",
         other => anyhow::bail!(
             "no vendored dependency directory mapped for WIT file `{other}` — \
              add an arm to wit_package_subdir_for and reference the directory \
@@ -790,10 +791,10 @@ mod wit_subdir_tests {
 
     #[test]
     fn an_unmapped_wit_file_is_an_error() {
-        let err = wit_package_subdir_for("extension-addon.wit")
+        let err = wit_package_subdir_for("extension-nonexistent.wit")
             .expect_err("an unmapped wit file must error");
         assert!(
-            err.to_string().contains("extension-addon.wit"),
+            err.to_string().contains("extension-nonexistent.wit"),
             "the error should name the file, got: {err}"
         );
     }

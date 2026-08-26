@@ -70,6 +70,7 @@ greentic-extension-sdk-testing = { path = "../greentic-extension-sdk-testing", v
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
 wiremock = "0.6"
+wit-parser = "0.258.0"
 
 [lints]
 workspace = true

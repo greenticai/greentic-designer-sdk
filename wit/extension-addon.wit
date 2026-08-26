@@ -1,0 +1,257 @@
+package greentic:extension-addon@0.1.0;
+
+/// Behavioural validation the JSON Schema cannot express.
+///
+/// `contributions.addons[].config_schema` already checked shape. This checks
+/// meaning: that a collection's vector size matches the embedding model the
+/// config selects, that a name is free in this instance. Shape is a schema's
+/// job; meaning needs code.
+interface validation {
+  use greentic:extension-base/types@0.2.0.{diagnostic};
+
+  /// Returns `[]` when the config is usable. Diagnostic-only rather than
+  /// `result<>`: there is no failure mode distinct from "here is what is
+  /// wrong". Mirrors `bundling.validate-config`.
+  validate-config: func(resource-id: string, config-json: string) -> list<diagnostic>;
+
+  /// Takes `config-json` as well as the desired state. The most common thing
+  /// wrong with desired state is disagreement with config — a collection's
+  /// vector size against the model config selects — and without config the
+  /// addon cannot check it, so the error surfaces at apply instead.
+  validate-desired-state: func(
+    resource-id: string,
+    config-json: string,
+    desired-json: string,
+  ) -> list<diagnostic>;
+}
+
+/// What the addon needs run on its behalf. The addon never provisions; the
+/// platform does. That split is what lets one declaration serve both hosted
+/// and bring-your-own-cloud placement.
+interface workload {
+  use greentic:extension-base/types@0.2.0.{extension-error};
+
+  record port {
+    name: string,
+    number: u16,
+  }
+
+  record volume {
+    name: string,
+    size-gb: u32,
+    mount-path: string,
+  }
+
+  record probe {
+    /// Readiness path on the primary container's first port. `none` means the
+    /// addon is ready as soon as the container runs.
+    http-path: option<string>,
+    initial-delay-seconds: u32,
+    period-seconds: u32,
+  }
+
+  record resource-request {
+    /// What the addon needs to function at all. The platform refuses at plan
+    /// time when the environment's cap is below this, naming both numbers —
+    /// rather than scheduling a container that OOMs, which reads as an
+    /// infrastructure fault and points at everything except the cause.
+    min-memory-mb: u32,
+    min-cpu-millis: u32,
+    /// What the addon would prefer. Advisory; the platform may grant less.
+    recommended-memory-mb: option<u32>,
+    recommended-cpu-millis: option<u32>,
+  }
+
+  record container {
+    /// OCI reference, digest-pinned. A mutable tag means the workload the
+    /// plan approved is not necessarily the workload that runs, which drains
+    /// the plan/apply consistency guarantee through the one field that
+    /// guarantee does not cover.
+    image: string,
+    args: list<string>,
+    env: list<tuple<string, string>>,
+    ports: list<port>,
+  }
+
+  record container-workload {
+    primary: container,
+    sidecars: list<container>,
+    volumes: list<volume>,
+    resources: resource-request,
+    readiness: probe,
+  }
+
+  record managed-workload {
+    /// Vendor-neutral class the BYOC renderer maps to a cloud resource —
+    /// `postgres`, `redis`. The hosted renderer refuses it at plan time with
+    /// an explicit message rather than silently substituting a container: an
+    /// addon asking for a managed Postgres wants managed backups and
+    /// failover, which a container does not provide.
+    service-class: string,
+    params-json: string,
+  }
+
+  variant workload-spec {
+    container(container-workload),
+    managed(managed-workload),
+  }
+
+  /// PURE. No network, no side effects. Called at plan time and cacheable.
+  render-workload: func(resource-id: string, config-json: string)
+    -> result<workload-spec, extension-error>;
+}
+
+/// Day-2 state inside a running instance: Qdrant collections, Redis ACL
+/// users. Level-triggered — the platform re-derives everything from observed
+/// state rather than remembering which step it was on.
+interface reconciler {
+  use greentic:extension-base/types@0.2.0.{extension-error};
+
+  /// How to reach the live instance. Every value the addon needs in order to
+  /// authenticate arrives here and nowhere else. Credentials never appear in
+  /// desired state, because a value `observe` cannot read back diffs forever
+  /// and no plan is ever clean.
+  record binding {
+    outputs: list<tuple<string, string>>,
+  }
+
+  /// Why no plan could be produced yet. Present from v0.1.0 rather than
+  /// retrofitted: day-2 config genuinely cannot be planned before the
+  /// instance is reachable, and "I cannot plan this yet" must be a
+  /// first-class answer rather than an error or a lie.
+  enum deferred-reason {
+    /// The instance is not up. Ask again after readiness.
+    absent-prereq,
+    /// A referenced output is not resolved yet.
+    config-unknown,
+  }
+
+  record planned-change {
+    /// The addon's own desired-state JSON, amended with any defaults the
+    /// addon knows. The platform diffs `current-json` against this to render
+    /// the plan — the addon never names an action. An opaque action payload
+    /// would mean only the addon could say what an apply will do, and the
+    /// platform would have to take its word.
+    planned-json: string,
+    /// JSON Pointer paths whose change cannot be applied in place and require
+    /// destroy-and-recreate. This is what surfaces as destructive in the plan
+    /// UI and what gates approval — a list the platform reads, not a boolean
+    /// the addon asserts.
+    requires-replace: list<string>,
+  }
+
+  variant plan-outcome {
+    planned(planned-change),
+    deferred(deferred-reason),
+  }
+
+  enum outcome {
+    applied,
+    /// A connection reset. The platform may retry.
+    failed-retryable,
+    /// A schema violation. Retrying changes nothing.
+    failed-terminal,
+  }
+
+  record apply-report {
+    /// State actually reached. The host asserts every leaf of `planned-json`
+    /// is present and equal here and fails the apply if not: without that
+    /// assertion a plan is a dry run — a suggestion, not a contract.
+    observed-json: string,
+    outcome: outcome,
+    message: string,
+  }
+
+  /// Deliberately does NOT receive desired state. An observer that can see
+  /// intent will reconcile toward it, and drift detection becomes
+  /// unfalsifiable. Terraform withholds config from `ReadResource` for the
+  /// same reason.
+  observe: func(resource-id: string, binding: binding)
+    -> result<string, extension-error>;
+
+  /// PURE. No network, no side effects.
+  plan: func(
+    resource-id: string,
+    current-json: string,
+    desired-json: string,
+  ) -> result<plan-outcome, extension-error>;
+
+  apply: func(
+    resource-id: string,
+    binding: binding,
+    current-json: string,
+    planned-json: string,
+  ) -> result<apply-report, extension-error>;
+}
+
+/// OPTIONAL. Exported only by `addon-extension-with-backup`.
+///
+/// A retention schedule is NOT here — that is observable, diffable and
+/// convergent, so it is ordinary desired state and belongs in
+/// `desired_state_schema`. What is here has no desired state at all: no
+/// `observe` returns "a snapshot was taken before the thing that has not
+/// happened yet". Modelling it as desired state would make it diff forever.
+interface backup {
+  use greentic:extension-base/types@0.2.0.{extension-error};
+  use reconciler.{binding};
+
+  record backup-handle {
+    /// Opaque to the platform, meaningful to the addon. The platform stores
+    /// it against the revision that triggered the backup and hands it back to
+    /// `restore` unchanged.
+    id: string,
+    /// Shown next to the destructive change it guarded.
+    summary: string,
+    size-bytes: option<u64>,
+  }
+
+  /// Snapshot before a destructive change. The PLATFORM calls this; an author
+  /// never schedules it.
+  backup: func(resource-id: string, binding: binding)
+    -> result<backup-handle, extension-error>;
+
+  /// Destructive by definition. The platform gates it the way it gates a
+  /// `requires-replace` path.
+  restore: func(resource-id: string, binding: binding, handle: backup-handle)
+    -> result<_, extension-error>;
+}
+
+/// NOTE FOR IMPLEMENTERS: these worlds can be declared today but not yet
+/// correctly implemented. `manifest.get-identity()` returns an
+/// `extension-identity` whose `kind` field is an enum that has no `addon`
+/// variant, and adding one is a breaking change to `greentic:extension-base`.
+/// The contract is here to be reviewed and versioned; a component implementing
+/// it waits on `extension-base@0.3.0`. This is deliberate, not an oversight.
+world addon-extension {
+  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-host/logging@0.1.0;
+  import greentic:extension-host/i18n@0.1.0;
+  import greentic:extension-host/secrets@0.1.0;
+  import greentic:extension-host/http@0.1.0;
+
+  export greentic:extension-base/manifest@0.2.0;
+  export greentic:extension-base/lifecycle@0.2.0;
+  export validation;
+  export workload;
+  export reconciler;
+}
+
+/// The same, for an addon that can genuinely snapshot. WIT has no optional
+/// export, so the capability is expressed as a second world — the shape
+/// `extension-provider.wit` already uses for its own combinations. A platform
+/// therefore reads the capability off the declared world rather than trusting
+/// a boolean.
+world addon-extension-with-backup {
+  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-host/logging@0.1.0;
+  import greentic:extension-host/i18n@0.1.0;
+  import greentic:extension-host/secrets@0.1.0;
+  import greentic:extension-host/http@0.1.0;
+
+  export greentic:extension-base/manifest@0.2.0;
+  export greentic:extension-base/lifecycle@0.2.0;
+  export validation;
+  export workload;
+  export reconciler;
+  export backup;
+}
