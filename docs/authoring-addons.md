@@ -54,7 +54,7 @@ spec §9.3 names as the first one built.
         "family": "vector-db",
         "display_name": "Qdrant",
         "description": "Vector database for embeddings and similarity search.",
-        "icon": "qdrant.svg",
+        "icon": "database",
         "config_schema": "{\"type\":\"object\",\"properties\":{\"replicas\":{\"type\":\"integer\",\"minimum\":1,\"default\":1},\"size_gb\":{\"type\":\"integer\",\"minimum\":1,\"default\":10}},\"required\":[\"size_gb\"]}",
         "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"collections\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}",
         "outputs": [
@@ -84,8 +84,12 @@ spec §9.3 names as the first one built.
   know about. `gtdx lint` warns rather than errors on an unfamiliar family —
   see `W_ADDON_FAMILY_UNKNOWN` below.
 
-- **`display_name`**, **`description`**, **`icon`** — presentation only.
-  `icon` is optional.
+- **`display_name`**, **`description`** — presentation only.
+
+- **`icon`** — optional, presentation only. A **host-resolved icon name**,
+  matching `View.icon` — not a file path. The host looks the name up in its
+  own icon set; nothing in the packer copies an addon icon, and no
+  directory is reserved for one the way `assets/views/<id>/` is for a view.
 
 - **`config_schema`** — JSON Schema (Draft 2020-12), stringly-encoded, for
   the knobs a user sets per environment: size, replica count, version. The

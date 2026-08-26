@@ -73,6 +73,10 @@ pub struct Addon {
     pub display_name: String,
     pub description: String,
 
+    /// Host-resolved icon name, matching `View.icon` — not a file path.
+    /// Nothing in the packer copies an addon icon and no directory is
+    /// reserved for one, the way `assets/views/<id>/` is for a view; the
+    /// host looks this name up in its own icon set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
 

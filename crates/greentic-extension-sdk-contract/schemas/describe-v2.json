@@ -199,7 +199,10 @@
               },
               "display_name": { "type": "string" },
               "description": { "type": "string" },
-              "icon": { "type": "string" },
+              "icon": {
+                "description": "Host-resolved icon name.",
+                "type": "string"
+              },
               "config_schema": {
                 "description": "JSON Schema (Draft 2020-12) for the knobs a user sets per environment - size, replicas, version. Rendered as a form by the Designer. Stringly-encoded because it is a payload passed to a renderer, not host control data. Must parse as JSON; the Rust deserializer rejects it otherwise.",
                 "type": "string"

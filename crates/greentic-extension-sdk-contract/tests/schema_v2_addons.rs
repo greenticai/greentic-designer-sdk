@@ -70,7 +70,7 @@ fn a_full_addon_validates() {
             "family": "vector-db",
             "display_name": "Qdrant",
             "description": "Vector database.",
-            "icon": "icons/qdrant.svg",
+            "icon": "database",
             "config_schema": "{\"type\":\"object\"}",
             "desired_state_schema": "{\"type\":\"object\"}",
             "outputs": [{ "name": "url", "type": "text", "sensitive": false }],
