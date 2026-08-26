@@ -152,12 +152,22 @@ fn looks_like_a_secret(property: &str) -> bool {
 
 /// Recursively walks a JSON Schema value, calling `on_property` for every
 /// name that appears as a **property key**: every key of a `properties`
-/// object, at any depth reachable through `properties`, `items`, `$defs`,
-/// `definitions`, `patternProperties`, `additionalProperties`, `allOf`,
-/// `anyOf`, `oneOf`. `path` accumulates a human-readable pointer through
-/// `properties`/`items` nesting only (`acl_users[].password`), not through
-/// schema-composition keywords (`$defs`, `allOf`, ...), since those don't
-/// correspond to a position in the *data* shape.
+/// object, at any depth reachable through `properties`, `items`,
+/// `prefixItems`, `contains`, `$defs`, `definitions`, `patternProperties`,
+/// `dependentSchemas`, `additionalProperties`, `unevaluatedProperties`,
+/// `allOf`, `anyOf`, `oneOf`, `if`, `then`, `else`. `path` accumulates a
+/// human-readable pointer through `properties`/`items` nesting
+/// (`acl_users[].password`) and most schema-composition keywords add
+/// nothing (`allOf`, `anyOf`, `oneOf`, `patternProperties`,
+/// `dependentSchemas`, `if`, `then`, `else` all pass `path` through
+/// unchanged, since they don't correspond to a position of their own in the
+/// *data* shape). `$defs` and
+/// `definitions` are the exception: a def has no data position at all, since
+/// it is reachable only through a `$ref` this walk deliberately never
+/// resolves. So instead of passing `path` through, they insert a
+/// `$defs/<name>` (or `definitions/<name>`) marker, keeping the reported
+/// path honest about being a definition rather than implying a data
+/// position that may not exist.
 ///
 /// Only names appearing as property keys are ever candidates: the keys of
 /// `patternProperties` are regexes, not property names, and the keys of
@@ -167,7 +177,47 @@ fn looks_like_a_secret(property: &str) -> bool {
 /// never treated as candidates because they never appear as a map key
 /// *inside* a `properties` object in the shapes this walks. `enum` and
 /// `const` are not in the keyword set walked here, so their values are
-/// never descended into.
+/// never descended into. `propertyNames` is also deliberately not walked:
+/// its schema validates each property *name* as a string, never the object
+/// itself, so a `properties` map placed inside it is schema-legal but dead -
+/// it can never apply to any actual data an addon declares - and walking it
+/// would only add noise, not signal. `dependentRequired` is not walked
+/// either: its values are arrays of property name strings, never schemas,
+/// so there is nowhere for a `properties` map to go. `not` is likewise
+/// deliberately excluded - see the note at its former call site below for
+/// why negation is different from every other composition keyword this
+/// walk covers.
+///
+/// # Why unbounded recursion is safe here
+///
+/// This function recurses with no explicit depth guard. That is safe today,
+/// but only because of two facts that hold nowhere else in this file and
+/// must both keep holding:
+///
+/// 1. **`$ref` is deliberately never resolved.** `$ref` is not one of the
+///    keywords walked above, so a `$defs`/`$ref` pair is an ordinary finite
+///    tree: the `$defs` value is walked once, directly, and a sibling `$ref`
+///    pointing at it is never followed back down. Adding `$ref` resolution
+///    would let a `$defs` entry's schema point at an ancestor of itself,
+///    turning that finite tree into an actual cycle and this recursion into
+///    an infinite one.
+/// 2. **The input's nesting depth is bounded before it ever reaches this
+///    function.** The only caller parses the schema with
+///    `serde_json::from_str`, whose deserializer defaults to a
+///    `remaining_depth` of 128 and errors out before producing a `Value` for
+///    anything nested deeper. This crate never enables `serde_json`'s
+///    `unbounded_depth` feature, so a schema nested past that limit fails to
+///    *parse* - the caller's `if let Ok(parsed) = ...` simply skips it - and
+///    never reaches this walk at all. See
+///    `a_desired_state_schema_nested_past_serde_json_depth_limit_fails_to_parse`
+///    in `tests.rs`, which pins this.
+///
+/// If either assumption stops holding - `$ref` resolution is added (extending
+/// the set of keywords this walk covers is exactly when that temptation
+/// shows up), or `unbounded_depth` is enabled anywhere in the dependency
+/// graph - this function needs an explicit depth guard, because it would
+/// then be walking attacker-controlled, effectively unbounded recursion at
+/// publish/install time.
 fn walk_schema_properties(
     schema: &serde_json::Value,
     path: &str,
@@ -201,14 +251,86 @@ fn walk_schema_properties(
         }
     }
 
-    // `$defs`/`definitions` keys are def names, and `patternProperties` keys
-    // are regexes - neither names a property, so `path` passes through
-    // unchanged and only the values are walked.
-    for key in ["$defs", "definitions", "patternProperties"] {
-        if let Some(map) = obj.get(key).and_then(|v| v.as_object()) {
-            for subschema in map.values() {
-                walk_schema_properties(subschema, path, on_property);
-            }
+    // `prefixItems` is Draft 2020-12's replacement for tuple-form `items`
+    // (array-form `items` is deprecated there): each entry is a schema for
+    // the item at that index. Walked the same way as tuple-form `items`
+    // above - one `[]` marker for every entry, since the reported path
+    // doesn't try to track which index a property lives at.
+    if let Some(serde_json::Value::Array(tuple)) = obj.get("prefixItems") {
+        let child_path = format!("{path}[]");
+        for item in tuple {
+            walk_schema_properties(item, &child_path, on_property);
+        }
+    }
+
+    // `contains` is a single schema an array item must match at least once -
+    // the non-tuple counterpart of `items`. Walked the same way as
+    // non-tuple `items`: one `[]` marker, since which item satisfies it is
+    // unknown statically.
+    if let Some(contains) = obj.get("contains")
+        && contains.is_object()
+    {
+        let child_path = format!("{path}[]");
+        walk_schema_properties(contains, &child_path, on_property);
+    }
+
+    // `$defs`/`definitions` keys are def names, not property names, so they
+    // are never passed to `on_property` - but unlike every other keyword
+    // walked here, a def is not inlined at `path`: it is only ever reached
+    // through a `$ref` this walk deliberately never resolves (see the
+    // "unbounded recursion" note above), so it has no data position at all.
+    // Passing `path` through unchanged would report a violation at, e.g.,
+    // `foo.password` when the def sits under `properties.foo.$defs` - a
+    // position that does not exist in the addon's actual desired state and
+    // would send the author looking in the wrong place. Insert a `$defs/
+    // <name>` marker instead, so the reported path is honest about being a
+    // definition rather than data.
+    if let Some(map) = obj.get("$defs").and_then(|v| v.as_object()) {
+        for (name, subschema) in map {
+            let def_path = if path.is_empty() {
+                format!("$defs/{name}")
+            } else {
+                format!("{path}.$defs/{name}")
+            };
+            walk_schema_properties(subschema, &def_path, on_property);
+        }
+    }
+    if let Some(map) = obj.get("definitions").and_then(|v| v.as_object()) {
+        for (name, subschema) in map {
+            let def_path = if path.is_empty() {
+                format!("definitions/{name}")
+            } else {
+                format!("{path}.definitions/{name}")
+            };
+            walk_schema_properties(subschema, &def_path, on_property);
+        }
+    }
+
+    // `patternProperties` keys are regexes, not property names, so `path`
+    // passes through unchanged and only the values are walked. Unlike
+    // `$defs`/`definitions`, a `patternProperties` value schema *is* inlined
+    // at the parent's data position - it is just that the specific matching
+    // key is unknown - so no marker is needed here.
+    if let Some(map) = obj.get("patternProperties").and_then(|v| v.as_object()) {
+        for subschema in map.values() {
+            walk_schema_properties(subschema, path, on_property);
+        }
+    }
+
+    // `dependentSchemas` maps a property name to a schema that applies to
+    // the *whole* object (not to that property's value) whenever the named
+    // property is present. Its values are full schemas that can carry a
+    // nested `properties` map at the same data position as the parent
+    // object, so they are walked like `patternProperties`: path unchanged,
+    // values only. The map's own keys are already real property names, but
+    // every realistic use of `dependentSchemas` pairs a key with a
+    // same-named entry under the object's own `properties` (the property's
+    // type has to be declared somewhere), so that key is already a
+    // candidate through the ordinary `properties` walk above - it is not
+    // duplicated here.
+    if let Some(map) = obj.get("dependentSchemas").and_then(|v| v.as_object()) {
+        for subschema in map.values() {
+            walk_schema_properties(subschema, path, on_property);
         }
     }
 
@@ -218,11 +340,48 @@ fn walk_schema_properties(
         walk_schema_properties(additional, path, on_property);
     }
 
+    // `unevaluatedProperties` is Draft 2020-12's successor to
+    // `additionalProperties` for properties left over after `allOf`/`if`/
+    // `$ref` composition is accounted for. Like `additionalProperties` it
+    // takes a schema (not only a boolean) and that schema applies at the
+    // same, real leftover-property data position, so it is walked the same
+    // way: path unchanged, only when it is an object.
+    if let Some(unevaluated) = obj.get("unevaluatedProperties")
+        && unevaluated.is_object()
+    {
+        walk_schema_properties(unevaluated, path, on_property);
+    }
+
     for key in ["allOf", "anyOf", "oneOf"] {
         if let Some(branches) = obj.get(key).and_then(|v| v.as_array()) {
             for branch in branches {
                 walk_schema_properties(branch, path, on_property);
             }
+        }
+    }
+
+    // `if`, `then`, `else` are each a single schema constraining the *same*
+    // data position as their parent, exactly like the `allOf`/`anyOf`/
+    // `oneOf` branches above - applied conditionally, but that doesn't
+    // change where a `properties` map inside them would land in the actual
+    // data, so `path` passes through unchanged, same as
+    // `additionalProperties`.
+    //
+    // `not` is deliberately NOT walked here, unlike every other
+    // composition keyword above. `not: {"properties":{"admin_password":...}}`
+    // means the instance must NOT have `admin_password` in that shape - the
+    // author is forbidding the credential, not declaring one. Flagging a
+    // name found only inside `not` would invert its meaning and punish an
+    // author for writing the prohibition D16 recommends (the same mistake
+    // this rule already made once, for `secret_ref`, and fixed). The bias
+    // toward over-detection elsewhere in this file is deliberate; it does
+    // not extend to a construct whose entire meaning is negation. Do not
+    // re-add `not` to this list without re-reading this comment.
+    for key in ["if", "then", "else"] {
+        if let Some(sub) = obj.get(key)
+            && sub.is_object()
+        {
+            walk_schema_properties(sub, path, on_property);
         }
     }
 }

@@ -73,7 +73,12 @@ spec §9.3 names as the first one built.
   without you having to pick a globally-unique string. Must match
   `^[a-z0-9][a-z0-9-]*$` — lowercase letters, digits and hyphens only, no
   underscore, no dot. That's a narrower pattern than a view's `id`
-  (`^[a-z0-9][a-z0-9._-]*$`); `gtdx lint` enforces it as `E_ADDON_ID_PATTERN`.
+  (`^[a-z0-9][a-z0-9._-]*$`). Enforced in two places: `gtdx lint` reports a
+  violation as `E_ADDON_ID_PATTERN`, and since the 1.2.11 release
+  `describe-v2.json`'s own JSON Schema declares the same pattern, so
+  `validate_describe_json` rejects a bad id too. The schema is the layer
+  that actually gates a bad id out — it runs on the publish and install
+  paths, while `gtdx lint` is opt-in.
 
 - **`family`** — what kind of thing this is, e.g. `vector-db`, not which
   vendor. A flow that needs a vector database asks for the family, so a
@@ -84,7 +89,13 @@ spec §9.3 names as the first one built.
   know about. `gtdx lint` warns rather than errors on an unfamiliar family —
   see `W_ADDON_FAMILY_UNKNOWN` below.
 
-- **`display_name`**, **`description`** — presentation only.
+- **`display_name`**, **`description`** — presentation only. These render in
+  the Designer's catalogue, the most user-facing surface an addon appears on,
+  but they are plain `String` today, unlike `Recipe.display_name` and
+  `NodeType.label` (`LocalizedString`) or `View.title_key`/`title_fallback`.
+  Addon catalogue strings are not localizable yet; expect that to change.
+  `LocalizedString` deserializes a bare string transparently, so the switch
+  will be wire-compatible in both directions when it happens.
 
 - **`icon`** — optional, presentation only. A **host-resolved icon name**,
   matching `View.icon` — not a file path. The host looks the name up in its
@@ -108,7 +119,14 @@ spec §9.3 names as the first one built.
   from another resource's configuration as
   `${resources.<resource_id>.outputs.<name>}`. Each entry needs a `name`
   and a `type`; `sensitive` and `description` are optional. See "The
-  `sensitive` flag" below.
+  `sensitive` flag" below. `name` must match `^[A-Za-z_][A-Za-z0-9_]*$` —
+  outputs are injected as environment variables, so the name has to survive
+  that translation. Enforced in the same two places as `id`: `gtdx lint`
+  reports a violation as `E_ADDON_OUTPUT_NAME`, and since the 1.2.11 release
+  `describe-v2.json`'s own JSON Schema declares the same pattern, so
+  `validate_describe_json` — the layer that actually gates, running on the
+  publish and install paths rather than opt-in like `gtdx lint` — rejects a
+  bad name too.
 
 - **`supports_backup`** — whether the addon can snapshot before a
   destructive change. The platform offers to back up on the strength of

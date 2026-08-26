@@ -1113,6 +1113,192 @@ fn a_secret_inside_an_all_of_branch_is_caught() {
     );
 }
 
+/// Draft 2020-12 declares tuples with `prefixItems`, not array-form `items`
+/// (which is deprecated there). `describe-v2.json` is a 2020-12 schema, so
+/// this is the form addon authors actually write.
+#[test]
+fn a_secret_inside_prefix_items_is_caught_with_an_array_path() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"pairs":{"type":"array",
+            "prefixItems":[{"type":"object",
+                "properties":{"password":{"type":"string"}}}]}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("pairs[].password"),
+        "message should carry the array path to the offending property: {hit:?}"
+    );
+}
+
+/// `contains` is the non-tuple counterpart of `items` - a schema at least
+/// one array element must match.
+#[test]
+fn a_secret_inside_contains_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"nodes":{"type":"array",
+            "contains":{"type":"object",
+                "properties":{"admin_password":{"type":"string"}}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "a secret nested inside contains must be caught: {v:?}"
+    );
+}
+
+/// `if`, `then`, `else` all constrain the same data position as their
+/// parent and can carry a nested `properties` map, exactly like `allOf`.
+/// Data can genuinely match an `if` before `then` applies, so these are
+/// real positions, unlike `not` below.
+#[test]
+fn a_secret_inside_if_then_or_else_is_caught() {
+    for wrapper in ["if", "then", "else"] {
+        let mut a = base_addon();
+        a["desired_state_schema"] = json!(format!(
+            r#"{{"type":"object","{wrapper}":{{"type":"object",
+                "properties":{{"admin_password":{{"type":"string"}}}}}}}}"#
+        ));
+        let v = check_addons(&describe_with_addon(&a));
+        assert!(
+            v.iter()
+                .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+            "a secret nested inside {wrapper:?} must be caught: {v:?}"
+        );
+    }
+}
+
+/// `not: {"properties":{"admin_password":...}}` means the instance must NOT
+/// have `admin_password` in that shape - the author is forbidding the
+/// credential, not declaring one. A name reachable only through `not` must
+/// not be flagged: doing so would invert the schema's meaning and punish an
+/// author for writing the exact prohibition D16 recommends.
+#[test]
+fn a_secret_reachable_only_through_not_is_not_flagged() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","not":{"type":"object",
+            "properties":{"admin_password":{"type":"string"}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "a property forbidden by `not` must not be flagged as declared: {v:?}"
+    );
+}
+
+/// `unevaluatedProperties` is 2020-12's successor to `additionalProperties`
+/// for properties left over after composition - it takes a schema, not
+/// only a boolean, and that schema is a real leftover-property data
+/// position, so a secret hiding inside it must be caught.
+#[test]
+fn a_secret_inside_unevaluated_properties_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"known":{"type":"string"}},
+            "unevaluatedProperties":{"type":"object",
+                "properties":{"leftover_password":{"type":"string"}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter().any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"
+            && x.message.contains("leftover_password")),
+        "a secret nested inside unevaluatedProperties must be caught: {v:?}"
+    );
+}
+
+/// `dependentSchemas` values are full schemas applied to the same object,
+/// so a secret hiding inside one must be caught.
+#[test]
+fn a_secret_inside_dependent_schemas_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"credit_card":{"type":"string"}},
+            "dependentSchemas":{"credit_card":{"type":"object",
+                "properties":{"cvv_secret":{"type":"string"}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter().any(
+            |x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE" && x.message.contains("cvv_secret")
+        ),
+        "a secret nested inside a dependentSchemas value must be caught: {v:?}"
+    );
+}
+
+/// `propertyNames` validates property *names* as strings, never the object
+/// itself - a `properties` map placed inside it is schema-legal but dead,
+/// since it can never apply to any actual data. It must not be walked.
+#[test]
+fn a_properties_map_inside_property_names_is_not_walked() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","propertyNames":{"type":"string",
+            "properties":{"password":{"type":"string"}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "propertyNames must not be walked for nested properties: {v:?}"
+    );
+}
+
+/// A `$defs` nested under a real data position must not report a path that
+/// looks like it lives there. `foo.password` would send the author looking
+/// for a `password` property directly under `foo`, when none exists - the
+/// `password` here only exists inside a definition, reachable (if at all)
+/// through a `$ref` this walk never resolves.
+#[test]
+fn a_secret_inside_nested_defs_reports_a_defs_marker_not_a_fake_data_path() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{"foo":{"type":"object",
+            "$defs":{"credentials":{"type":"object",
+                "properties":{"password":{"type":"string"}}}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("foo.$defs/credentials.password"),
+        "path should carry a $defs marker rather than a fake data position: {hit:?}"
+    );
+    assert!(
+        !hit.message.contains("\"foo.password\""),
+        "must not report the nonexistent data position foo.password: {hit:?}"
+    );
+}
+
+/// The same fix at the root: `$defs` there already had a usable path before
+/// this change (a bare `password`), but the marker format must still apply
+/// consistently rather than only kicking in once nesting is involved.
+#[test]
+fn a_secret_inside_root_defs_also_carries_the_defs_marker() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r##"{"type":"object","$defs":{"credentials":{"type":"object",
+            "properties":{"password":{"type":"string"}}}},
+            "properties":{"admin":{"$ref":"#/$defs/credentials"}}}"##
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("$defs/credentials.password"),
+        "path should carry the $defs marker: {hit:?}"
+    );
+}
+
 /// A JSON Schema may legally have a property literally named `properties`.
 /// The keyword itself must never be treated as a candidate name - only
 /// values that appear as a key *inside* a `properties` map are.
@@ -1181,4 +1367,40 @@ fn narrowing_does_not_weaken_the_existing_positives() {
             "{bad:?} must still be flagged, got: {v:?}"
         );
     }
+}
+
+/// Pins the second safety assumption documented on `walk_schema_properties`:
+/// that function recurses with no depth guard of its own, which is safe only
+/// because `serde_json::from_str` refuses to *parse* anything nested past its
+/// default 128-frame `remaining_depth` limit in the first place. If this
+/// crate ever enables `serde_json`'s `unbounded_depth` feature, this test
+/// starts failing - which is the signal that `walk_schema_properties` now
+/// needs an explicit depth guard of its own.
+#[test]
+fn a_desired_state_schema_nested_past_serde_json_depth_limit_fails_to_parse() {
+    // 200 nested arrays comfortably clears serde_json's 128-frame default
+    // depth limit regardless of exactly where the off-by-one boundary falls.
+    let depth = 200;
+    let nested: String = "[".repeat(depth) + &"]".repeat(depth);
+
+    // The assumption itself: serde_json rejects this at parse time.
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&nested).is_err(),
+        "expected serde_json to refuse to parse {depth} levels of nesting - \
+         if it now succeeds, `unbounded_depth` may have been enabled \
+         somewhere in the dependency graph, and \
+         `walk_schema_properties`'s lack of a depth guard is no longer safe"
+    );
+
+    // The consequence relied on by `check_addons`: since parsing fails, the
+    // `if let Ok(parsed) = ...` around the walk skips this schema entirely -
+    // `walk_schema_properties` never sees it, and no violation is reported.
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(nested);
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "an unparsable desired_state_schema must be silently skipped, not \
+         reach the walk: {v:?}"
+    );
 }
