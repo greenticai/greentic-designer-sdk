@@ -155,6 +155,7 @@ pub async fn run_watch(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result
     });
 
     let mut last_pack_hash: Option<String> = None;
+    let mut last_fingerprint = watched_fingerprint(&cfg.project_dir);
 
     loop {
         if cancel.is_cancelled() {
@@ -163,6 +164,14 @@ pub async fn run_watch(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result
         }
         match handle.changes.recv_timeout(Duration::from_millis(250)) {
             Ok(batch) => {
+                // An event is not a change. Skip silently when no watched byte
+                // moved, or the build's own regenerated files re-trigger the
+                // loop forever.
+                let fingerprint = watched_fingerprint(&cfg.project_dir);
+                if fingerprint == last_fingerprint {
+                    tracing::debug!("watch event with no content change; skipping rebuild");
+                    continue;
+                }
                 if let Some(p) = batch.first() {
                     out.emit(&DevEvent::ChangeDetected {
                         path: p.display().to_string(),
@@ -174,6 +183,9 @@ pub async fn run_watch(cfg: &DevConfig, out: &mut dyn Emitter) -> anyhow::Result
                 if let Err(e) = run_once_cached(cfg, out, &mut last_pack_hash).await {
                     tracing::warn!("dev cycle failed: {e}");
                 }
+                // Re-read after the build: cargo-component rewrites bindings,
+                // and the packer may fill digests into describe.json.
+                last_fingerprint = watched_fingerprint(&cfg.project_dir);
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -258,6 +270,45 @@ async fn run_once_cached(
             Err(e)
         }
     }
+}
+
+/// Content fingerprint of every watched file, as `sha256(path + content-hash)`
+/// folded over the set in a stable order.
+///
+/// The watcher fires on filesystem *events*, not on content changes, and a
+/// `cargo component build` re-touches the very paths it is watching —
+/// `src/bindings.rs`, `wit/deps/`, `Cargo.toml` — plus their parent
+/// directories. Rebuilding on every event therefore feeds itself: on a fresh
+/// scaffold the loop ran at roughly three builds a second, indefinitely, each
+/// one reporting "pack sha256 unchanged" because nothing had actually changed.
+///
+/// Comparing this fingerprint instead answers the question the watcher cannot:
+/// did any watched byte change? Recomputed *after* a build so the build's own
+/// writes are folded into the baseline rather than triggering the next cycle.
+fn watched_fingerprint(project_dir: &Path) -> String {
+    let mut entries: Vec<(String, String)> = walkdir::WalkDir::new(project_dir)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| {
+            let rel = e.path().strip_prefix(project_dir).ok()?.to_path_buf();
+            if !watcher::should_watch(&rel) {
+                return None;
+            }
+            let bytes = std::fs::read(e.path()).ok()?;
+            Some((
+                rel.to_string_lossy().replace('\\', "/"),
+                greentic_extension_sdk_contract::sha256_hex(&bytes),
+            ))
+        })
+        .collect();
+    entries.sort();
+    let joined = entries
+        .into_iter()
+        .map(|(path, hash)| format!("{path}:{hash}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    greentic_extension_sdk_contract::sha256_hex(joined.as_bytes())
 }
 
 fn count_watched_files(project_dir: &Path) -> usize {
@@ -372,5 +423,54 @@ mod tests {
 
         assert_eq!(info.pack_path, dist.join("demo-0.1.0.gtxpack"));
         assert_eq!(info.pack_name, "demo-0.1.0.gtxpack");
+    }
+
+    /// The watcher fires on filesystem events, and a build re-touches the very
+    /// paths it watches. Only a content change may start a rebuild — otherwise
+    /// `gtdx dev` feeds itself forever.
+    #[test]
+    fn fingerprint_ignores_mtime_and_tracks_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), b"fn main() {}").unwrap();
+        std::fs::write(root.join("describe.json"), b"{}").unwrap();
+
+        let baseline = watched_fingerprint(root);
+
+        // Rewriting identical bytes moves mtime but not content.
+        std::fs::write(root.join("src/lib.rs"), b"fn main() {}").unwrap();
+        assert_eq!(
+            watched_fingerprint(root),
+            baseline,
+            "an mtime-only touch must not look like a change"
+        );
+
+        std::fs::write(root.join("src/lib.rs"), b"fn main() { changed() }").unwrap();
+        assert_ne!(
+            watched_fingerprint(root),
+            baseline,
+            "a real edit must be detected"
+        );
+    }
+
+    /// Files the watcher ignores must not leak into the fingerprint, or every
+    /// `cargo build` writing into `target/` would look like a source change.
+    #[test]
+    fn fingerprint_covers_only_watched_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("target/debug")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), b"fn main() {}").unwrap();
+
+        let baseline = watched_fingerprint(root);
+        std::fs::write(root.join("target/debug/out.wasm"), b"artifact").unwrap();
+
+        assert_eq!(
+            watched_fingerprint(root),
+            baseline,
+            "build output is not a source change"
+        );
     }
 }
