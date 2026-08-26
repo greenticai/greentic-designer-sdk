@@ -108,6 +108,49 @@ struct DescribeJsonRaw {
     secret_requirements: Vec<serde_json::Value>,
 }
 
+/// Invariants the `Addon` type cannot state on its own.
+///
+/// Addon ids namespace to `<extension_id>/<addon_id>` on the platform, so a
+/// duplicate makes one of the two unaddressable. Outputs are addressed by
+/// name from other resources' bindings, so a duplicate means
+/// `${resources.x.outputs.url}` resolves to whichever entry the platform saw
+/// last. And a schema that is not JSON renders as an empty form with no
+/// error — the worst place to discover the typo.
+fn validate_addons(addons: &[contributions::Addon]) -> Result<(), String> {
+    let mut seen_addons = std::collections::BTreeSet::new();
+    for addon in addons {
+        if !seen_addons.insert(addon.id.as_str()) {
+            return Err(format!(
+                "contributions.addons[] declares duplicate id {:?}",
+                addon.id
+            ));
+        }
+
+        let mut seen_outputs = std::collections::BTreeSet::new();
+        for out in &addon.outputs {
+            if !seen_outputs.insert(out.name.as_str()) {
+                return Err(format!(
+                    "addon {:?} declares duplicate output name {:?}",
+                    addon.id, out.name
+                ));
+            }
+        }
+
+        for (field, text) in [
+            ("config_schema", &addon.config_schema),
+            ("desired_state_schema", &addon.desired_state_schema),
+        ] {
+            if serde_json::from_str::<serde_json::Value>(text).is_err() {
+                return Err(format!(
+                    "addon {:?} has a {field} that is not valid JSON",
+                    addon.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl TryFrom<DescribeJsonRaw> for DescribeJson {
     type Error = String;
 
@@ -187,6 +230,8 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
                 }
             }
         }
+
+        validate_addons(&raw.contributions.addons)?;
 
         Ok(DescribeJson {
             schema_ref: raw.schema_ref,
