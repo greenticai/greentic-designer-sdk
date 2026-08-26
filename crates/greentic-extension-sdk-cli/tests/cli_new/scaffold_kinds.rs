@@ -421,6 +421,40 @@ fn design_scaffold_ships_a_working_tool_declared_in_both_places() {
     );
 }
 
+/// Every kind whose guest has a "what do you offer?" export must answer it
+/// with something. Returning an empty list means a freshly scaffolded
+/// extension builds, packs and installs cleanly and then contributes nothing —
+/// no result to see, and nothing to copy when writing the first real one.
+#[test]
+fn every_guest_template_ships_a_working_example() {
+    // (template dir, the listing export, the token proving it returns data)
+    let cases = [
+        ("design", "fn list_tools(", "vec!["),
+        ("bundle", "fn list_recipes(", "vec!["),
+        ("deploy", "fn list_targets(", "vec!["),
+        ("provider", "fn list_channels(", "vec!["),
+        ("llm", "fn list_tools(", "vec!["),
+        ("mcp", "fn list_tools(", "vec!["),
+    ];
+    for (kind, export, proof) in cases {
+        let path = format!(
+            "{}/templates/{kind}/src/lib.rs.tmpl",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let tmpl = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let body = tmpl
+            .split_once(export)
+            .unwrap_or_else(|| panic!("{kind}: no {export} in template"))
+            .1;
+        // Look only at the function body, up to the next item.
+        let body = body.split("\n    fn ").next().unwrap_or(body);
+        assert!(
+            body.contains(proof),
+            "{kind}: {export} returns nothing — a fresh scaffold would contribute no {kind} surface"
+        );
+    }
+}
+
 /// The scaffold renderer treats doubled braces as its own placeholder syntax
 /// and refuses to write a file that still contains one. A Rust format string
 /// escaping braces therefore cannot appear in a template — this guards the
