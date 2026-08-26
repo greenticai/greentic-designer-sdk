@@ -69,6 +69,7 @@ pub(super) fn run(args: &Args) -> anyhow::Result<Resolved> {
         label: args.label.clone(),
         component_ref: args.component_ref.clone(),
         from_openapi,
+        with_view: args.with_view,
     })
 }
 
