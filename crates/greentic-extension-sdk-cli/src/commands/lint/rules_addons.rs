@@ -90,6 +90,83 @@ fn looks_like_a_secret(property: &str) -> bool {
     last_segment(property).eq_ignore_ascii_case("token")
 }
 
+/// Recursively walks a JSON Schema value, calling `on_property` for every
+/// name that appears as a **property key**: every key of a `properties`
+/// object, at any depth reachable through `properties`, `items`, `$defs`,
+/// `definitions`, `patternProperties`, `additionalProperties`, `allOf`,
+/// `anyOf`, `oneOf`. `path` accumulates a human-readable pointer through
+/// `properties`/`items` nesting only (`acl_users[].password`), not through
+/// schema-composition keywords (`$defs`, `allOf`, ...), since those don't
+/// correspond to a position in the *data* shape.
+///
+/// Only names appearing as property keys are ever candidates: the keys of
+/// `patternProperties` are regexes, not property names, and the keys of
+/// `$defs`/`definitions` are def names, not property names, so neither is
+/// ever passed to `on_property` - only their *values* are walked further.
+/// Schema keywords themselves (the literal string `"properties"`, etc.) are
+/// never treated as candidates because they never appear as a map key
+/// *inside* a `properties` object in the shapes this walks. `enum` and
+/// `const` are not in the keyword set walked here, so their values are
+/// never descended into.
+fn walk_schema_properties(
+    schema: &serde_json::Value,
+    path: &str,
+    on_property: &mut impl FnMut(&str, &str),
+) {
+    let Some(obj) = schema.as_object() else {
+        return;
+    };
+
+    if let Some(props) = obj.get("properties").and_then(|p| p.as_object()) {
+        for (name, subschema) in props {
+            let child_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}.{name}")
+            };
+            on_property(name, &child_path);
+            walk_schema_properties(subschema, &child_path, on_property);
+        }
+    }
+
+    if let Some(items) = obj.get("items") {
+        let child_path = format!("{path}[]");
+        match items {
+            serde_json::Value::Array(tuple) => {
+                for item in tuple {
+                    walk_schema_properties(item, &child_path, on_property);
+                }
+            }
+            _ => walk_schema_properties(items, &child_path, on_property),
+        }
+    }
+
+    // `$defs`/`definitions` keys are def names, and `patternProperties` keys
+    // are regexes - neither names a property, so `path` passes through
+    // unchanged and only the values are walked.
+    for key in ["$defs", "definitions", "patternProperties"] {
+        if let Some(map) = obj.get(key).and_then(|v| v.as_object()) {
+            for subschema in map.values() {
+                walk_schema_properties(subschema, path, on_property);
+            }
+        }
+    }
+
+    if let Some(additional) = obj.get("additionalProperties")
+        && additional.is_object()
+    {
+        walk_schema_properties(additional, path, on_property);
+    }
+
+    for key in ["allOf", "anyOf", "oneOf"] {
+        if let Some(branches) = obj.get(key).and_then(|v| v.as_array()) {
+            for branch in branches {
+                walk_schema_properties(branch, path, on_property);
+            }
+        }
+    }
+}
+
 pub(super) fn check_addons(describe: &serde_json::Value) -> Vec<Violation> {
     let mut out = Vec::new();
     let Some(addons) = describe
@@ -154,22 +231,20 @@ pub(super) fn check_addons(describe: &serde_json::Value) -> Vec<Violation> {
             .get("desired_state_schema")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(desired)
-            && let Some(props) = parsed.get("properties").and_then(|p| p.as_object())
-        {
-            for property in props.keys() {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(desired) {
+            walk_schema_properties(&parsed, "", &mut |property, path| {
                 if looks_like_a_secret(property) {
                     out.push(Violation::error(
                         "E_ADDON_SECRET_IN_DESIRED_STATE",
                         format!(
-                            "addon {id:?} declares {property:?} in desired_state_schema. \
+                            "addon {id:?} declares {path:?} in desired_state_schema. \
                              A credential there can never be read back by `observe`, so it \
                              diffs forever and no plan is ever clean. Credentials reach the \
                              addon through its runtime binding instead."
                         ),
                     ));
                 }
-            }
+            });
         }
     }
 

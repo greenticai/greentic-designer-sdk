@@ -1050,3 +1050,80 @@ fn a_describe_with_no_addons_produces_no_violations() {
     let v = check_addons(&json!({ "contributions": {} }));
     assert!(v.is_empty(), "expected no violations, got: {v:?}");
 }
+
+/// D16 cites `rediscloud_acl_user` by name - Redis ACL users, a list of
+/// managed objects each carrying a `password`. The old top-level-only check
+/// never looked inside `items.properties` and so never fired on the exact
+/// case it was written for.
+#[test]
+fn a_secret_nested_under_items_properties_is_caught_with_a_path() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","properties":{
+            "acl_users":{"type":"array","items":{"type":"object",
+                "properties":{"username":{"type":"string"},"password":{"type":"string"}}}}}}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
+        .unwrap_or_else(|| panic!("expected E_ADDON_SECRET_IN_DESIRED_STATE, got: {v:?}"));
+    assert!(
+        hit.message.contains("acl_users[].password"),
+        "message should carry the full path to the offending property: {hit:?}"
+    );
+    assert!(
+        !v.iter().any(|x| x.message.contains("username")),
+        "username is not a secret and must not be flagged: {v:?}"
+    );
+}
+
+/// A secret defined inside `$defs` (reachable only by `$ref` elsewhere in
+/// the schema) must still be caught - the walk covers `$defs` unconditionally
+/// rather than trying to resolve `$ref`.
+#[test]
+fn a_secret_reachable_only_through_defs_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r##"{"type":"object","$defs":{"credentials":{"type":"object",
+            "properties":{"password":{"type":"string"}}}},
+            "properties":{"admin":{"$ref":"#/$defs/credentials"}}}"##
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "a secret nested inside $defs must be caught: {v:?}"
+    );
+}
+
+/// A secret defined inside an `allOf` branch must be caught.
+#[test]
+fn a_secret_inside_an_all_of_branch_is_caught() {
+    let mut a = base_addon();
+    a["desired_state_schema"] = json!(
+        r#"{"type":"object","allOf":[{"type":"object",
+            "properties":{"admin_password":{"type":"string"}}}]}"#
+    );
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.iter()
+            .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
+        "a secret nested inside an allOf branch must be caught: {v:?}"
+    );
+}
+
+/// A JSON Schema may legally have a property literally named `properties`.
+/// The keyword itself must never be treated as a candidate name - only
+/// values that appear as a key *inside* a `properties` map are.
+#[test]
+fn a_property_literally_named_properties_is_evaluated_as_a_property_not_a_keyword() {
+    let mut a = base_addon();
+    a["desired_state_schema"] =
+        json!(r#"{"type":"object","properties":{"properties":{"type":"string"}}}"#);
+    let v = check_addons(&describe_with_addon(&a));
+    assert!(
+        v.is_empty(),
+        "a property literally named `properties` is not itself a secret: {v:?}"
+    );
+}

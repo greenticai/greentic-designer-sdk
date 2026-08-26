@@ -134,19 +134,29 @@ binding, not through desired state. That path is unaffected by this rule —
 this is only about what you put in the schema string in your `describe.json`.
 
 `gtdx lint` catches a property that looks like a credential with
-`E_ADDON_SECRET_IN_DESIRED_STATE`. It checks the top-level property names of
-`desired_state_schema` (after parsing it as JSON) against a list of markers —
-`password`, `secret`, `apikey`, `credential`, `passwd` — matched
-case-insensitively with `-` and `_` stripped, so `api_key`, `apiKey`, and
-`api-key` all trip it. `token` is handled separately and more narrowly: it
-only matches when `token` is the *final* segment of the property name, split
-on `-`, `_`, and camelCase boundaries. That's deliberate — `auth_token` is a
-token, held in the `auth` slot, and gets flagged; `max_tokens` (segment
-"tokens", plural) and `tokenizer` (no segment boundary at all, the whole
-word is "tokenizer") are not, because they aren't credentials, they're a
-count and a component name that happen to contain the letters. `config_schema`
-is never checked by this rule — config isn't reconciled against observed
-state, so it can't diff.
+`E_ADDON_SECRET_IN_DESIRED_STATE`. It walks the *entire* shape of
+`desired_state_schema` (after parsing it as JSON) — every property name
+reachable through `properties`, `items`, `$defs`, `definitions`,
+`patternProperties`, `additionalProperties`, and the `allOf`/`anyOf`/`oneOf`
+branches — not just the top level. That matters for the shape day-2 state
+usually takes: a list of managed objects, like Redis ACL users:
+
+    "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"acl_users\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"username\":{\"type\":\"string\"},\"password\":{\"type\":\"string\"}}}}}}"
+
+is flagged with the path `acl_users[].password`, even though `password` is
+nested two levels deep inside `items.properties`.
+
+A property name is checked against a list of markers — `password`, `secret`,
+`apikey`, `credential`, `passwd` — matched case-insensitively with `-` and
+`_` stripped, so `api_key`, `apiKey`, and `api-key` all trip it. `token` is
+handled separately and more narrowly: it only matches when `token` is the
+*final* segment of the property name, split on `-`, `_`, and camelCase
+boundaries. That's deliberate — `auth_token` is a token, held in the `auth`
+slot, and gets flagged; `max_tokens` (segment "tokens", plural) and
+`tokenizer` (no segment boundary at all, the whole word is "tokenizer") are
+not, because they aren't credentials, they're a count and a component name
+that happen to contain the letters. `config_schema` is never checked by this
+rule — config isn't reconciled against observed state, so it can't diff.
 
 Fix by removing the property from `desired_state_schema` and moving the
 credential to wherever your addon's runtime binding delivers it:
@@ -198,7 +208,7 @@ needed to change shape, stays valid without touching it.
 |---|---|
 | `E_ADDON_ID_PATTERN` | `id` does not match `^[a-z0-9][a-z0-9-]*$` |
 | `E_ADDON_OUTPUT_NAME` | an output `name` does not match `^[A-Za-z_][A-Za-z0-9_]*$` — outputs are injected as environment variables on the consuming service, so the name has to survive that |
-| `E_ADDON_SECRET_IN_DESIRED_STATE` | a top-level property of `desired_state_schema` looks like a credential (see above) |
+| `E_ADDON_SECRET_IN_DESIRED_STATE` | a property of `desired_state_schema`, at any depth, looks like a credential (see above) |
 | `W_ADDON_FAMILY_UNKNOWN` | `family` is not one this `gtdx` build recognizes |
 
 Fixes, in order:
