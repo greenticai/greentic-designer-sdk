@@ -80,10 +80,10 @@ fn the_addon_contract_parses() {
     );
 }
 
-/// The four interfaces are the contract's shape; a rename or an accidental
+/// The five interfaces are the contract's shape; a rename or an accidental
 /// deletion should fail here rather than in a downstream repo.
 #[test]
-fn the_addon_contract_declares_its_four_interfaces() {
+fn the_addon_contract_declares_its_five_interfaces() {
     let Some(root) = wit_root() else {
         eprintln!("workspace wit/ not present — skipping");
         return;
@@ -98,7 +98,7 @@ fn the_addon_contract_declares_its_four_interfaces() {
         .map(|(_, p)| p)
         .expect("extension-addon package present");
 
-    for want in ["validation", "workload", "reconciler", "backup"] {
+    for want in ["types", "validation", "workload", "reconciler", "backup"] {
         assert!(
             pkg.interfaces.contains_key(want),
             "extension-addon must declare interface {want:?}; has {:?}",
