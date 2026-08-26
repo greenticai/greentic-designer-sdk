@@ -43,6 +43,38 @@ impl ExtensionKind {
             Self::WasixMcpRouter => "mcp",
         }
     }
+
+    /// The `serde` wire value for this kind, as it appears in
+    /// `describe.json`'s `kind` field.
+    ///
+    /// Declared separately from the `#[serde(rename = "…")]` attributes
+    /// because attributes are not readable at runtime. `wire_name_matches_serde`
+    /// in `tests/kind.rs` asserts the two agree, so the duplication cannot
+    /// drift silently.
+    #[must_use]
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Design => "DesignExtension",
+            Self::Bundle => "BundleExtension",
+            Self::Deploy => "DeployExtension",
+            Self::Provider => "ProviderExtension",
+            Self::WasixMcpRouter => "wasix:mcp/router",
+        }
+    }
+
+    /// Inverse of [`Self::wire_name`]. `None` for anything this contract
+    /// version does not know — callers decide whether that is an error or a
+    /// skip.
+    #[must_use]
+    pub fn from_wire(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.wire_name() == s)
+    }
+
+    /// Inverse of [`Self::dir_name`].
+    #[must_use]
+    pub fn from_dir_name(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.dir_name() == s)
+    }
 }
 
 #[cfg(test)]
