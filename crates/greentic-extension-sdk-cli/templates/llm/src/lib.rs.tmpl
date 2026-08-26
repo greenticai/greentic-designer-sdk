@@ -154,3 +154,47 @@ impl knowledge::Guest for Component {
 }
 
 bindings::export!(Component with_types_in bindings);
+
+// Unit tests run on the host — no WASM, no designer, milliseconds. The guest
+// exports are plain Rust functions, so call them directly.
+//
+// `cargo test` needs `src/bindings.rs`, which is generated. Build once first
+// (`gtdx dev --once` or `cargo component build`), then test freely.
+//
+// Note the boundary: anything that reaches a host import — `secrets::get`,
+// `http::fetch` — cannot run here. On the host those symbols abort the process
+// outright (SIGABRT, a non-unwinding panic), which takes the whole test binary
+// with it and cannot be caught, not even with `#[should_panic]`.
+//
+// So test up to that line, as below. To cover what lies past it, take the host
+// call as a parameter instead of reaching for it inline, then pass a fake in
+// tests — the SDK ships in-memory mocks for exactly this:
+//
+//     [dev-dependencies]
+//     greentic-extension-sdk-testing = "{{sdk_version}}"
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_completion_tool_is_listed() {
+        let tools = <Component as tools::Guest>::list_tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "complete");
+        // Declared as agentic-worker only: this is not a flow node.
+        assert_eq!(
+            tools[0].capabilities.as_deref(),
+            Some(["agentic_worker".to_string()].as_slice())
+        );
+    }
+
+    /// The unknown-name guard returns before any secret is read or request
+    /// sent, which is both correct and what makes it testable here.
+    #[test]
+    fn an_unknown_tool_is_rejected_before_any_host_call() {
+        assert!(
+            <Component as tools::Guest>::invoke_tool("nope".to_string(), "{}".to_string())
+                .is_err()
+        );
+    }
+}
