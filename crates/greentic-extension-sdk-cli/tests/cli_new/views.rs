@@ -54,6 +54,34 @@ fn scaffold_with_view_produces_a_lintable_project() {
         lint_ok,
         "a fresh --with-view scaffold must lint clean: {lint_err}"
     );
+
+    // The `design` kind is the one every doc points readers at
+    // (`gtdx new my-ext --kind design --with-view`), so it is the path most
+    // deserving of a real schema-validate pass, not just lint. `llm` and
+    // `deploy` already get one; `design` did not.
+    let (validate_ok, _o, validate_err) =
+        run(Command::new(gtdx_bin()).arg("validate").arg(&target));
+    assert!(
+        validate_ok,
+        "a fresh design --with-view scaffold must validate clean: {validate_err}"
+    );
+
+    // `design`'s `echo` tool declares `input_schema` with `required:
+    // ["message"]` (matching the guest's own descriptor in
+    // src/lib.rs.tmpl), so the derived placeholder args must not be the
+    // empty object `const ARGS = {};` — that was the flagship scaffold path
+    // emitting an unusable example call.
+    let app_js = std::fs::read_to_string(target.join("assets/views/hello/app.js"))
+        .expect("read scaffolded app.js");
+    assert!(
+        app_js.contains("\"message\""),
+        "app.js must send the argument echo's own input_schema requires (`message`), \
+         not an empty ARGS object: {app_js}"
+    );
+    assert!(
+        !app_js.contains("const ARGS = {};"),
+        "the flagship --kind design --with-view scaffold must not emit empty args: {app_js}"
+    );
 }
 
 #[test]
