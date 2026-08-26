@@ -180,6 +180,69 @@
             }
           }
         },
+        "addons": {
+          "description": "Managed services this extension offers to an environment - Qdrant, Redis, Postgres. Catalogue metadata only: the platform provisions the workload, and the addon declares what it needs. Secrets never appear in `desired_state_schema`; they reach the addon through its runtime binding, because a secret in desired state can never be read back and so diffs forever.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "family", "display_name", "description", "config_schema", "desired_state_schema"],
+            "properties": {
+              "id": {
+                "description": "Unique within the extension. The platform namespaces it as `<extension_id>/<id>`.",
+                "type": "string"
+              },
+              "family": {
+                "description": "What kind of thing this is - `vector-db`, `cache`, `sql`. A flow asks for the family, not the vendor, so a deployment can substitute one implementation for another. An open string on purpose: describe.json is signed and immutable once published, so a closed enum in it rots. `gtdx lint` warns on an unfamiliar family instead.",
+                "type": "string"
+              },
+              "display_name": { "type": "string" },
+              "description": { "type": "string" },
+              "icon": { "type": "string" },
+              "config_schema": {
+                "description": "JSON Schema (Draft 2020-12) for the knobs a user sets per environment - size, replicas, version. Rendered as a form by the Designer. Stringly-encoded because it is a payload passed to a renderer, not host control data. Must parse as JSON; the Rust deserializer rejects it otherwise.",
+                "type": "string"
+              },
+              "desired_state_schema": {
+                "description": "JSON Schema for the day-2 state the addon reconciles - Qdrant collections, Redis ACL users. Secrets do not belong here: a password in desired state can never be read back by `observe`, so it diffs forever and no plan is ever clean. `gtdx lint` reports a secret-looking property as an error.",
+                "type": "string"
+              },
+              "outputs": {
+                "description": "Values the addon publishes once provisioned, referenced from another resource as `${resources.<id>.outputs.<name>}`.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "type"],
+                  "properties": {
+                    "name": {
+                      "description": "Referenced as `${resources.<id>.outputs.<name>}`. `gtdx lint` constrains this to characters that survive becoming an environment variable, because that is what the platform does with it.",
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Scalar only. An output is interpolated into another resource's configuration, where a structured value has no meaningful rendering; an addon wanting structure exposes several outputs.",
+                      "enum": ["text", "number", "boolean"]
+                    },
+                    "sensitive": {
+                      "description": "A sensitive output never becomes a literal value - the platform resolves it to a secret reference, so it never passes through a plan document, a plan UI, or a support bundle. Getting this wrong is how a password ends up in a log.",
+                      "type": "boolean"
+                    },
+                    "description": { "type": "string" }
+                  }
+                }
+              },
+              "supports_backup": {
+                "description": "Whether the addon can snapshot before a destructive change. The platform offers to back up on the strength of this flag, so declare true only when a snapshot genuinely happens.",
+                "type": "boolean"
+              },
+              "schema_version": {
+                "description": "Version of this addon's `desired_state_schema`, not of the addon. It lets one extension migrate instances from a v1 shape to a v2 shape rather than breaking them. Defaults to 1.",
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
         "connection_test": {
           "description": "Optional self-test the extension declares so a consumer (designer, gtdx, store) can verify a live connection or credential by invoking one of the extension's own tools. Snake-case on the wire, unlike the camelCase siblings in this block - that spelling matches how extensions and the designer already read `contributions.connection_test`.",
           "type": "object",
