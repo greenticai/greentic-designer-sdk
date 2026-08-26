@@ -1,6 +1,11 @@
 // Provider extension guest for {{id}}.
 //
-// This scaffold implements the messaging-only provider contract as TODO stubs.
+// This scaffold ships one working channel — `webhook` — so a fresh build has
+// something to show: the designer lists the channel, renders its credential
+// and config forms from the schemas below, and `dry_run_encode` round-trips a
+// sample. Replace it with your real channel rather than starting from a blank
+// file.
+//
 // Two extra steps a provider author must complete before `gtdx publish`:
 //
 // 1. Replace the bundled `.gtpack` runtime: set
@@ -19,7 +24,6 @@ use bindings::greentic::extension_base::types;
 // `Direction`, `CardTier` and the profile records live here — needed as soon
 // as `list_channels` returns a real profile. The error type does NOT: the WIT
 // declares `extension-error`, which comes from `extension-base/types`.
-#[allow(unused_imports)]
 use bindings::greentic::extension_provider::types as provider_types;
 
 struct Component;
@@ -34,10 +38,15 @@ impl manifest::Guest for Component {
         }
     }
 
+    /// Capabilities other extensions may depend on. A provider usually offers
+    /// something like `greentic:channels/webhook`; keep this in step with
+    /// `capabilities.offered` in describe.json.
     fn get_offered() -> Vec<types::CapabilityRef> {
         Vec::new()
     }
 
+    /// Capabilities this provider needs from others. The designer refuses to
+    /// enable an extension whose required capabilities are unmet.
     fn get_required() -> Vec<types::CapabilityRef> {
         Vec::new()
     }
@@ -45,46 +54,105 @@ impl manifest::Guest for Component {
 
 // ---- extension-base/lifecycle ----
 impl lifecycle::Guest for Component {
+    /// `config_json` is this provider's settings, serialised. Returning `Err`
+    /// stops the provider loading at all — reserve it for configuration that
+    /// is genuinely unusable, not for missing optional values.
     fn init(_config_json: String) -> Result<(), types::ExtensionError> {
-        // TODO: initialize any state the provider needs (clients, caches, etc.).
         Ok(())
     }
 
     fn shutdown() {
-        // TODO: flush/close whatever `init` set up.
+        // Flush or close whatever `init` set up. Only needed for effects that
+        // outlive the component itself.
     }
 }
 
 // ---- extension-provider/messaging ----
+// A channel is one way this provider can send or receive. The designer lists
+// them, renders their schemas as forms, and uses `dry_run_encode` to preview
+// an outbound envelope without sending anything.
 impl messaging::Guest for Component {
+    /// Every channel this provider can talk to.
+    ///
+    /// `tier_support` says how richly the channel can render a card, best
+    /// first: native rendering, then attachment, then a fallback layout, then
+    /// plain text. Declaring the honest floor matters — the designer downgrades
+    /// content to the best tier a channel actually claims.
     fn list_channels() -> Vec<messaging::ChannelProfile> {
-        // TODO: return every channel this provider can talk to.
-        Vec::new()
+        vec![messaging::ChannelProfile {
+            id: "webhook".to_string(),
+            display_name: "Webhook".to_string(),
+            // `Outbound` sends only. Use `Inbound` for receive-only, or
+            // `Bidirectional` when the same channel does both.
+            direction: provider_types::Direction::Outbound,
+            tier_support: vec![provider_types::CardTier::TierDTextOnly],
+            // Free-form hints for the designer UI. Keys are yours to choose.
+            metadata: vec![("transport".to_string(), "http".to_string())],
+        }]
     }
 
-    fn describe_channel(
-        id: String,
-    ) -> Result<messaging::ChannelProfile, types::ExtensionError> {
-        // TODO: look up and return the channel profile.
-        Err(types::ExtensionError::NotFound(id))
+    /// Look up one channel. Returning `NotFound` for an id you do not own is
+    /// correct — the designer treats it as "ask someone else".
+    fn describe_channel(id: String) -> Result<messaging::ChannelProfile, types::ExtensionError> {
+        Self::list_channels()
+            .into_iter()
+            .find(|c| c.id == id)
+            .ok_or(types::ExtensionError::NotFound(id))
     }
 
+    /// JSON Schema for the channel's *credentials*. The designer renders this
+    /// as the "Add credential" form, and the runtime injects the stored values
+    /// at execution time.
+    ///
+    /// Never return the credential values themselves — only their shape.
     fn secret_schema(id: String) -> Result<String, types::ExtensionError> {
-        // TODO: return a JSON Schema for the channel's credentials.
-        Err(types::ExtensionError::NotFound(id))
+        match id.as_str() {
+            "webhook" => Ok(r#"{
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "title": "Webhook URL",
+                        "description": "Where outbound messages are POSTed"
+                    }
+                },
+                "required": ["url"]
+            }"#
+            .to_string()),
+            _ => Err(types::ExtensionError::NotFound(id)),
+        }
     }
 
+    /// JSON Schema for per-channel configuration — the non-secret settings a
+    /// user tunes per deployment.
     fn config_schema(id: String) -> Result<String, types::ExtensionError> {
-        // TODO: return a JSON Schema for per-channel configuration.
-        Err(types::ExtensionError::NotFound(id))
+        match id.as_str() {
+            "webhook" => Ok(r#"{
+                "type": "object",
+                "properties": {
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "title": "Timeout (seconds)",
+                        "default": 10
+                    }
+                }
+            }"#
+            .to_string()),
+            _ => Err(types::ExtensionError::NotFound(id)),
+        }
     }
 
-    fn dry_run_encode(
-        id: String,
-        _sample: Vec<u8>,
-    ) -> Result<Vec<u8>, types::ExtensionError> {
-        // TODO: encode the sample as this channel's outbound envelope.
-        Err(types::ExtensionError::NotFound(id))
+    /// Encode `sample` as this channel's outbound envelope, without sending
+    /// it. The designer uses this for preview, so it must stay side-effect
+    /// free: no network, no writes.
+    fn dry_run_encode(id: String, sample: Vec<u8>) -> Result<Vec<u8>, types::ExtensionError> {
+        match id.as_str() {
+            // This channel POSTs the payload unchanged, so the envelope is the
+            // sample. A real channel would wrap it — JSON body, form fields,
+            // whatever the far end expects.
+            "webhook" => Ok(sample),
+            _ => Err(types::ExtensionError::NotFound(id)),
+        }
     }
 }
 

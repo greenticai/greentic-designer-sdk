@@ -373,3 +373,102 @@ fn scaffolded_worlds_reference_versions_the_vendored_packages_declare() {
         );
     }
 }
+
+/// A design scaffold used to implement every export as an empty stub, so a
+/// fresh build contributed nothing: it installed cleanly and the designer had
+/// nothing to show. It now ships one working tool, and the tool has to be
+/// declared in both places or it is never offered — the guest implements it,
+/// `contributions.tools` lists it.
+#[test]
+fn design_scaffold_ships_a_working_tool_declared_in_both_places() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("demo");
+    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("demo")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new failed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+
+    let lib = std::fs::read_to_string(proj.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains(r#"name: "echo".to_string()"#),
+        "the guest must implement a real tool, not an empty Vec: {lib}"
+    );
+    assert!(
+        !lib.contains("fn list_tools() -> Vec<tools::ToolDefinition> {\n        Vec::new()"),
+        "list_tools must not be an empty stub"
+    );
+
+    let describe: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
+    let tools = describe["contributions"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 1, "describe must declare the tool: {describe}");
+    assert_eq!(tools[0]["name"], "echo");
+    // Governance rule E_EXPORT_FORM: fully-qualified export reference.
+    assert_eq!(
+        tools[0]["export"],
+        "greentic:extension-design/tools.invoke-tool"
+    );
+    // The runtime_ref must resolve to a declared component, or lint fails with
+    // a dangling reference.
+    let runtime_ref = tools[0]["runtime_ref"].as_str().unwrap();
+    assert!(
+        describe["runtime"]["components"].get(runtime_ref).is_some(),
+        "runtime_ref {runtime_ref} does not resolve: {describe}"
+    );
+}
+
+/// Every kind whose guest has a "what do you offer?" export must answer it
+/// with something. Returning an empty list means a freshly scaffolded
+/// extension builds, packs and installs cleanly and then contributes nothing —
+/// no result to see, and nothing to copy when writing the first real one.
+#[test]
+fn every_guest_template_ships_a_working_example() {
+    // (template dir, the listing export, the token proving it returns data)
+    let cases = [
+        ("design", "fn list_tools(", "vec!["),
+        ("bundle", "fn list_recipes(", "vec!["),
+        ("deploy", "fn list_targets(", "vec!["),
+        ("provider", "fn list_channels(", "vec!["),
+        ("llm", "fn list_tools(", "vec!["),
+        ("mcp", "fn list_tools(", "vec!["),
+    ];
+    for (kind, export, proof) in cases {
+        let path = format!(
+            "{}/templates/{kind}/src/lib.rs.tmpl",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let tmpl = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let body = tmpl
+            .split_once(export)
+            .unwrap_or_else(|| panic!("{kind}: no {export} in template"))
+            .1;
+        // Look only at the function body, up to the next item.
+        let body = body.split("\n    fn ").next().unwrap_or(body);
+        assert!(
+            body.contains(proof),
+            "{kind}: {export} returns nothing — a fresh scaffold would contribute no {kind} surface"
+        );
+    }
+}
+
+/// The scaffold renderer treats doubled braces as its own placeholder syntax
+/// and refuses to write a file that still contains one. A Rust format string
+/// escaping braces therefore cannot appear in a template — this guards the
+/// design guest, where the temptation is strongest.
+#[test]
+fn design_template_has_no_stray_placeholder_braces() {
+    let template = include_str!("../../templates/design/src/lib.rs.tmpl");
+    let known = ["{{id}}", "{{version}}"];
+    let mut rest = template.to_string();
+    for k in known {
+        rest = rest.replace(k, "");
+    }
+    assert!(
+        !rest.contains("{{"),
+        "template contains doubled braces that are not known placeholders — it will fail to render"
+    );
+}
