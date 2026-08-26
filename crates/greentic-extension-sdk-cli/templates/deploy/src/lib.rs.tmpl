@@ -164,3 +164,57 @@ impl deployment::Guest for Component {
 }
 
 bindings::export!(Component with_types_in bindings);
+
+// Unit tests run on the host — no WASM, no designer, milliseconds. The guest
+// exports are plain Rust functions, so call them directly.
+//
+// `cargo test` needs `src/bindings.rs`, which is generated. Build once first
+// (`gtdx dev --once` or `cargo component build`), then test freely.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_target_is_listed() {
+        let targets = <Component as targets::Guest>::list_targets();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].id, "dry-run");
+    }
+
+    /// `supports_rollback` is a promise the designer acts on, so the two must
+    /// agree: a target that declares `false` has to refuse `rollback`.
+    #[test]
+    fn rollback_matches_what_the_target_declares() {
+        let target = &<Component as targets::Guest>::list_targets()[0];
+        assert!(!target.supports_rollback);
+        assert!(<Component as deployment::Guest>::rollback("any".to_string()).is_err());
+    }
+
+    #[test]
+    fn deploy_returns_a_job_that_poll_can_settle() {
+        let job = <Component as deployment::Guest>::deploy(deployment::DeployRequest {
+            target_id: "dry-run".to_string(),
+            artifact_bytes: Vec::new(),
+            credentials_json: "{}".to_string(),
+            config_json: "{}".to_string(),
+            deployment_name: "demo".to_string(),
+        })
+        .expect("dry-run is implemented");
+
+        let settled = <Component as deployment::Guest>::poll(job.id).expect("poll answers");
+        // Terminal, or the designer polls forever.
+        assert!(matches!(
+            settled.status,
+            deployment::DeployStatus::Running
+                | deployment::DeployStatus::Failed
+                | deployment::DeployStatus::RolledBack
+        ));
+    }
+
+    #[test]
+    fn an_unknown_target_is_an_error() {
+        assert!(
+            <Component as targets::Guest>::credential_schema("nope".to_string()).is_err()
+        );
+    }
+}

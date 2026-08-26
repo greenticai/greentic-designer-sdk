@@ -157,3 +157,49 @@ impl messaging::Guest for Component {
 }
 
 bindings::export!(Component with_types_in bindings);
+
+// Unit tests run on the host — no WASM, no designer, milliseconds. The guest
+// exports are plain Rust functions, so call them directly.
+//
+// `cargo test` needs `src/bindings.rs`, which is generated. Build once first
+// (`gtdx dev --once` or `cargo component build`), then test freely.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_channel_is_listed_and_describable() {
+        let channels = <Component as messaging::Guest>::list_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].id, "webhook");
+        // list and describe must agree, or the designer shows one thing and
+        // resolves another.
+        let described = <Component as messaging::Guest>::describe_channel("webhook".to_string())
+            .expect("webhook is implemented");
+        assert_eq!(described.id, channels[0].id);
+    }
+
+    #[test]
+    fn the_channel_declares_its_schemas() {
+        let secret = <Component as messaging::Guest>::secret_schema("webhook".to_string())
+            .expect("webhook is implemented");
+        assert!(secret.contains("url"), "got: {secret}");
+        assert!(<Component as messaging::Guest>::config_schema("webhook".to_string()).is_ok());
+    }
+
+    /// `dry_run_encode` powers preview, so it must be pure: same input, same
+    /// output, no side effects.
+    #[test]
+    fn dry_run_encode_round_trips() {
+        let sample = b"hello".to_vec();
+        let encoded =
+            <Component as messaging::Guest>::dry_run_encode("webhook".to_string(), sample.clone())
+                .expect("webhook is implemented");
+        assert_eq!(encoded, sample);
+    }
+
+    #[test]
+    fn an_unknown_channel_is_an_error() {
+        assert!(<Component as messaging::Guest>::describe_channel("nope".to_string()).is_err());
+    }
+}
