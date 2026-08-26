@@ -29,6 +29,25 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
+**Use 1.2.11 or newer.** An extension can now declare the managed services it
+offers — Qdrant, Redis, Postgres — as a typed `contributions.addons` block, so
+the Designer can list them and render their configuration forms. Nothing
+provisions yet: the platform owns provisioning and the addon declares what it
+needs, which is the split that lets one declaration serve both hosted and
+bring-your-own-cloud placement later. Read
+[docs/authoring-addons.md](docs/authoring-addons.md) before publishing one —
+an addon-bearing extension does not load on any designer or runner released so
+far, for the same `deny_unknown_fields` reason views hit.
+
+It also closes a lint that had never fired. `W_DESCRIBE_DIFF_BREAKING` read
+`extensions/<kind>/<id>/describe.json` while installs land at
+`<id>-<version>/`, so the rule returned nothing for every extension kind — and
+both of its test layers pinned the same wrong layout, which is why it looked
+healthy. Alongside it, five hand-written lists of extension kinds now derive
+from `ExtensionKind::ALL`: `gtdx search --kind provider` answered "unknown
+kind" for a kind shipped since 1.2.0, and installing a provider extension
+skipped the designer-compatibility check while reporting success.
+
 **Use 1.2.10 or newer.** Two things landed in it.
 
 It is the first release where an extension can contribute a page, not just
