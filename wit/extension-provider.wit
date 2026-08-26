@@ -40,7 +40,7 @@ interface types {
 }
 
 interface messaging {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   use types.{channel-id, channel-profile};
 
   list-channels: func() -> list<channel-profile>;
@@ -51,7 +51,7 @@ interface messaging {
 }
 
 interface event-source {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   use types.{trigger-id, trigger-profile};
 
   list-trigger-types: func() -> list<trigger-profile>;
@@ -60,7 +60,7 @@ interface event-source {
 }
 
 interface event-sink {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   use types.{event-id, event-profile};
 
   list-event-types: func() -> list<event-profile>;
@@ -69,64 +69,64 @@ interface event-sink {
 }
 
 world messaging-only-provider {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export messaging;
 }
 
 world event-source-only-provider {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export event-source;
 }
 
 world event-sink-only-provider {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export event-sink;
 }
 
 world messaging-and-event-source-provider {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export messaging;
   export event-source;
 }
 
 world messaging-and-event-sink-provider {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export messaging;
   export event-sink;
 }
 
 world full-provider {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export messaging;
   export event-source;
   export event-sink;

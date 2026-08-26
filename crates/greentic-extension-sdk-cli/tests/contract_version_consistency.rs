@@ -63,10 +63,11 @@ fn wit_files_declare_consistent_package_version() {
         return;
     }
     // Per-file expected @version. CONTRACT_VERSION is the contract generation
-    // (the shared base all worlds import); extension-design carries an internal
-    // increment for its `roles` interface, so it is one minor ahead.
+    // (the shared base all worlds import); extension-design carried an internal
+    // increment for its `roles` interface under the 0.2.0 generation, putting
+    // it one minor ahead — the 0.3.0 generation now matches it.
     let expected: &[(&str, &str)] = &[
-        ("extension-base.wit", "0.2.0"),
+        ("extension-base.wit", "0.3.0"),
         ("extension-design.wit", "0.3.0"),
         ("extension-bundle.wit", "0.2.0"),
         ("extension-deploy.wit", "0.2.0"),
@@ -91,8 +92,8 @@ fn wit_files_declare_consistent_package_version() {
     }
     let constant_version = greentic_extension_sdk_cli_for_tests::contract_version();
     assert_eq!(
-        constant_version, "0.2.0",
-        "CONTRACT_VERSION ({constant_version}) must equal the base contract generation 0.2.0",
+        constant_version, "0.3.0",
+        "CONTRACT_VERSION ({constant_version}) must equal the base contract generation 0.3.0",
     );
     // Every wit file on disk must be covered by the expected map, so a newly
     // added contract file can't silently skip version assertion.

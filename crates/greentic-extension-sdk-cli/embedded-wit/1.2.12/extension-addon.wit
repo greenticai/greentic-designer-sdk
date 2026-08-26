@@ -58,7 +58,7 @@ interface types {
 /// config selects, that a name is free in this instance. Shape is a schema's
 /// job; meaning needs code.
 interface validation {
-  use greentic:extension-base/types@0.2.0.{diagnostic};
+  use greentic:extension-base/types@0.3.0.{diagnostic};
   use types.{resource-id, versioned-state};
 
   /// Returns `[]` when the config is usable. Diagnostic-only rather than
@@ -81,7 +81,7 @@ interface validation {
 /// platform does. That split is what lets one declaration serve both hosted
 /// and bring-your-own-cloud placement.
 interface workload {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   use types.{resource-id, value-ref};
 
   record port {
@@ -199,7 +199,7 @@ interface workload {
 /// users. Level-triggered — the platform re-derives everything from observed
 /// state rather than remembering which step it was on.
 interface reconciler {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   use types.{resource-id, value-ref, versioned-state};
 
   /// How to reach the live instance. Every value the addon needs in order to
@@ -337,7 +337,7 @@ interface reconciler {
 /// `observe` returns "a snapshot was taken before the thing that has not
 /// happened yet". Modelling it as desired state would make it diff forever.
 interface backup {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   use types.{resource-id};
   use reconciler.{binding};
 
@@ -368,12 +368,9 @@ interface backup {
     -> result<_, extension-error>;
 }
 
-/// NOTE FOR IMPLEMENTERS: these worlds can be declared today but not yet
-/// correctly implemented. `manifest.get-identity()` returns an
-/// `extension-identity` whose `kind` field is an enum that has no `addon`
-/// variant, and adding one is a breaking change to `greentic:extension-base`.
-/// The contract is here to be reviewed and versioned; a component implementing
-/// it waits on `extension-base@0.3.0`. This is deliberate, not an oversight.
+/// NOTE FOR IMPLEMENTERS: as of `extension-base@0.3.0`, `kind` has an
+/// `addon` variant, so `manifest.get-identity()` can now honestly identify
+/// a component implementing these worlds.
 ///
 /// More generally: none of the platform-side enforcement described in this
 /// file's doc comments — plan-time refusal, digest-pinning, plan/apply
@@ -381,14 +378,14 @@ interface backup {
 /// comments state the contract the platform will be held to, not behaviour
 /// that exists today.
 world addon-extension {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
   import greentic:extension-host/secrets@0.1.0;
   import greentic:extension-host/http@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export validation;
   export workload;
   export reconciler;
@@ -400,14 +397,14 @@ world addon-extension {
 /// therefore reads the capability off the declared world rather than trusting
 /// a boolean.
 world addon-extension-with-backup {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
   import greentic:extension-host/secrets@0.1.0;
   import greentic:extension-host/http@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export validation;
   export workload;
   export reconciler;
