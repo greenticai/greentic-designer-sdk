@@ -10,6 +10,7 @@ use std::{
 };
 
 use clap::Args as ClapArgs;
+use greentic_extension_sdk_contract::extension_id::validate_extension_id;
 
 use crate::scaffold::{
     Kind,
@@ -206,7 +207,21 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
     })?;
     let id = args.id.clone().unwrap_or_else(|| default_id(&name));
     let author = args.author.clone().unwrap_or_else(detect_git_author);
-    validate_id(&id)?;
+    validate_name(&name)?;
+    // A derived id that fails is really a complaint about the project name, and
+    // saying so is the difference between a fixable error and a baffling one:
+    // `provider-3aigent` is a perfectly good crate name, so nothing about
+    // "invalid extension id" points back at what the author typed.
+    validate_id(&id).map_err(|e| {
+        if args.id.is_some() {
+            e
+        } else {
+            e.context(format!(
+                "the id was derived from the project name {name:?}; rename the project \
+                 or pass --id <reverse-dns>"
+            ))
+        }
+    })?;
     validate_version(&args.version)?;
     Ok(Resolved {
         name,
@@ -562,44 +577,89 @@ fn detect_git_author() -> String {
 
 /// The `metadata.id` a scaffold gets when the author passes no `--id`.
 ///
-/// Deliberately under the `greentic.` namespace. `gtdx lint`'s `E_ID_PATTERN`
-/// requires `^greentic\.[a-z0-9][a-z0-9-]*$`, so any other default ships a
-/// scaffold that fails the linter shipped beside it — which is exactly what
-/// `com.example.<name>` did for every kind, on an untouched `gtdx new`.
+/// `greentic.` is a default, not a requirement — `E_ID_PATTERN` accepts any
+/// reverse-DNS namespace. It stays the default because a scaffold has no way to
+/// know which namespace its author owns, and `com.example.<name>` (the previous
+/// default) shipped a placeholder namespace nobody controls.
 ///
-/// `validate_id` already constrains each reverse-DNS segment to
-/// `^[a-z][a-z0-9-]*$`, so a name that scaffolds at all is lint-clean here.
+/// A name that scaffolds at all is `<lowercase-kebab>`, and the id rule allows a
+/// later segment to start with a digit, so `greentic.<name>` is always valid
+/// here — including `greentic.3aigent-designer`, which the old rule rejected.
 pub(crate) fn default_id(name: &str) -> String {
     format!("greentic.{name}")
 }
 
-fn validate_id(id: &str) -> anyhow::Result<()> {
-    if !is_reverse_dns(id) {
-        anyhow::bail!("id must match reverse-DNS (got {id:?})");
+/// What a project name must match once its dots are folded to dashes.
+const PROJECT_NAME_PATTERN: &str = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
+
+/// The project name must be a valid cargo package name.
+///
+/// It is spent as `[package] name`, with `.` folded to `-` the way
+/// `build_context` derives `name_cargo`, so cargo's rules are the ones that
+/// bind here — not WIT's, which apply to the id instead (see
+/// [`greentic_extension_sdk_contract::extension_id`]). The two differ in
+/// exactly one place that matters: cargo allows a digit-led word after the
+/// first (`provider-3aigent` is a fine crate), WIT does not.
+///
+/// Checked here rather than left to the build, because cargo's own refusal
+/// (`invalid character `3` in package name`) arrives only once the author runs
+/// `gtdx build`, from a file they did not write.
+///
+/// # Errors
+///
+/// Returns an error naming the offending part when `name` would not be a valid
+/// cargo package name.
+pub(super) fn validate_name(name: &str) -> anyhow::Result<()> {
+    let cargo_name = name.replace('.', "-");
+    let fail = |why: String| -> anyhow::Result<()> {
+        anyhow::bail!(
+            "project name {name:?} is invalid: {why}. It becomes the cargo package \
+             name {cargo_name:?}, so it must match {PROJECT_NAME_PATTERN}"
+        )
+    };
+
+    if cargo_name.is_empty() {
+        return fail("it is empty".to_string());
+    }
+    for (index, word) in cargo_name.split('-').enumerate() {
+        let mut chars = word.chars();
+        let Some(first) = chars.next() else {
+            return fail(
+                "it has an empty word — '-' and '.' must each sit between two words, so no                  leading, trailing or doubled separator"
+                    .to_string(),
+            );
+        };
+        // Only the very first character is barred from being a digit; cargo is
+        // happy with `provider-3aigent`.
+        if index == 0 && !first.is_ascii_lowercase() {
+            return fail(if first.is_ascii_digit() {
+                format!(
+                    "it starts with {first:?} — a cargo package name may not start with a digit"
+                )
+            } else {
+                format!("it starts with {first:?} — it must start with a lowercase letter a-z")
+            });
+        }
+        if let Some(ch) = word
+            .chars()
+            .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit()))
+        {
+            return fail(if ch.is_whitespace() {
+                format!("the word {word:?} contains whitespace")
+            } else if ch == '_' {
+                format!("the word {word:?} contains {ch:?} — use '-' instead of '_'")
+            } else {
+                format!(
+                    "the word {word:?} contains {ch:?} — only lowercase letters a-z, digits                      0-9, '-' and '.' are allowed"
+                )
+            });
+        }
     }
     Ok(())
 }
 
-pub(super) fn is_reverse_dns(id: &str) -> bool {
-    // Reverse-DNS: [a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+
-    let parts: Vec<&str> = id.split('.').collect();
-    if parts.len() < 2 {
-        return false;
-    }
-    for p in parts {
-        if p.is_empty() {
-            return false;
-        }
-        let mut chars = p.chars();
-        let first = chars.next().unwrap();
-        if !first.is_ascii_lowercase() {
-            return false;
-        }
-        if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-            return false;
-        }
-    }
-    true
+fn validate_id(id: &str) -> anyhow::Result<()> {
+    validate_extension_id(id).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn validate_version(version: &str) -> anyhow::Result<()> {

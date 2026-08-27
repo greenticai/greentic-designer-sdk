@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use dialoguer::{Confirm, Input, Select};
 
-use super::{Args, Resolved, detect_git_author, is_reverse_dns};
+use greentic_extension_sdk_contract::extension_id::validate_extension_id;
+
+use super::{Args, Resolved, detect_git_author};
 use crate::scaffold::Kind;
 
 /// Extension kinds offered in the picker, each with a one-line description.
@@ -169,23 +171,12 @@ fn print_summary(name: &str, kind: Kind, id: &str, version: &str, author: &str, 
 // dialoguer's `Validate<String>` bound forces a `&String` receiver here.
 #[allow(clippy::ptr_arg)]
 fn validate_name(input: &String) -> Result<(), String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err("name cannot be empty".to_string());
-    }
-    if trimmed.chars().any(char::is_whitespace) {
-        return Err("name cannot contain whitespace (use kebab-case)".to_string());
-    }
-    Ok(())
+    super::validate_name(input.trim()).map_err(|e| e.to_string())
 }
 
 #[allow(clippy::ptr_arg)]
 fn validate_id_input(input: &String) -> Result<(), String> {
-    if is_reverse_dns(input.trim()) {
-        Ok(())
-    } else {
-        Err("must be reverse-DNS, e.g. com.acme.my-ext".to_string())
-    }
+    validate_extension_id(input.trim()).map_err(|e| e.to_string())
 }
 
 #[allow(clippy::ptr_arg)]
@@ -226,10 +217,74 @@ mod tests {
         assert!(validate_name(&"my ext".to_string()).is_err());
     }
 
+    /// The name becomes the cargo package name (with `.` folded to `-`), which
+    /// may not start with a digit — cargo refuses the scaffold outright with
+    /// `invalid character `3` in package name`.
+    #[test]
+    fn name_validation_rejects_a_leading_digit() {
+        let msg = validate_name(&"3aigent-designer".to_string()).expect_err("leading digit");
+        assert!(msg.contains("3aigent-designer"), "{msg}");
+        assert!(msg.contains("cargo"), "should say whose rule it is: {msg}");
+    }
+
+    /// A dotted name is folded to `-` for the cargo package name, so it is fine
+    /// — several kinds' fixtures rely on it.
+    #[test]
+    fn name_validation_accepts_a_dotted_name() {
+        assert!(validate_name(&"greentic.snap-test".to_string()).is_ok());
+    }
+
+    /// Only the *first* character is barred from being a digit here. A digit-led
+    /// word later on is fine for cargo; it is the derived id that rejects it,
+    /// with its own message about WIT.
+    #[test]
+    fn name_validation_accepts_a_digit_led_word() {
+        assert!(validate_name(&"provider-3aigent".to_string()).is_ok());
+        assert!(validate_name(&"provider-aigent3".to_string()).is_ok());
+    }
+
+    /// A `\` line-continuation that gets lost leaves a run of indentation
+    /// spaces in the middle of the sentence the author actually reads.
+    #[test]
+    fn name_validation_message_has_no_double_spaces() {
+        let msg = validate_name(&"3aigent-designer".to_string()).expect_err("leading digit");
+        assert!(!msg.contains("  "), "collapsed continuation in: {msg}");
+    }
+
+    #[test]
+    fn name_validation_rejects_underscore() {
+        let msg = validate_name(&"telco_x".to_string()).expect_err("underscore");
+        assert!(msg.contains('_'), "{msg}");
+    }
+
     #[test]
     fn id_validation_enforces_reverse_dns() {
         assert!(validate_id_input(&"com.acme.my-ext".to_string()).is_ok());
         assert!(validate_id_input(&"not-reverse-dns".to_string()).is_err());
+    }
+
+    /// Digits are fine once a word has started; a digit-led word is not, because
+    /// the id becomes the WIT package name.
+    #[test]
+    fn id_validation_accepts_digits_inside_a_word() {
+        assert!(validate_id_input(&"greentic.aigent3-designer".to_string()).is_ok());
+    }
+
+    #[test]
+    fn id_validation_rejects_a_digit_led_word() {
+        let msg = validate_id_input(&"greentic.3aigent-designer".to_string())
+            .expect_err("digit-led word");
+        assert!(msg.contains("3aigent"), "{msg}");
+        assert!(msg.contains("WIT"), "{msg}");
+    }
+
+    /// The old message was a bare "must be reverse-DNS, e.g. com.acme.my-ext" —
+    /// it never said which part of the id was wrong.
+    #[test]
+    fn id_validation_message_names_the_offending_part() {
+        let msg = validate_id_input(&"greentic.telco_x".to_string()).expect_err("underscore");
+        assert!(msg.contains("telco_x"), "{msg}");
+        assert!(msg.contains('_'), "{msg}");
     }
 
     #[test]
