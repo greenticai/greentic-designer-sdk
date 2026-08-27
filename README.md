@@ -274,7 +274,7 @@ locally, or `gtdx lint --publish --dir <ext>` to also enforce
 | `E_EXPORT_FORM` | `tools[].export` must be a fully-qualified `greentic:extension-design/<interface>.<member>` reference (e.g. `tools.invoke-tool`, `validation.validate-content`, `knowledge.get-entry`) | Replace bare names like `"invoke-tool"` with the fully-qualified form. |
 | `E_ENGINE_DEPRECATED` | the `engine` block is forbidden | Move version constraints into `compat.min_designer_version` / `compat.min_runner_version` and delete `engine`. Templates stopped emitting it in 1.2.1, so this no longer fires on a fresh scaffold. |
 | `E_SHA256_ZERO` | (`--publish` only) no placeholder `0000…` hashes | Let the build/publish step fill real `sha256` values before publishing. |
-| `E_ID_PATTERN` | `metadata.id` must match `^greentic\.[a-z0-9][a-z0-9-]*$` | Use a lowercase-kebab id under the `greentic.` namespace. |
+| `E_ID_PATTERN` | `metadata.id` must match `^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*(\.[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*)+$` | Use a reverse-DNS id in a namespace you control: `greentic.my-ext`, `com.acme.my-ext`. Any namespace is accepted (the `greentic.` prefix stopped being mandatory in 1.2.16). Each segment is a WIT kebab-name, because `gtdx new` turns the id into the WIT package name — so every dash-separated word must start with a letter: `greentic.aigent3-designer` is valid, `greentic.3aigent-designer` and `greentic.provider-3aigent` are not. 1.2.16 accepted those two and produced scaffolds `cargo component build` refused; 1.2.17 rejects them at `gtdx new`. |
 | `E_TOOL_NAMING` | tool names must be `snake_case` with no near-duplicate prefixes | Rename camelCase tools; disambiguate pairs like `generate_gtpack` / `generate_gtpack_from_sorla_yaml`. |
 
 ### Quick dev-loop install
