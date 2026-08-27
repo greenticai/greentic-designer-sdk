@@ -1,25 +1,32 @@
 //! `metadata.id` validation — the one rule `gtdx new`, `gtdx lint` and
 //! `gtdx publish` all share.
 //!
-//! There used to be four spellings of this rule, and they disagreed:
-//! `describe-v2.json` and `gtdx lint` accepted a segment starting with a digit
-//! while `gtdx new` and `gtdx publish` rejected it, so `gtdx new
-//! 3aigent-designer` offered a default id its own wizard refused. `gtdx lint`
-//! additionally hard-required the `greentic.` prefix, which no other layer
-//! asked for. This module is the single source of truth; every caller reports
-//! the same verdict and quotes the same [`EXTENSION_ID_PATTERN`].
+//! There used to be four spellings of this rule and they disagreed, so an id
+//! could be schema-valid and lint-clean yet unpublishable, or scaffoldable yet
+//! lint-rejected, depending on which layer saw it first. This module is the
+//! single source of truth; every caller reports the same verdict and quotes the
+//! same [`EXTENSION_ID_PATTERN`].
 //!
-//! The rule: two or more `.`-separated segments; the first segment starts with
-//! a lowercase letter (so an id never reads as a number); later segments may
-//! start with a digit; every segment continues in lowercase letters, digits and
-//! `-`. No namespace is privileged.
+//! The rule: two or more `.`-separated segments, each a WIT kebab-name. No
+//! namespace is privileged — `com.acme.my-ext` is as valid as `greentic.my-ext`.
+//!
+//! Segments are WIT kebab-names because `gtdx new` spends the id as one:
+//! `id_to_wit_package` turns `greentic.telco-x` into `package greentic:telco-x;`
+//! and `package.metadata.component.package`. 1.2.16 briefly allowed a segment
+//! to start with a digit — `describe-v2.json` permits it — and that produced
+//! scaffolds `cargo component build` refused with `invalid label: dash-separated
+//! words must begin with an ASCII lowercase letter`. An id that cannot be built
+//! is not a valid id, so the stricter rule wins.
 
 use std::fmt;
+
+use crate::wit_name::{KebabViolation, check_wit_kebab};
 
 /// The regex the rule implements. Quoted verbatim in error messages, docs and
 /// the `describe-v2.json` `metadata.id` description, so it must stay in step
 /// with [`validate_extension_id`].
-pub const EXTENSION_ID_PATTERN: &str = "^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$";
+pub const EXTENSION_ID_PATTERN: &str =
+    "^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*(\\.[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*)+$";
 
 /// Why an id was rejected, with enough detail for the message to point at the
 /// offending part rather than restating the regex.
@@ -31,16 +38,9 @@ enum Reason {
     EmptySegment {
         position: usize,
     },
-    FirstSegmentNotLetter {
+    Segment {
         segment: String,
-        first: char,
-    },
-    SegmentStartsWithHyphen {
-        segment: String,
-    },
-    InvalidChar {
-        segment: String,
-        ch: char,
+        violation: KebabViolation,
     },
 }
 
@@ -76,45 +76,24 @@ impl fmt::Display for ExtensionIdError {
                 "segment {position} is empty — every '.' must sit between two segments, \
                  so no leading, trailing or doubled '.'"
             ),
-            Reason::FirstSegmentNotLetter { segment, first } => write!(
-                f,
-                "the first segment {segment:?} starts with {first:?} — the first segment \
-                 must start with a lowercase letter a-z (later segments may start with a \
-                 digit, so \"greentic.3aigent\" is fine while \"3aigent.designer\" is not)"
-            ),
-            Reason::SegmentStartsWithHyphen { segment } => write!(
-                f,
-                "segment {segment:?} starts with '-' — a segment may contain '-' but must \
-                 not begin with one"
-            ),
-            Reason::InvalidChar { segment, ch } if ch.is_whitespace() => write!(
-                f,
-                "segment {segment:?} contains whitespace — segments may only use lowercase \
-                 letters a-z, digits 0-9 and '-'"
-            ),
-            Reason::InvalidChar { segment, ch } if ch.is_ascii_uppercase() => write!(
-                f,
-                "segment {segment:?} contains {ch:?} — segments may only use lowercase \
-                 letters a-z, digits 0-9 and '-' (ids are lowercase-only)"
-            ),
-            Reason::InvalidChar { segment, ch } if *ch == '_' => write!(
-                f,
-                "segment {segment:?} contains {ch:?} — segments may only use lowercase \
-                 letters a-z, digits 0-9 and '-' (use '-' instead of '_')"
-            ),
-            Reason::InvalidChar { segment, ch } => write!(
-                f,
-                "segment {segment:?} contains {ch:?} — segments may only use lowercase \
-                 letters a-z, digits 0-9 and '-'"
-            ),
+            Reason::Segment { segment, violation } => {
+                write!(f, "in segment {segment:?}, {violation}")
+            }
         }?;
-        write!(f, ". Expected {EXTENSION_ID_PATTERN}")
+        // The id becomes the WIT package name, so saying so here is what makes
+        // a later `cargo component build` failure recognisable as this rule.
+        write!(
+            f,
+            ". The id becomes the WIT package name, so it must match \
+             {EXTENSION_ID_PATTERN}"
+        )
     }
 }
 
 impl std::error::Error for ExtensionIdError {}
 
-/// Validate a `metadata.id`, naming the offending segment when it fails.
+/// Validate a `metadata.id`, naming the offending segment and word when it
+/// fails.
 ///
 /// # Errors
 ///
@@ -136,37 +115,21 @@ pub fn validate_extension_id(id: &str) -> Result<(), ExtensionIdError> {
         return fail(Reason::SingleSegment);
     }
     for (position, segment) in segments.iter().enumerate() {
-        let mut chars = segment.chars();
-        let Some(first) = chars.next() else {
-            return fail(Reason::EmptySegment {
-                position: position + 1,
-            });
-        };
-        // Only the first segment is barred from starting with a digit: an id
-        // whose very first character is a digit reads as a number, while
-        // `greentic.3aigent-designer` does not.
-        let first_ok = if position == 0 {
-            first.is_ascii_lowercase()
-        } else {
-            first.is_ascii_lowercase() || first.is_ascii_digit()
-        };
-        if !first_ok {
-            let segment = (*segment).to_owned();
-            return if first == '-' {
-                fail(Reason::SegmentStartsWithHyphen { segment })
-            } else if position == 0 {
-                fail(Reason::FirstSegmentNotLetter { segment, first })
-            } else {
-                fail(Reason::InvalidChar { segment, ch: first })
-            };
-        }
-        if let Some(ch) =
-            chars.find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-'))
-        {
-            return fail(Reason::InvalidChar {
-                segment: (*segment).to_owned(),
-                ch,
-            });
+        match check_wit_kebab(segment) {
+            Ok(()) => {}
+            // An empty segment is about the id's dots, not the segment's
+            // dashes, so it is reported in the id's own terms.
+            Err(KebabViolation::Empty) => {
+                return fail(Reason::EmptySegment {
+                    position: position + 1,
+                });
+            }
+            Err(violation) => {
+                return fail(Reason::Segment {
+                    segment: (*segment).to_owned(),
+                    violation,
+                });
+            }
         }
     }
     Ok(())

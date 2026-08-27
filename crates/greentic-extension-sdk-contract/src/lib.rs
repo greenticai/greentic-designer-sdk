@@ -23,6 +23,7 @@ pub mod runtime_component;
 pub mod schema;
 pub mod sha256;
 pub mod signature;
+pub mod wit_name;
 
 pub use self::agentic_worker::{
     AgenticWorkerMetadata, Cost, SideEffects, ToolCapability, UsageExample,
