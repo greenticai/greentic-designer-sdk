@@ -264,6 +264,28 @@
               "type": "object"
             }
           }
+        },
+        "messaging_channel": {
+          "description": "The messaging channel a provider extension offers, so a consumer can present it for selection and, when a deployment is built, bake the right provider pack into the bundle. Snake-case on the wire for the same reason as `connection_test` above. Absent means the extension offers no channel, which is the normal state and never an error.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "ref"],
+          "properties": {
+            "id": {
+              "description": "Stable channel id, e.g. `messaging-3aigent-gui`. This is the identity a consumer stores against a deployment and later resolves back to `ref`, so renaming it orphans every deployment that already selected the channel.",
+              "type": "string",
+              "minLength": 1
+            },
+            "ref": {
+              "description": "OCI reference of the messaging provider pack to bake into a bundle. Digest-pinned references are strongly preferred: a tag can be moved to different bytes after publication, so a bundle built from one is not reproducible. A consumer may warn on, or refuse, an unpinned reference.",
+              "type": "string",
+              "pattern": "^oci://"
+            },
+            "label": {
+              "description": "Display name for the channel. Absent means a consumer should fall back to `metadata.name`. The field exists for the case where the channel's name and the extension's name legitimately differ.",
+              "type": "string"
+            }
+          }
         }
       }
     },
