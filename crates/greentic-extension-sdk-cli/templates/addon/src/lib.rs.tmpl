@@ -66,8 +66,22 @@ const DEFAULT_EVICTION_POLICY: &str = "noeviction";
 /// below) — the same value the `CACHE_PASSWORD` output declared in
 /// `describe.json`'s `contributions.addons[].outputs` resolves to once the
 /// platform materialises it. Named once here so the two documents cannot
-/// silently drift apart; `describe.json`'s `runtime.permissions.secrets`
-/// grants this exact name.
+/// silently drift apart.
+///
+/// It needs no entry in `describe.json`'s `runtime.permissions.secrets`, and
+/// adding one is an error the linter rejects. A `secret-ref` in
+/// `container.env` is a REQUEST: it names a secret for the platform to
+/// materialise — generating a value if none exists — and inject into the
+/// container's environment. This component never reads it, so there is
+/// nothing to grant read permission for.
+///
+/// The opposite direction is the one that would need a grant.
+/// `reconciler.binding.outputs` hands the guest a `secret-ref` that POINTS at
+/// an existing value, which the guest resolves through
+/// `extension-host/secrets` — and that read is what
+/// `runtime.permissions.secrets` exists to authorise. This scaffold never
+/// does it, because the only function that would is `observe`, which fails
+/// loudly instead of pretending.
 const SECRET_CACHE_PASSWORD: &str = "cache-password";
 
 // ---- extension-base/manifest ----
