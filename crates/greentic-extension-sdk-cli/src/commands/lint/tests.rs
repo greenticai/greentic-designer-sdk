@@ -421,7 +421,8 @@ fn id_pattern_rejects_bad_id() {
         "greentic.",
         "greentic.Sorla",
         "greentic.-x",
-        "com.example.x",
+        "3aigent.designer",
+        "greentic.telco_x",
     ] {
         let d = json!({ "metadata": { "id": bad } });
         let v = check_id_pattern(&d);
@@ -436,6 +437,12 @@ fn id_pattern_accepts_good_id() {
         "greentic.sorla",
         "greentic.telco-x-tools",
         "greentic.operala",
+        // A later segment may start with a digit, and the namespace is the
+        // author's to choose — both were rejected before, in disagreement with
+        // `describe-v2.json`.
+        "greentic.3aigent-designer",
+        "com.acme.my-ext",
+        "io.github.someone.3d-viewer",
     ] {
         let d = json!({ "metadata": { "id": good } });
         assert!(
@@ -673,6 +680,17 @@ fn secret_key_canonical_rejects_uri_scheme() {
     assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
 }
 
+/// `E_ID_PATTERN` used to print only the regex, leaving the author to diff
+/// their id against it by eye.
+#[test]
+fn id_pattern_message_names_the_offending_part() {
+    let d = json!({ "metadata": { "id": "greentic.Sorla" } });
+    let v = check_id_pattern(&d);
+    assert_eq!(v.len(), 1);
+    assert!(v[0].message.contains("Sorla"), "{}", v[0].message);
+    assert!(v[0].message.contains("lowercase"), "{}", v[0].message);
+}
+
 #[test]
 fn secret_key_canonical_rejects_star_wildcard() {
     let d = json!({ "requiredSecrets": [{ "key": "*" }] });
@@ -683,17 +701,19 @@ fn secret_key_canonical_rejects_star_wildcard() {
 
 /// The scaffold's default id must satisfy the linter shipped beside it.
 ///
-/// `gtdx new` defaulted to `com.example.<name>` while `E_ID_PATTERN` requires
+/// `gtdx new` defaulted to `com.example.<name>` while `E_ID_PATTERN` required
 /// the `greentic.` namespace, so an untouched scaffold failed `gtdx lint` with
 /// exit 1 for every kind — the tool's own output rejected by its own governance
 /// rule, with nothing anywhere connecting the two. Both sides were deliberate
 /// and neither knew about the other.
 ///
-/// This asserts the pair rather than either half: change the namespace the rule
-/// enforces, or the namespace the scaffold defaults to, and this fails.
+/// The namespace requirement is gone, but the pairing still needs asserting:
+/// the scaffold default must satisfy the linter shipped beside it, whatever
+/// either one becomes. `a1` and `3d` cover the digits that the pre-1.2.16 rule
+/// choked on.
 #[test]
 fn the_scaffold_default_id_passes_the_id_rule() {
-    for name in ["demo", "telco-x", "a1"] {
+    for name in ["demo", "telco-x", "a1", "3aigent-designer", "3d"] {
         let id = crate::commands::new::default_id(name);
         let d = json!({ "metadata": { "id": id } });
         let v = check_id_pattern(&d);

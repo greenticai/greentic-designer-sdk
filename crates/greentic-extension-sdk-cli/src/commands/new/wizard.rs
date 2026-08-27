@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use dialoguer::{Confirm, Input, Select};
 
-use super::{Args, Resolved, detect_git_author, is_reverse_dns};
+use greentic_extension_sdk_contract::extension_id::validate_extension_id;
+
+use super::{Args, Resolved, detect_git_author};
 use crate::scaffold::Kind;
 
 /// Extension kinds offered in the picker, each with a one-line description.
@@ -186,11 +188,7 @@ fn validate_name(input: &String) -> Result<(), String> {
 
 #[allow(clippy::ptr_arg)]
 fn validate_id_input(input: &String) -> Result<(), String> {
-    if is_reverse_dns(input.trim()) {
-        Ok(())
-    } else {
-        Err("must be reverse-DNS, e.g. com.acme.my-ext".to_string())
-    }
+    validate_extension_id(input.trim()).map_err(|e| e.to_string())
 }
 
 #[allow(clippy::ptr_arg)]
@@ -233,6 +231,23 @@ mod tests {
     fn id_validation_enforces_reverse_dns() {
         assert!(validate_id_input(&"com.acme.my-ext".to_string()).is_ok());
         assert!(validate_id_input(&"not-reverse-dns".to_string()).is_err());
+    }
+
+    /// `gtdx new 3aigent-designer` offered `greentic.3aigent-designer` as the
+    /// default and then refused it, looping the prompt forever. A later segment
+    /// may start with a digit — `describe-v2.json` always allowed it.
+    #[test]
+    fn id_validation_accepts_a_digit_led_segment() {
+        assert!(validate_id_input(&"greentic.3aigent-designer".to_string()).is_ok());
+    }
+
+    /// The old message was a bare "must be reverse-DNS, e.g. com.acme.my-ext" —
+    /// it never said which part of the id was wrong.
+    #[test]
+    fn id_validation_message_names_the_offending_part() {
+        let msg = validate_id_input(&"greentic.telco_x".to_string()).expect_err("underscore");
+        assert!(msg.contains("telco_x"), "{msg}");
+        assert!(msg.contains('_'), "{msg}");
     }
 
     #[test]
