@@ -269,3 +269,85 @@ fn publish_icon_patches_describe() {
         serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
     assert_eq!(d["metadata"]["icon"], "assets/icon.svg");
 }
+
+/// `gtdx publish --dry-run` is documented as "Build + pack + validate; skip
+/// registry write." The skip was real for the registry, but the pack step
+/// (`build_pack_with_key` filling `runtime.components.*.gtpack.sha256` from the
+/// scaffold's all-zero placeholder) wrote the computed hash straight back into
+/// the project's `describe.json` on disk *before* the dry-run bail-out — so a
+/// dry run left the working tree dirty. In a real session this made a
+/// controller hand a subagent a "clean tree" that was not clean.
+///
+/// This test needs no toolchain: `--wasm` substitutes a stub component for
+/// `cargo component build`, exercising the exact packer code path
+/// (`fill_self_contained_hashes`) that mutated describe.json, without the
+/// `GTDX_RUN_BUILD` gate the other tests in this file require.
+#[test]
+fn dry_run_does_not_mutate_describe_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("demo");
+    let home = tmp.path().join("home");
+
+    let (ok, o, e) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("demo")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("--author")
+        .arg("tester")
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new failed: {o}\n{e}");
+
+    let describe_path = proj.join("describe.json");
+    let before = std::fs::read(&describe_path).unwrap();
+    // Sanity: the scaffold really does ship the all-zero placeholder this test
+    // depends on `--dry-run` leaving untouched.
+    assert!(
+        String::from_utf8_lossy(&before)
+            .contains("0000000000000000000000000000000000000000000000000000000000000000"),
+        "fixture assumption broken: scaffold no longer ships a placeholder sha256"
+    );
+
+    let wasm = tmp.path().join("stub.wasm");
+    std::fs::write(&wasm, b"\0asm\x01\0\0\0").unwrap();
+
+    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+        .env("GREENTIC_HOME", &home)
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--format")
+        .arg("json")
+        .arg("--manifest")
+        .arg(proj.join("Cargo.toml"))
+        .arg("--dist")
+        .arg(proj.join("dist"))
+        .arg("--wasm")
+        .arg(&wasm));
+    assert!(ok, "gtdx publish --dry-run failed: {stdout}\n{stderr}");
+
+    let after = std::fs::read(&describe_path).unwrap();
+    assert_eq!(
+        before, after,
+        "publish --dry-run must not mutate describe.json on disk"
+    );
+
+    // The registry write really was skipped.
+    assert!(
+        !home.join("registries/local").exists(),
+        "--dry-run must still skip the registry write"
+    );
+
+    // The pack + reported sha256 must still be computed for real — that's the
+    // point of a dry run — even though the on-disk describe.json is untouched.
+    let report: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("dry-run --format json did not print JSON: {e}\n{stdout}"));
+    let sha256 = report["sha256"]
+        .as_str()
+        .expect("dry-run report must include sha256");
+    assert_eq!(sha256.len(), 64, "sha256 must be a real 64-hex digest");
+    assert_ne!(
+        sha256, "0000000000000000000000000000000000000000000000000000000000000000",
+        "dry-run must report the real computed sha256, not the placeholder"
+    );
+}
