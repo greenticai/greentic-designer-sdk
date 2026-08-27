@@ -1,4 +1,4 @@
-package greentic:extension-base@0.2.0;
+package greentic:extension-base@0.3.0;
 
 interface types {
   record extension-identity {
@@ -12,6 +12,9 @@ interface types {
     bundle,
     deploy,
     provider,
+    /// A component the platform provisions and reconciles as declarative
+    /// infrastructure — see `wit/extension-addon.wit`.
+    addon,
   }
 
   record capability-ref {

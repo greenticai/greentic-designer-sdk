@@ -713,7 +713,7 @@ fn the_scaffold_default_id_passes_the_id_rule() {
 fn kind_dir_name_resolves_every_kind() {
     use greentic_extension_sdk_contract::ExtensionKind;
 
-    for kind in ExtensionKind::ALL {
+    for kind in ExtensionKind::ALL.iter().copied() {
         assert_eq!(
             super::rules::kind_dir_name(kind.wire_name()),
             Some(kind.dir_name()),
@@ -725,7 +725,10 @@ fn kind_dir_name_resolves_every_kind() {
 
 #[test]
 fn kind_dir_name_rejects_an_unknown_wire_name() {
-    assert_eq!(super::rules::kind_dir_name("AddonExtension"), None);
+    // `AddonExtension` used to be the canonical "not a kind yet" example
+    // here; now that `ExtensionKind::Addon` exists (wire name
+    // `AddonExtension`), `BogusExtension` fills that role instead.
+    assert_eq!(super::rules::kind_dir_name("BogusExtension"), None);
 }
 
 // --- contributions.views[] (August 2026) ---

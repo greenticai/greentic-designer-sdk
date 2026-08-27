@@ -150,7 +150,7 @@ fn parse_pack_name(filename: &str) -> anyhow::Result<(String, String)> {
 /// designer-compatibility check entirely while still reporting success.
 fn find_installed_describe_bytes(storage: &Storage, name: &str, version: &str) -> Option<Vec<u8>> {
     let dir_name = format!("{name}-{version}");
-    ExtensionKind::ALL.into_iter().find_map(|kind| {
+    ExtensionKind::ALL.iter().copied().find_map(|kind| {
         std::fs::read(storage.kind_dir(kind).join(&dir_name).join("describe.json")).ok()
     })
 }
@@ -179,7 +179,7 @@ mod tests {
     /// designer-compatibility warning.
     #[test]
     fn finds_a_describe_installed_under_any_kind() {
-        for kind in ExtensionKind::ALL {
+        for kind in ExtensionKind::ALL.iter().copied() {
             let home = tempfile::tempdir().expect("tempdir");
             let storage = Storage::new(home.path());
             let dir = storage.kind_dir(kind).join("greentic.demo-0.1.0");

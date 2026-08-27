@@ -1,0 +1,22 @@
+package {{id_wit}};
+
+// Mirrors `addon-extension` from `greentic:extension-addon@{{wit_version_addon}}` —
+// deliberately the world WITHOUT `backup`. Selecting
+// `addon-extension-with-backup` here (and exporting `backup`) would claim a
+// snapshot capability this scaffold does not implement; `describe.json`'s
+// `supports_backup: false` and this world's missing `backup` export are the
+// same claim made twice, in two places the platform can each check
+// independently.
+world extension {
+  import greentic:extension-base/types@{{wit_version_base}};
+  import greentic:extension-host/logging@{{wit_version_host}};
+  import greentic:extension-host/i18n@{{wit_version_host}};
+  import greentic:extension-host/secrets@{{wit_version_host}};
+  import greentic:extension-host/http@{{wit_version_host}};
+
+  export greentic:extension-base/manifest@{{wit_version_base}};
+  export greentic:extension-base/lifecycle@{{wit_version_base}};
+  export greentic:extension-addon/validation@{{wit_version_addon}};
+  export greentic:extension-addon/workload@{{wit_version_addon}};
+  export greentic:extension-addon/reconciler@{{wit_version_addon}};
+}

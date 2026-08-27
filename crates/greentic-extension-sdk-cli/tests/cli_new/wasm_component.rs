@@ -214,21 +214,17 @@ fn wasm_component_node_points_at_a_component_with_an_oci_ref() {
 /// failing the project's own linter.
 #[test]
 fn scaffolded_describes_carry_no_deprecated_engine_block() {
-    for kind in [
-        "design",
-        "bundle",
-        "deploy",
-        "provider",
-        "llm",
-        "wasm-component",
-    ] {
+    // Every scaffoldable kind (`fixtures::all_kind_strs`, read back out of
+    // the compiled binary's own `--kind` parser rather than hand-listed) —
+    // the `engine` block is deprecated across all of them, not just some.
+    for kind in crate::fixtures::all_kind_strs() {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join("demo");
         let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
             .arg("new")
             .arg("demo")
             .arg("--kind")
-            .arg(kind)
+            .arg(&kind)
             .arg("--dir")
             .arg(&proj)
             .arg("-y")

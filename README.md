@@ -1,6 +1,6 @@
 # greentic-designer-sdk
 
-Public SDK for authoring [Greentic Designer](https://greentic.ai) extensions — Bundle, Design, Deploy, Provider, WASM-component, and LLM extension kinds.
+Public SDK for authoring [Greentic Designer](https://greentic.ai) extensions — Bundle, Design, Deploy, Provider, WASM-component, LLM, and Addon extension kinds.
 
 ## What this is
 
@@ -206,7 +206,7 @@ There are two ways to scaffold. Pick whichever you prefer:
 
 ```bash
 # 1) Flag-driven (scriptable, CI-friendly)
-gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm | mcp
+gtdx new my-ext --kind design     # or: bundle | deploy | provider | wasm-component | llm | mcp | addon
 
 # wasm-component wraps an already-published component as a palette node, so it
 # needs that component's OCI reference — digest-pinned. Omit it and the

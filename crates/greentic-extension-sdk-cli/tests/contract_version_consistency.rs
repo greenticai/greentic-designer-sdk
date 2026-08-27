@@ -63,10 +63,11 @@ fn wit_files_declare_consistent_package_version() {
         return;
     }
     // Per-file expected @version. CONTRACT_VERSION is the contract generation
-    // (the shared base all worlds import); extension-design carries an internal
-    // increment for its `roles` interface, so it is one minor ahead.
+    // (the shared base all worlds import); extension-design carried an internal
+    // increment for its `roles` interface under the 0.2.0 generation, putting
+    // it one minor ahead — the 0.3.0 generation now matches it.
     let expected: &[(&str, &str)] = &[
-        ("extension-base.wit", "0.2.0"),
+        ("extension-base.wit", "0.3.0"),
         ("extension-design.wit", "0.3.0"),
         ("extension-bundle.wit", "0.2.0"),
         ("extension-deploy.wit", "0.2.0"),
@@ -80,19 +81,26 @@ fn wit_files_declare_consistent_package_version() {
         let path = wit_root.join(name);
         let text =
             std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read wit/{name}: {e}"));
-        let first_line = text.lines().next().unwrap_or_default();
-        let at = first_line
+        // The `package` statement is not necessarily the first line: a
+        // package-level `///` doc comment (see `wit/extension-addon.wit`) is
+        // required to precede it, so this scans for the declaration by
+        // prefix rather than assuming line 0.
+        let decl_line = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("package "))
+            .unwrap_or_else(|| panic!("wit/{name} declares no `package` line"));
+        let at = decl_line
             .find('@')
-            .unwrap_or_else(|| panic!("wit/{name} declares no @version: {first_line:?}"));
-        let after = &first_line[at + 1..];
+            .unwrap_or_else(|| panic!("wit/{name} declares no @version: {decl_line:?}"));
+        let after = &decl_line[at + 1..];
         let semi = after.find(';').unwrap_or(after.len());
         let got = after[..semi].trim();
         assert_eq!(got, *want, "wit/{name} declares @{got}, expected @{want}");
     }
     let constant_version = greentic_extension_sdk_cli_for_tests::contract_version();
     assert_eq!(
-        constant_version, "0.2.0",
-        "CONTRACT_VERSION ({constant_version}) must equal the base contract generation 0.2.0",
+        constant_version, "0.3.0",
+        "CONTRACT_VERSION ({constant_version}) must equal the base contract generation 0.3.0",
     );
     // Every wit file on disk must be covered by the expected map, so a newly
     // added contract file can't silently skip version assertion.

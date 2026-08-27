@@ -16,6 +16,7 @@ static TEMPLATES_MCP: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/mcp"
 static TEMPLATES_OPENAPI_CONNECTOR: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/templates/openapi-connector");
 static TEMPLATES_VIEW_ADDON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/view-addon");
+static TEMPLATES_ADDON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/addon");
 
 #[derive(Debug, Clone)]
 pub struct TemplateEntry {
@@ -114,6 +115,7 @@ pub fn load_templates_kind(kind: &str) -> anyhow::Result<Vec<TemplateEntry>> {
         "llm" => collect(&TEMPLATES_LLM),
         "mcp" => collect(&TEMPLATES_MCP),
         "openapi-connector" => collect(&TEMPLATES_OPENAPI_CONNECTOR),
+        "addon" => collect(&TEMPLATES_ADDON),
         other => anyhow::bail!("no scaffold templates for kind `{other}`"),
     };
     Ok(entries)
@@ -351,7 +353,7 @@ mod tests {
     /// well as wasm32. It must not use `wit-bindgen-rt` directly.
     #[test]
     fn every_kind_template_ships_wit_bindgen_rt_0_41() {
-        for kind in ["design", "bundle", "deploy", "provider", "llm"] {
+        for kind in ["design", "bundle", "deploy", "provider", "llm", "addon"] {
             let entries = load_templates_kind(kind)
                 .unwrap_or_else(|e| panic!("kind {kind} templates resolve: {e}"));
             let cargo_toml = entries
@@ -494,14 +496,43 @@ mod tests {
         }
     }
 
+    /// The `addon` template tree resolves through `load_templates_kind` and
+    /// ships the canonical 5-file skeleton plus a pinned dev-dependency on
+    /// `greentic-extension-sdk-testing`, whose conformance helpers the
+    /// scaffold's own tests hold `plan` to (see
+    /// `tests::plan_is_idempotent_and_stable` in `src/lib.rs.tmpl`).
+    #[test]
+    fn load_kind_addon_returns_full_template_set() {
+        let entries = load_templates_kind("addon").expect("addon templates resolve");
+        let names: Vec<&str> = entries.iter().map(|e| e.dst_rel.as_str()).collect();
+        for expected in [
+            "Cargo.toml",
+            "describe.json",
+            "src/lib.rs",
+            "wit/world.wit",
+            "rust-toolchain.toml",
+        ] {
+            assert!(names.contains(&expected), "missing {expected}: {names:?}");
+        }
+        let cargo_toml = entries
+            .iter()
+            .find(|e| e.dst_rel == "Cargo.toml")
+            .expect("addon Cargo.toml present");
+        let content = std::str::from_utf8(cargo_toml.src_bytes).expect("utf8");
+        assert!(
+            content.contains("greentic-extension-sdk-testing"),
+            "addon Cargo.toml must dev-depend on greentic-extension-sdk-testing:\n{content}",
+        );
+    }
+
     /// A kind with no match arm used to scaffold zero kind files and report
     /// success — the user got the common overlay and nothing else: no
     /// src/lib.rs, no describe.json, no Cargo.toml.
     #[test]
     fn an_unknown_kind_is_an_error() {
-        let err = load_templates_kind("addon").expect_err("unknown kind must error");
+        let err = load_templates_kind("widget").expect_err("unknown kind must error");
         assert!(
-            err.to_string().contains("addon"),
+            err.to_string().contains("widget"),
             "the error should name the offending kind, got: {err}"
         );
     }

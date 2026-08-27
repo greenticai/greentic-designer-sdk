@@ -8,9 +8,13 @@
 use greentic_extension_sdk_contract::describe::DescribeJson;
 
 fn describe_with(addons: &serde_json::Value) -> serde_json::Value {
+    describe_with_kind("DesignExtension", addons)
+}
+
+fn describe_with_kind(kind: &str, addons: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "apiVersion": "greentic.ai/v2",
-        "kind": "DesignExtension",
+        "kind": kind,
         "compat": {
             "min_designer_version": ">=1.2.0",
             "min_runner_version": "^1.2.0",
@@ -194,5 +198,36 @@ fn a_desired_state_schema_of_null_is_rejected() {
     assert!(
         err.to_string().contains("desired_state_schema"),
         "error should name the field: {err}"
+    );
+}
+
+/// Forward direction only: an `AddonExtension` declaring zero addons installs
+/// and contributes nothing, so it must be rejected. This is the one direction
+/// `Contributions` itself cannot express, the same way it cannot express
+/// `execution.is_some()` requiring `kind == Bundle`.
+#[test]
+fn addon_extension_with_no_addons_is_rejected() {
+    let d = describe_with_kind("AddonExtension", &serde_json::json!([]));
+    let err = parse(d).expect_err("kind=AddonExtension with an empty addons[] must be rejected");
+    assert!(
+        err.to_string().contains("AddonExtension"),
+        "error should name the kind: {err}"
+    );
+}
+
+/// The reverse is not enforced: `kind=AddonExtension` with a real addon
+/// declared parses fine.
+#[test]
+fn addon_extension_with_an_addon_is_accepted() {
+    let d = describe_with_kind(
+        "AddonExtension",
+        &serde_json::json!([addon(
+            "qdrant",
+            &serde_json::json!([{ "name": "url", "type": "text" }])
+        )]),
+    );
+    assert!(
+        parse(d).is_ok(),
+        "kind=AddonExtension with a declared addon must parse"
     );
 }

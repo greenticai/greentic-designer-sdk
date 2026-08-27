@@ -16,6 +16,7 @@ pub enum Kind {
     WasmComponent,
     Mcp,
     Llm,
+    Addon,
 }
 
 impl Kind {
@@ -28,6 +29,7 @@ impl Kind {
             Kind::WasmComponent => "wasm-component",
             Kind::Mcp => "mcp",
             Kind::Llm => "llm",
+            Kind::Addon => "addon",
         }
     }
 }
@@ -51,7 +53,7 @@ mod tests {
         assert_eq!(Kind::Llm.as_str(), "llm");
     }
 
-    /// A sixth `ExtensionKind` compiles and passes every kind-dependent
+    /// A new `ExtensionKind` compiles and passes every kind-dependent
     /// guard in the contract and CLI crates (install, list, search,
     /// validate) without a matching `scaffold::Kind` variant, template
     /// tree, embedded WIT, or wizard entry — `gtdx new --kind <it>` would
@@ -60,21 +62,22 @@ mod tests {
     /// This ties the two enums together: every `ExtensionKind::ALL` entry
     /// must be scaffoldable via some `scaffold::Kind` (matched by
     /// `dir_name()` == `as_str()`), unless explicitly exempted below with a
-    /// comment explaining why. All five are scaffoldable today.
+    /// comment explaining why. There are no exemptions today — every
+    /// `ExtensionKind` `gtdx new` knows about can be scaffolded from
+    /// scratch.
     #[test]
     fn every_extension_kind_is_scaffoldable() {
         use clap::ValueEnum as _;
         use greentic_extension_sdk_contract::ExtensionKind;
 
         // Deliberately non-scaffoldable `ExtensionKind`s go here, with a
-        // comment saying why `gtdx new` cannot produce them. Empty today —
-        // every kind that can be installed can also be scaffolded.
+        // comment saying why `gtdx new` cannot produce them.
         const NON_SCAFFOLDABLE: &[ExtensionKind] = &[];
 
         let scaffoldable: Vec<&'static str> =
             Kind::value_variants().iter().map(|k| k.as_str()).collect();
 
-        for kind in ExtensionKind::ALL {
+        for kind in ExtensionKind::ALL.iter().copied() {
             if NON_SCAFFOLDABLE.contains(&kind) {
                 continue;
             }

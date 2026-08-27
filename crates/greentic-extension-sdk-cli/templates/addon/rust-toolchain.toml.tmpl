@@ -1,0 +1,11 @@
+[toolchain]
+channel = "1.95.0"
+# Both, deliberately: `gtdx dev`/`gtdx dev --once` invoke
+# `cargo component build --target wasm32-wasip2` (this addon's primary build
+# path), while a bare `cargo component build` — as run by `build.sh` and as
+# this crate's own `mod bindings;` doc comment tells you to run once before
+# `cargo test` — has cargo-component 0.21 default to wasm32-wasip1 instead.
+# Declaring only one of the two means a fresh machine that provisions targets
+# from this file can hit a "target not installed" failure on whichever path
+# it takes second. Declaring both means either path just works.
+targets = ["wasm32-wasip1", "wasm32-wasip2"]

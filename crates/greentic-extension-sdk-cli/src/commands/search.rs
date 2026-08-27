@@ -74,7 +74,7 @@ mod tests {
     /// hand-listed four dir names. Every kind must parse.
     #[test]
     fn every_kind_dir_name_parses() {
-        for kind in ExtensionKind::ALL {
+        for kind in ExtensionKind::ALL.iter().copied() {
             let parsed = parse_kind_arg(Some(kind.dir_name()))
                 .unwrap_or_else(|e| panic!("{} should parse: {e}", kind.dir_name()));
             assert_eq!(parsed, Some(kind));

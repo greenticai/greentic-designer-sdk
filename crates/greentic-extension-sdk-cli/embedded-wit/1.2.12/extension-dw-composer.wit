@@ -9,7 +9,7 @@ package greentic:dw-composer@0.2.0;
 /// responsible for serialising its strongly-typed request structs into JSON
 /// before calling and for parsing the returned JSON into its own types.
 interface composer {
-    use greentic:extension-base/types@0.2.0.{extension-error};
+    use greentic:extension-base/types@0.3.0.{extension-error};
 
     /// Return a JSON descriptor string (`ComposerDescriptor`) describing
     /// this composer — its id, display name, supported intents, and
@@ -41,6 +41,6 @@ interface composer {
 }
 
 world dw-composer-extension {
-    import greentic:extension-base/types@0.2.0;
+    import greentic:extension-base/types@0.3.0;
     export composer;
 }

@@ -257,6 +257,7 @@ const WIT_VERSION_PLACEHOLDERS: &[(&str, &str)] = &[
     ("wit_version_bundle", "bundle"),
     ("wit_version_deploy", "deploy"),
     ("wit_version_provider", "provider"),
+    ("wit_version_addon", "addon"),
 ];
 
 /// The `greentic:extension-<pkg>@<version>` reference a given kind is authored
@@ -735,9 +736,17 @@ fn print_checks(checks: &[Check]) {
 
 #[cfg(test)]
 mod tests {
-    use super::oci_ref_digest;
+    use super::{kind_wit_ref, oci_ref_digest};
 
     const HEX: &str = "461c6a68b1c0d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccdd";
+
+    /// `addon` resolves through the same generic lookup as `design`/`bundle`/
+    /// `deploy`/`provider` — no special-casing needed, since `kind_wit_ref`
+    /// reads the version straight off the embedded `extension-addon.wit`.
+    #[test]
+    fn kind_wit_ref_resolves_addon() {
+        assert_eq!(kind_wit_ref("addon"), "greentic:extension-addon@0.1.0");
+    }
 
     #[test]
     fn extracts_a_pinned_digest() {

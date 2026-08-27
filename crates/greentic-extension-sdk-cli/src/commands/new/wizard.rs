@@ -30,6 +30,11 @@ const KIND_CHOICES: &[(Kind, &str, &str)] = &[
     (Kind::Llm, "llm", "LLM provider extension"),
     (Kind::Bundle, "bundle", "Bundle extension"),
     (Kind::Deploy, "deploy", "Deploy target extension"),
+    (
+        Kind::Addon,
+        "addon",
+        "Addon (managed infra the platform provisions and reconciles)",
+    ),
 ];
 
 /// Run the interactive wizard, falling back to `args` values as defaults.

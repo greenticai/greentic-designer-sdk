@@ -1,7 +1,7 @@
 package greentic:extension-design@0.3.0;
 
 interface tools {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   record tool-definition {
     name: string,
     description: string,
@@ -20,7 +20,7 @@ interface tools {
 }
 
 interface validation {
-  use greentic:extension-base/types@0.2.0.{diagnostic};
+  use greentic:extension-base/types@0.3.0.{diagnostic};
   record validate-result {
     valid: bool,
     diagnostics: list<diagnostic>,
@@ -38,7 +38,7 @@ interface prompting {
 }
 
 interface knowledge {
-  use greentic:extension-base/types@0.2.0.{extension-error};
+  use greentic:extension-base/types@0.3.0.{extension-error};
   record entry-summary {
     id: string,
     title: string,
@@ -58,7 +58,7 @@ interface knowledge {
 }
 
 interface roles {
-  use greentic:extension-base/types@0.2.0.{diagnostic, extension-error};
+  use greentic:extension-base/types@0.3.0.{diagnostic, extension-error};
 
   /// Output channel a compiled role targets. Closed enum on purpose:
   /// every channel here implies a downstream renderer the runner already
@@ -172,7 +172,7 @@ interface roles {
 }
 
 world design-extension {
-  import greentic:extension-base/types@0.2.0;
+  import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;
   import greentic:extension-host/i18n@0.1.0;
   import greentic:extension-host/secrets@0.1.0;
@@ -180,8 +180,8 @@ world design-extension {
   import greentic:extension-host/http@0.1.0;
   import greentic:extension-host/llm@0.1.0;
 
-  export greentic:extension-base/manifest@0.2.0;
-  export greentic:extension-base/lifecycle@0.2.0;
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
   export tools;
   export validation;
   export prompting;

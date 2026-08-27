@@ -44,7 +44,7 @@ fn find_installed(
 
     let mut candidates: Vec<(ExtensionKind, semver::Version, DescribeJson)> = Vec::new();
 
-    for kind in all_kinds {
+    for kind in all_kinds.iter().copied() {
         let kind_dir = storage.kind_dir(kind);
         if !kind_dir.exists() {
             continue;
@@ -112,12 +112,16 @@ fn render_info(kind: ExtensionKind, d: &DescribeJson) {
     println!("License: {}", d.metadata.license);
     println!("Summary: {}", d.metadata.summary.default());
 
-    if kind == ExtensionKind::Provider
-        && let Some(gtpack) = d
-            .runtime
-            .components
-            .values()
-            .find_map(|c| c.gtpack.as_ref())
+    // Driven off the data being present, not the kind: a `gtpack` component
+    // is `ProviderExtension`'s relocated-nested-pack shape, but nothing
+    // about the `runtime.components` schema restricts it to that kind — the
+    // `addon` scaffold's describe declares one too, and a kind-gated check
+    // here silently dropped these two lines for it.
+    if let Some(gtpack) = d
+        .runtime
+        .components
+        .values()
+        .find_map(|c| c.gtpack.as_ref())
     {
         println!("Runtime pack: {}", gtpack.pack_id);
         println!("Component version: {}", gtpack.component_version);

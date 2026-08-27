@@ -8,12 +8,13 @@ use include_dir::{Dir, include_dir};
 /// contract — scaffolded extensions import the contract at this generation.
 ///
 /// This is NOT a uniform per-file version: within a generation, individual
-/// worlds may carry an internal increment. As of generation `0.2.0`,
-/// `extension-design` is one minor ahead (`@0.3.0`) for its `roles` interface,
+/// worlds may carry an internal increment. As of generation `0.3.0`,
+/// `extension-design` matches the generation (`@0.3.0`, having already been
+/// one minor ahead under the `0.2.0` generation for its `roles` interface),
 /// while `extension-host` is still `@0.1.0`. The per-file `@version` values are
 /// asserted explicitly in `tests/contract_version_consistency.rs`.
 /// Bump this constant when the shared base contract advances a generation.
-pub const CONTRACT_VERSION: &str = "0.2.0";
+pub const CONTRACT_VERSION: &str = "0.3.0";
 
 static EMBEDDED: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/embedded-wit/$CARGO_PKG_VERSION");
 
@@ -54,6 +55,9 @@ pub fn wit_files() -> Vec<WitFile> {
 /// The `wasix-mcp` WIT dep ships as a `templates/mcp/wit/deps/wasix-mcp/`
 /// template file instead.
 ///
+/// `addon` resolves to `extension-base.wit` + `extension-host.wit` +
+/// `extension-addon.wit` like any other greentic-package kind.
+///
 /// # Errors
 ///
 /// A `kind` with no known WIT arm is an error naming the kind, not a silent
@@ -64,7 +68,7 @@ pub fn files_for_kind(kind: &str) -> anyhow::Result<Vec<WitFile>> {
         return Ok(Vec::new());
     }
     let kind_file = match kind {
-        "design" | "bundle" | "deploy" | "provider" => format!("extension-{kind}.wit"),
+        "design" | "bundle" | "deploy" | "provider" | "addon" => format!("extension-{kind}.wit"),
         "wasm-component" | "llm" => "extension-design.wit".to_string(),
         other => anyhow::bail!("no embedded WIT files for scaffold kind `{other}`"),
     };
@@ -90,9 +94,16 @@ pub fn files_for_kind(kind: &str) -> anyhow::Result<Vec<WitFile>> {
 #[must_use]
 pub fn package_version(bytes: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(bytes).ok()?;
-    let first_line = text.lines().next()?;
-    let at = first_line.find('@')?;
-    let after = &first_line[at + 1..];
+    // The `package` statement is not necessarily the first line: a
+    // package-level `///` doc comment (see `wit/extension-addon.wit`) is
+    // required to precede it, so this scans for the declaration by prefix
+    // rather than assuming line 0 the way an earlier version of this
+    // function did.
+    let decl_line = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("package "))?;
+    let at = decl_line.find('@')?;
+    let after = &decl_line[at + 1..];
     let semi = after.find(';').unwrap_or(after.len());
     Some(after[..semi].trim().to_string())
 }
@@ -102,10 +113,12 @@ pub fn package_version(bytes: &[u8]) -> Option<String> {
 ///
 /// Every renderer of a `world.wit` MUST source its versions here rather than
 /// from [`CONTRACT_VERSION`]. The packages are versioned independently within
-/// a generation (`extension-host` is `@0.1.0`, `extension-design` is `@0.3.0`,
-/// the rest are `@0.2.0`), so a world rendered with one uniform version asks
-/// for a package that does not exist and `cargo component build` fails with
-/// `package 'greentic:extension-host@0.2.0' not found`.
+/// a generation — see `tests/contract_version_consistency.rs` for the
+/// current, authoritative per-package versions, rather than trusting a list
+/// enumerated in this comment to stay in sync with it. A world rendered with
+/// one uniform version asks for a package at the wrong version and
+/// `cargo component build` fails with a `package '...' not found` error
+/// naming whichever version was wrongly assumed.
 pub fn package_version_for(suffix: &str) -> Option<String> {
     let file = format!("extension-{suffix}.wit");
     wit_files()
@@ -209,7 +222,7 @@ mod tests {
     /// `scaffold::template::load_templates_kind`.
     #[test]
     fn files_for_kind_rejects_an_unknown_kind() {
-        let err = match files_for_kind("addon") {
+        let err = match files_for_kind("widget") {
             Ok(files) => panic!(
                 "unknown kind must error, got {:?}",
                 files.iter().map(|f| f.name).collect::<Vec<_>>()
@@ -217,9 +230,24 @@ mod tests {
             Err(e) => e,
         };
         assert!(
-            err.to_string().contains("addon"),
+            err.to_string().contains("widget"),
             "error must name the offending kind: {err}"
         );
+    }
+
+    /// `addon` needs `extension-base.wit` + `extension-host.wit` +
+    /// `extension-addon.wit`, exactly like `design`/`bundle`/`deploy`/`provider`
+    /// need their own package alongside base+host.
+    #[test]
+    fn files_for_kind_addon_includes_base_host_and_addon() {
+        let files = files_for_kind("addon").expect("addon resolves");
+        let names: Vec<_> = files.iter().map(|f| f.name).collect();
+        assert!(names.contains(&"extension-base.wit"));
+        assert!(names.contains(&"extension-host.wit"));
+        assert!(names.contains(&"extension-addon.wit"));
+        assert!(!names.contains(&"extension-design.wit"));
+        assert!(!names.contains(&"extension-provider.wit"));
+        assert_eq!(names.len(), 3);
     }
 
     /// Every scaffoldable kind (`scaffold::Kind::value_variants()`) either
@@ -268,7 +296,7 @@ mod tests {
         // asserts, so a template that reads `package_version` at runtime gets the
         // exact numbers other tests already guard.
         let expected: &[(&str, &str)] = &[
-            ("extension-base.wit", "0.2.0"),
+            ("extension-base.wit", "0.3.0"),
             ("extension-host.wit", "0.1.0"),
             ("extension-design.wit", "0.3.0"),
         ];

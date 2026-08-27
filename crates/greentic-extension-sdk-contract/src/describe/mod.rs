@@ -19,6 +19,9 @@ pub use localization_block::Localization;
 /// Invariants enforced at deserialize time:
 /// - `runtime.components` must have at least one entry
 /// - `execution.is_some()` only when `kind == Bundle`
+/// - `contributions.addons` must be non-empty when `kind == Addon` (the
+///   reverse is not enforced: a non-addon kind declaring addons is
+///   legitimate — see `validate_addons`'s call site)
 /// - every `runtime_ref` in `contributions.node_types` and `contributions.tools`
 ///   must reference a key that exists in `runtime.components`
 #[derive(Debug, Clone, Serialize)]
@@ -196,6 +199,19 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
                 "`execution` is only allowed when kind=BundleExtension (got kind={:?})",
                 raw.kind
             ));
+        }
+
+        // The forward direction only: an `AddonExtension` declaring zero
+        // addons installs and contributes nothing, which is the same
+        // "declares but does nothing" failure mode this file already guards
+        // for `execution`. Not the reverse — a non-addon kind declaring
+        // `contributions.addons` is legitimate; `addon_e2e.rs`'s fixtures
+        // rely on it, and it's Phase 1's whole design (a catalogue entry on
+        // an existing extension kind, no `AddonExtension` required).
+        if raw.kind == ExtensionKind::Addon && raw.contributions.addons.is_empty() {
+            return Err(
+                "kind=AddonExtension must declare at least one contributions.addons[] entry".into(),
+            );
         }
 
         let known: std::collections::BTreeSet<&crate::component_id::ComponentId> =

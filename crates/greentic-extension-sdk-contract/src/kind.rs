@@ -1,6 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+/// `#[non_exhaustive]` so adding a future kind (kind #7 and beyond) is
+/// additive: from that point on, an exhaustive `match` outside this crate is
+/// forced to carry a wildcard arm, so it keeps compiling instead of breaking
+/// on every new variant after this one. This release is not itself covered
+/// by that guarantee — adding both `#[non_exhaustive]` and `Addon` in the
+/// same release still breaks any downstream exhaustive `match` written
+/// against the previous, five-variant enum, on both counts at once. Source
+/// compatibility starts from the *next* variant added after this one.
+/// Exhaustive matching over every variant still works *inside* this crate
+/// (see `dir_name`/`wire_name` below and `tests::all_covers_every_variant`),
+/// since `non_exhaustive` only restricts construction and matching from
+/// outside the defining crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum ExtensionKind {
     #[serde(rename = "DesignExtension")]
     Design,
@@ -17,6 +30,13 @@ pub enum ExtensionKind {
     /// the Greentic runner (`greentic-mcp`). Scaffold with `gtdx new --kind mcp`.
     #[serde(rename = "wasix:mcp/router")]
     WasixMcpRouter,
+    /// A component the platform provisions and reconciles as declarative
+    /// infrastructure — a Qdrant, a Redis — rather than a flow-time or
+    /// design-time extension. It implements `greentic:extension-addon@0.1.0`'s
+    /// `addon-extension` world (`validation` + `workload` + `reconciler`); see
+    /// `wit/extension-addon.wit`.
+    #[serde(rename = "AddonExtension")]
+    Addon,
 }
 
 impl ExtensionKind {
@@ -25,13 +45,32 @@ impl ExtensionKind {
     /// silently goes stale when a kind is added — `gtdx uninstall` shipped one
     /// that omitted `Provider`, so provider extensions could not be removed at
     /// all while the command still reported success.
-    pub const ALL: [Self; 5] = [
+    ///
+    /// A slice, not an array: an array's length (`[Self; N]`) is part of its
+    /// type, so adding a variant here used to change every call site's
+    /// inferred type right along with the const. A slice's length is a
+    /// runtime property, not a type parameter, so a new variant changes only
+    /// this initializer.
+    pub const ALL: &'static [Self] = &[
         Self::Design,
         Self::Bundle,
         Self::Deploy,
         Self::Provider,
         Self::WasixMcpRouter,
+        Self::Addon,
     ];
+
+    /// A variant added without a matching entry in `ALL` compiles fine —
+    /// nothing here forces `ALL` to be exhaustive; the compiler only forces
+    /// the match arms in `tests::all_covers_every_variant` (and `dir_name`
+    /// and `wire_name` below) to name every variant, because their scrutinee
+    /// is typed as `Self`. This assertion is the actual guard: it fails the
+    /// build the moment `ALL`'s length stops matching the variant count,
+    /// which is exactly the drift `gtdx uninstall` shipped with once
+    /// (omitted `Provider`, so provider extensions could not be removed at
+    /// all while the command still reported success). Bump this alongside
+    /// adding a variant to `ALL`.
+    const _ASSERT_ALL_COVERS_EVERY_VARIANT: () = assert!(Self::ALL.len() == 6);
 
     #[must_use]
     pub const fn dir_name(self) -> &'static str {
@@ -41,6 +80,7 @@ impl ExtensionKind {
             Self::Deploy => "deploy",
             Self::Provider => "provider",
             Self::WasixMcpRouter => "mcp",
+            Self::Addon => "addon",
         }
     }
 
@@ -59,6 +99,7 @@ impl ExtensionKind {
             Self::Deploy => "DeployExtension",
             Self::Provider => "ProviderExtension",
             Self::WasixMcpRouter => "wasix:mcp/router",
+            Self::Addon => "AddonExtension",
         }
     }
 
@@ -67,13 +108,13 @@ impl ExtensionKind {
     /// skip.
     #[must_use]
     pub fn from_wire(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|k| k.wire_name() == s)
+        Self::ALL.iter().copied().find(|k| k.wire_name() == s)
     }
 
     /// Inverse of [`Self::dir_name`].
     #[must_use]
     pub fn from_dir_name(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|k| k.dir_name() == s)
+        Self::ALL.iter().copied().find(|k| k.dir_name() == s)
     }
 }
 
@@ -81,17 +122,24 @@ impl ExtensionKind {
 mod tests {
     use super::ExtensionKind;
 
-    /// `ALL` must stay exhaustive. If a variant is added, the match below stops
-    /// compiling — which is the point: the compiler, not review, catches drift.
+    /// The match below is exhaustive over `ExtensionKind`, so adding a
+    /// variant forces a new arm here — but that only proves the arm list is
+    /// complete, not that `ALL` is: the scrutinee is `ALL.iter()`, so a
+    /// variant missing from `ALL` itself would simply never reach this match
+    /// and everything would keep compiling and passing. The actual guard for
+    /// that is `_ASSERT_ALL_COVERS_EVERY_VARIANT`'s `assert!` next to `ALL`'s
+    /// definition, which pins `ALL.len()` to the variant count at compile
+    /// time.
     #[test]
     fn all_covers_every_variant() {
-        for kind in ExtensionKind::ALL {
+        for kind in ExtensionKind::ALL.iter().copied() {
             match kind {
                 ExtensionKind::Design
                 | ExtensionKind::Bundle
                 | ExtensionKind::Deploy
                 | ExtensionKind::Provider
-                | ExtensionKind::WasixMcpRouter => {}
+                | ExtensionKind::WasixMcpRouter
+                | ExtensionKind::Addon => {}
             }
         }
         let mut dirs: Vec<_> = ExtensionKind::ALL.iter().map(|k| k.dir_name()).collect();
