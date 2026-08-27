@@ -31,7 +31,8 @@ That declaration ships inside your `.gtxpack` as `contributions.addons[]`.
 > layer further along.
 >
 > Read only the schema and you would reasonably conclude that declaring an
-> addon provisions one. It doesn't, yet.
+> addon provisions one. It doesn't, yet. The platform-side work is tracked as
+> [#166](https://github.com/greenticai/greentic-designer-sdk/issues/166).
 >
 > **There is also a compat trap, and it is the more serious half of this
 > note — and this branch widens it.** `Contributions` is
@@ -45,7 +46,9 @@ That declaration ships inside your `.gtxpack` as `contributions.addons[]`.
 > `gtdx new --kind addon` is now the first scaffold that emits
 > `contributions.addons[]` by default, so this is no longer an edge case you
 > have to opt into by hand-writing the block — it is what you get from the
-> default addon scaffold. Do not publish an `addons[]`-carrying extension
+> default addon scaffold. Tracked as
+> [#164](https://github.com/greenticai/greentic-designer-sdk/issues/164),
+> which is about surfacing this at scaffold time instead of only in prose. Do not publish an `addons[]`-carrying extension
 > for general use until a host release that understands it has shipped;
 > until then, `contributions.addons[]` is something you develop and
 > validate locally, not something you ship.
@@ -163,6 +166,8 @@ spec §9.3 names as the first one built.
   ship exports `backup` the way `wit/world.wit` says it does, or that
   calling it really produces a usable snapshot. A `world.wit` that claims
   `backup` and a component that doesn't implement it will still lint clean.
+  Tracked as
+  [#162](https://github.com/greenticai/greentic-designer-sdk/issues/162).
 
 - **`schema_version`** — see its own section below.
 
