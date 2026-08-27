@@ -29,13 +29,19 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.12 or newer.** It ships `greentic:extension-addon@0.1.0` — the WIT
-contract an addon will implement to declare the workload it needs and to
-reconcile day-2 state inside it. **Nothing executes yet**: `ExtensionKind::Addon`
-and a component's ability to implement these worlds wait on a
-`greentic:extension-base@0.3.0` contract release. The contract is here to be
-reviewed and versioned while changing it is still free — a WIT record cannot
-gain a field, and a WIT enum cannot gain a variant, without a breaking bump.
+**Use 1.2.13 or newer.** It makes the addon kind real: `gtdx new --kind addon`
+scaffolds a project that compiles to a wasm component implementing
+`greentic:extension-addon@0.1.0` — the contract an addon uses to declare the
+workload it needs and to reconcile day-2 state inside it. This is the release
+that advanced `greentic:extension-base` to `@0.3.0` for the `addon` variant its
+`kind` enum was missing, so the caveat earlier versions carried is gone.
+
+**What still does not run:** no platform implements the reconciler side yet, so
+a scaffolded addon builds, validates and installs, but nothing calls `observe`,
+`plan` or `apply`. Separately, `compat.rs` pins `MIN_DESIGNER_VERSION = "1.2.0"`
+and an `addons`-bearing `describe.json` is unloadable on every designer released
+so far — and the addon template is the first scaffold to emit
+`contributions.addons[]` by default.
 
 `greentic-extension-sdk-testing` gains the conformance half:
 `assert_apply_consistent` is the plan/apply consistency rule as a function the
