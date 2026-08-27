@@ -5,6 +5,8 @@
 //! read back diffs forever and no plan is ever clean. That is a design
 //! decision a reviewer would have to remember; here it is a rule.
 
+use std::path::Path;
+
 use super::Violation;
 
 /// Families this SDK version knows. Unknown ones warn rather than fail: the
@@ -386,7 +388,117 @@ fn walk_schema_properties(
     }
 }
 
-pub(super) fn check_addons(describe: &serde_json::Value) -> Vec<Violation> {
+/// Strips `//` line comments and `/* */` block comments from a `.wit`
+/// source, leaving everything else (including newlines, so statement
+/// boundaries are unaffected) untouched.
+///
+/// WIT has no string literals in the shape `world.wit` files take here
+/// (versions are written bare, `@0.1.0`, never quoted), so there is no
+/// "comment marker inside a string" case to worry about — every `//` and
+/// `/*` in a real `.wit` file starts an actual comment.
+///
+/// This exists because of a documented trap: the addon scaffold's own
+/// `wit/world.wit.tmpl` carries an eight-line comment explaining *why* the
+/// scaffold does NOT export `backup` — a comment that mentions
+/// `addon-extension-with-backup` and `backup` by name while the world it
+/// documents exports neither. A raw `contains("backup")` over the
+/// unstripped file reports the exact opposite of the truth on the first
+/// file anyone will test this rule against. Comments must be gone before
+/// `world_exports_backup` ever looks at the text.
+fn strip_wit_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '/' && chars.peek() == Some(&'/') {
+            for nc in chars.by_ref() {
+                if nc == '\n' {
+                    out.push('\n');
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            let mut prev = ' ';
+            for nc in chars.by_ref() {
+                if prev == '*' && nc == '/' {
+                    break;
+                }
+                prev = nc;
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Whether a `.wit` world source exports the `backup` interface — either
+/// qualified (`export greentic:extension-addon/backup@0.1.0;`, what the
+/// addon scaffold and every real extension's `wit/world.wit` writes) or
+/// bare (`export backup;`, valid only inside `extension-addon.wit` itself,
+/// where `backup` is a sibling interface rather than an import). Comments
+/// are stripped first — see `strip_wit_comments`.
+///
+/// Deliberately a statement scan, not a real WIT parse: `wit_parser` is a
+/// dev-dependency only (used by
+/// `crates/greentic-extension-sdk-cli/tests/wit_addon_parses.rs`), not
+/// available to this binary, and even if it were, a lone `wit/world.wit`
+/// that `use`s or exports `greentic:extension-addon/*` needs its
+/// `wit/deps/` tree to resolve those references — `gtdx lint --dir` is
+/// pointed at packed and installed extensions too, and nothing guarantees
+/// `wit/deps/` survives packing. Full resolution would make lint unusable
+/// on exactly the installs it needs to cover. Every `export`/`import`
+/// statement in a world block is `<path>[@<version>];` with no nested `;`
+/// of its own, so splitting the comment-stripped source on `;` and matching
+/// the `export` statements is sufficient for the shape this contract's
+/// world files actually take.
+fn world_exports_backup(source: &str) -> bool {
+    let stripped = strip_wit_comments(source);
+    stripped.split(';').any(|stmt| {
+        let Some(rest) = stmt.trim().strip_prefix("export") else {
+            return false;
+        };
+        let Some(target) = rest.split_whitespace().next() else {
+            return false;
+        };
+        let path_no_version = target.split('@').next().unwrap_or(target);
+        path_no_version.rsplit('/').next() == Some("backup")
+    })
+}
+
+/// Checks one addon's `supports_backup` claim against `backup_exported` (see
+/// `world_exports_backup`; `None` means `wit/world.wit` was absent and this
+/// is a no-op). Pushes `E_ADDON_BACKUP_NOT_EXPORTED` when the addon claims a
+/// capability the world does not export. Returns whether this addon declared
+/// `supports_backup: true`, which the caller aggregates across every addon
+/// to decide `W_ADDON_BACKUP_UNDECLARED`. Split out of `check_addons` to
+/// keep that function under clippy's line budget.
+fn check_addon_backup_claim(
+    addon: &serde_json::Value,
+    id: &str,
+    backup_exported: Option<bool>,
+    out: &mut Vec<Violation>,
+) -> bool {
+    let supports_backup = addon
+        .get("supports_backup")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if supports_backup && backup_exported == Some(false) {
+        out.push(Violation::error(
+            "E_ADDON_BACKUP_NOT_EXPORTED",
+            format!(
+                "addon {id:?} declares supports_backup: true, but wit/world.wit does not \
+                 export greentic:extension-addon/backup. The platform will offer a pre-destroy \
+                 snapshot for this addon and call an export that does not exist."
+            ),
+        ));
+    }
+    supports_backup
+}
+
+pub(super) fn check_addons(describe: &serde_json::Value, dir: &Path) -> Vec<Violation> {
     let mut out = Vec::new();
     let Some(addons) = describe
         .get("contributions")
@@ -395,6 +507,23 @@ pub(super) fn check_addons(describe: &serde_json::Value) -> Vec<Violation> {
     else {
         return out;
     };
+
+    // `wit/world.wit` is the extension's own world — not
+    // `wit/deps/greentic/.../world.wit`, which holds copies of the
+    // *imported* contract packages. `gtdx new --kind addon` writes the
+    // former at the project root (`crates/greentic-extension-sdk-cli/src/
+    // commands/new/mod.rs`, the `.join("world.wit")` under `target`, not
+    // under `wit/deps`).
+    //
+    // A missing file is not a violation of anything: `gtdx lint --dir` runs
+    // against packed and installed extensions too, where the source tree
+    // (including `wit/`) is legitimately absent. `None` here means both
+    // backup rules below stay completely silent, for every addon.
+    let backup_exported = std::fs::read_to_string(dir.join("wit").join("world.wit"))
+        .ok()
+        .map(|source| world_exports_backup(&source));
+
+    let mut any_declares_backup = false;
 
     for addon in addons {
         let id = addon.get("id").and_then(|v| v.as_str()).unwrap_or_default();
@@ -465,6 +594,24 @@ pub(super) fn check_addons(describe: &serde_json::Value) -> Vec<Violation> {
                 }
             });
         }
+
+        if check_addon_backup_claim(addon, id, backup_exported, &mut out) {
+            any_declares_backup = true;
+        }
+    }
+
+    // Drift in the other direction: the component genuinely implements
+    // `backup`, but no addon in the catalogue says so. Not a lie the way
+    // the error case is - a snapshot the platform is never told about is
+    // merely unused, not broken - so this is a warning, not an error.
+    if backup_exported == Some(true) && !any_declares_backup {
+        out.push(Violation::warning(
+            "W_ADDON_BACKUP_UNDECLARED",
+            "wit/world.wit exports greentic:extension-addon/backup, but no addon in \
+             contributions.addons declares supports_backup: true. The capability is \
+             implemented but never advertised, so the platform will never offer to use it."
+                .to_string(),
+        ));
     }
 
     out

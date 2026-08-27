@@ -936,7 +936,10 @@ fn base_addon() -> serde_json::Value {
 
 #[test]
 fn a_well_formed_addon_produces_no_violations() {
-    let v = check_addons(&describe_with_addon(&base_addon()));
+    let v = check_addons(
+        &describe_with_addon(&base_addon()),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(v.is_empty(), "expected no violations, got: {v:?}");
 }
 
@@ -945,7 +948,10 @@ fn an_id_with_uppercase_or_underscores_is_an_error() {
     for bad in ["Qdrant", "qdrant_db", "-qdrant", ""] {
         let mut a = base_addon();
         a["id"] = json!(bad);
-        let v = check_addons(&describe_with_addon(&a));
+        let v = check_addons(
+            &describe_with_addon(&a),
+            tempfile::tempdir().expect("tempdir").path(),
+        );
         assert!(
             v.iter().any(|x| x.code == "E_ADDON_ID_PATTERN"),
             "id {bad:?} should be rejected, got: {v:?}"
@@ -960,7 +966,10 @@ fn an_output_name_that_is_not_env_var_safe_is_an_error() {
     for bad in ["qdrant-url", "1url", "url!", ""] {
         let mut a = base_addon();
         a["outputs"] = json!([{ "name": bad, "type": "text" }]);
-        let v = check_addons(&describe_with_addon(&a));
+        let v = check_addons(
+            &describe_with_addon(&a),
+            tempfile::tempdir().expect("tempdir").path(),
+        );
         assert!(
             v.iter().any(|x| x.code == "E_ADDON_OUTPUT_NAME"),
             "output name {bad:?} should be rejected, got: {v:?}"
@@ -988,7 +997,10 @@ fn a_secret_looking_property_in_desired_state_is_an_error() {
         a["desired_state_schema"] = json!(format!(
             r#"{{"type":"object","properties":{{"{bad}":{{"type":"string"}}}}}}"#
         ));
-        let v = check_addons(&describe_with_addon(&a));
+        let v = check_addons(
+            &describe_with_addon(&a),
+            tempfile::tempdir().expect("tempdir").path(),
+        );
         assert!(
             v.iter()
                 .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1003,7 +1015,10 @@ fn a_secret_looking_property_in_desired_state_is_an_error() {
 fn a_secret_looking_property_in_config_schema_is_not_flagged() {
     let mut a = base_addon();
     a["config_schema"] = json!(r#"{"type":"object","properties":{"password":{"type":"string"}}}"#);
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         !v.iter()
             .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1024,7 +1039,10 @@ fn properties_where_token_is_a_modifier_not_the_head_noun_are_not_flagged() {
         a["desired_state_schema"] = json!(format!(
             r#"{{"type":"object","properties":{{"{ok}":{{"type":"string"}}}}}}"#
         ));
-        let v = check_addons(&describe_with_addon(&a));
+        let v = check_addons(
+            &describe_with_addon(&a),
+            tempfile::tempdir().expect("tempdir").path(),
+        );
         assert!(
             !v.iter()
                 .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1037,7 +1055,10 @@ fn properties_where_token_is_a_modifier_not_the_head_noun_are_not_flagged() {
 fn an_unfamiliar_family_is_a_warning_not_an_error() {
     let mut a = base_addon();
     a["family"] = json!("quantum-db");
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     let hit = v
         .iter()
         .find(|x| x.code == "W_ADDON_FAMILY_UNKNOWN")
@@ -1050,7 +1071,10 @@ fn an_unfamiliar_family_is_a_warning_not_an_error() {
 
 #[test]
 fn a_describe_with_no_addons_produces_no_violations() {
-    let v = check_addons(&json!({ "contributions": {} }));
+    let v = check_addons(
+        &json!({ "contributions": {} }),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(v.is_empty(), "expected no violations, got: {v:?}");
 }
 
@@ -1066,7 +1090,10 @@ fn a_secret_nested_under_items_properties_is_caught_with_a_path() {
             "acl_users":{"type":"array","items":{"type":"object",
                 "properties":{"username":{"type":"string"},"password":{"type":"string"}}}}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     let hit = v
         .iter()
         .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
@@ -1092,7 +1119,10 @@ fn a_secret_reachable_only_through_defs_is_caught() {
             "properties":{"password":{"type":"string"}}}},
             "properties":{"admin":{"$ref":"#/$defs/credentials"}}}"##
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.iter()
             .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1108,7 +1138,10 @@ fn a_secret_inside_an_all_of_branch_is_caught() {
         r#"{"type":"object","allOf":[{"type":"object",
             "properties":{"admin_password":{"type":"string"}}}]}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.iter()
             .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1127,7 +1160,10 @@ fn a_secret_inside_prefix_items_is_caught_with_an_array_path() {
             "prefixItems":[{"type":"object",
                 "properties":{"password":{"type":"string"}}}]}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     let hit = v
         .iter()
         .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
@@ -1148,7 +1184,10 @@ fn a_secret_inside_contains_is_caught() {
             "contains":{"type":"object",
                 "properties":{"admin_password":{"type":"string"}}}}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.iter()
             .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1168,7 +1207,10 @@ fn a_secret_inside_if_then_or_else_is_caught() {
             r#"{{"type":"object","{wrapper}":{{"type":"object",
                 "properties":{{"admin_password":{{"type":"string"}}}}}}}}"#
         ));
-        let v = check_addons(&describe_with_addon(&a));
+        let v = check_addons(
+            &describe_with_addon(&a),
+            tempfile::tempdir().expect("tempdir").path(),
+        );
         assert!(
             v.iter()
                 .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1189,7 +1231,10 @@ fn a_secret_reachable_only_through_not_is_not_flagged() {
         r#"{"type":"object","not":{"type":"object",
             "properties":{"admin_password":{"type":"string"}}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.is_empty(),
         "a property forbidden by `not` must not be flagged as declared: {v:?}"
@@ -1208,7 +1253,10 @@ fn a_secret_inside_unevaluated_properties_is_caught() {
             "unevaluatedProperties":{"type":"object",
                 "properties":{"leftover_password":{"type":"string"}}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.iter().any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"
             && x.message.contains("leftover_password")),
@@ -1226,7 +1274,10 @@ fn a_secret_inside_dependent_schemas_is_caught() {
             "dependentSchemas":{"credit_card":{"type":"object",
                 "properties":{"cvv_secret":{"type":"string"}}}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.iter().any(
             |x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE" && x.message.contains("cvv_secret")
@@ -1245,7 +1296,10 @@ fn a_properties_map_inside_property_names_is_not_walked() {
         r#"{"type":"object","propertyNames":{"type":"string",
             "properties":{"password":{"type":"string"}}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.is_empty(),
         "propertyNames must not be walked for nested properties: {v:?}"
@@ -1265,7 +1319,10 @@ fn a_secret_inside_nested_defs_reports_a_defs_marker_not_a_fake_data_path() {
             "$defs":{"credentials":{"type":"object",
                 "properties":{"password":{"type":"string"}}}}}}}"#
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     let hit = v
         .iter()
         .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
@@ -1291,7 +1348,10 @@ fn a_secret_inside_root_defs_also_carries_the_defs_marker() {
             "properties":{"password":{"type":"string"}}}},
             "properties":{"admin":{"$ref":"#/$defs/credentials"}}}"##
     );
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     let hit = v
         .iter()
         .find(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE")
@@ -1310,7 +1370,10 @@ fn a_property_literally_named_properties_is_evaluated_as_a_property_not_a_keywor
     let mut a = base_addon();
     a["desired_state_schema"] =
         json!(r#"{"type":"object","properties":{"properties":{"type":"string"}}}"#);
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.is_empty(),
         "a property literally named `properties` is not itself a secret: {v:?}"
@@ -1339,7 +1402,10 @@ fn legitimate_day_2_properties_are_not_flagged() {
         a["desired_state_schema"] = json!(format!(
             r#"{{"type":"object","properties":{{"{ok}":{{"type":"string"}}}}}}"#
         ));
-        let v = check_addons(&describe_with_addon(&a));
+        let v = check_addons(
+            &describe_with_addon(&a),
+            tempfile::tempdir().expect("tempdir").path(),
+        );
         assert!(
             !v.iter()
                 .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1363,7 +1429,10 @@ fn narrowing_does_not_weaken_the_existing_positives() {
         a["desired_state_schema"] = json!(format!(
             r#"{{"type":"object","properties":{{"{bad}":{{"type":"string"}}}}}}"#
         ));
-        let v = check_addons(&describe_with_addon(&a));
+        let v = check_addons(
+            &describe_with_addon(&a),
+            tempfile::tempdir().expect("tempdir").path(),
+        );
         assert!(
             v.iter()
                 .any(|x| x.code == "E_ADDON_SECRET_IN_DESIRED_STATE"),
@@ -1400,10 +1469,211 @@ fn a_desired_state_schema_nested_past_serde_json_depth_limit_fails_to_parse() {
     // `walk_schema_properties` never sees it, and no violation is reported.
     let mut a = base_addon();
     a["desired_state_schema"] = json!(nested);
-    let v = check_addons(&describe_with_addon(&a));
+    let v = check_addons(
+        &describe_with_addon(&a),
+        tempfile::tempdir().expect("tempdir").path(),
+    );
     assert!(
         v.is_empty(),
         "an unparsable desired_state_schema must be silently skipped, not \
          reach the walk: {v:?}"
+    );
+}
+
+// --- supports_backup vs wit/world.wit ---
+
+/// Writes `wit/world.wit` under a fresh tempdir and returns the dir, so
+/// `check_addons` can read it back exactly the way it reads a real
+/// extension's source tree.
+fn dir_with_world_wit(source: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("wit")).expect("mkdir wit");
+    std::fs::write(dir.path().join("wit/world.wit"), source).expect("write world.wit");
+    dir
+}
+
+/// What `gtdx new --kind addon` actually writes: `validation`, `workload`
+/// and `reconciler` exported, `backup` deliberately absent.
+const WORLD_WITHOUT_BACKUP: &str = r"
+package greentic:example-cache;
+
+world extension {
+  import greentic:extension-base/types@0.3.0;
+  import greentic:extension-host/logging@0.1.0;
+
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
+  export greentic:extension-addon/validation@0.1.0;
+  export greentic:extension-addon/workload@0.1.0;
+  export greentic:extension-addon/reconciler@0.1.0;
+}
+";
+
+/// The same world, with `backup` genuinely exported.
+const WORLD_WITH_BACKUP: &str = r"
+package greentic:example-cache;
+
+world extension {
+  import greentic:extension-base/types@0.3.0;
+  import greentic:extension-host/logging@0.1.0;
+
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
+  export greentic:extension-addon/validation@0.1.0;
+  export greentic:extension-addon/workload@0.1.0;
+  export greentic:extension-addon/reconciler@0.1.0;
+  export greentic:extension-addon/backup@0.1.0;
+}
+";
+
+/// The exact trap: `gtdx new --kind addon`'s own `wit/world.wit.tmpl` ships
+/// this comment block, which mentions `addon-extension-with-backup` and
+/// `backup` by name while the world it documents exports neither. A raw
+/// `contains("backup")` over this file would report the opposite of the
+/// truth.
+const WORLD_WITH_BACKUP_MENTIONED_ONLY_IN_A_COMMENT: &str = r"
+package greentic:example-cache;
+
+// Mirrors `addon-extension` from `greentic:extension-addon@0.1.0` —
+// deliberately the world WITHOUT `backup`. Selecting
+// `addon-extension-with-backup` here (and exporting `backup`) would claim a
+// snapshot capability this scaffold does not implement; `describe.json`'s
+// `supports_backup: false` and this world's missing `backup` export are the
+// same claim made twice, in two places the platform can each check
+// independently.
+world extension {
+  import greentic:extension-base/types@0.3.0;
+
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
+  export greentic:extension-addon/validation@0.1.0;
+  export greentic:extension-addon/workload@0.1.0;
+  export greentic:extension-addon/reconciler@0.1.0;
+}
+";
+
+fn addon_claiming_backup() -> serde_json::Value {
+    let mut a = base_addon();
+    a["supports_backup"] = json!(true);
+    a
+}
+
+/// `gtdx lint --dir` is pointed at packed and installed extensions too,
+/// where the source tree - including `wit/` - is legitimately absent. Both
+/// backup rules must stay completely silent rather than treating a missing
+/// file as either a pass or a failure.
+#[test]
+fn a_missing_world_wit_keeps_both_backup_rules_silent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let v = check_addons(&describe_with_addon(&addon_claiming_backup()), dir.path());
+    assert!(
+        v.is_empty(),
+        "a missing wit/world.wit must not trigger either backup rule: {v:?}"
+    );
+}
+
+/// The scaffold's clean baseline: `supports_backup: false`, no `backup`
+/// export. Must lint clean.
+#[test]
+fn a_world_without_backup_and_no_addon_claiming_it_lints_clean() {
+    let dir = dir_with_world_wit(WORLD_WITHOUT_BACKUP);
+    let v = check_addons(&describe_with_addon(&base_addon()), dir.path());
+    assert!(v.is_empty(), "expected no violations, got: {v:?}");
+}
+
+/// The failing case this rule exists for: an addon claims `supports_backup:
+/// true` but the world does not export `backup`. The platform would offer a
+/// snapshot it cannot take.
+#[test]
+fn an_addon_claiming_backup_without_the_export_is_an_error() {
+    let dir = dir_with_world_wit(WORLD_WITHOUT_BACKUP);
+    let v = check_addons(&describe_with_addon(&addon_claiming_backup()), dir.path());
+    let hit = v
+        .iter()
+        .find(|x| x.code == "E_ADDON_BACKUP_NOT_EXPORTED")
+        .unwrap_or_else(|| panic!("expected E_ADDON_BACKUP_NOT_EXPORTED, got: {v:?}"));
+    assert!(
+        matches!(hit.severity, Severity::Error),
+        "a claimed-but-unexported backup must fail the run: {hit:?}"
+    );
+    assert!(
+        hit.message.contains("\"qdrant\""),
+        "message must name the offending addon id: {hit:?}"
+    );
+}
+
+/// Once the world actually exports `backup`, the same claim goes quiet.
+#[test]
+fn an_addon_claiming_backup_with_the_export_is_clean() {
+    let dir = dir_with_world_wit(WORLD_WITH_BACKUP);
+    let v = check_addons(&describe_with_addon(&addon_claiming_backup()), dir.path());
+    assert!(
+        !v.iter().any(|x| x.code == "E_ADDON_BACKUP_NOT_EXPORTED"),
+        "an addon claiming backup with a genuine export must not be flagged: {v:?}"
+    );
+}
+
+/// The trap: a comment mentioning `backup` (and `addon-extension-with-backup`)
+/// must not be mistaken for an actual export. This is the scaffold's own
+/// `wit/world.wit.tmpl` comment, verbatim.
+#[test]
+fn a_backup_mention_inside_a_comment_does_not_count_as_an_export() {
+    let dir = dir_with_world_wit(WORLD_WITH_BACKUP_MENTIONED_ONLY_IN_A_COMMENT);
+    let v = check_addons(&describe_with_addon(&addon_claiming_backup()), dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_ADDON_BACKUP_NOT_EXPORTED"),
+        "a comment mentioning backup must not be read as an export - a naive \
+         `contains(\"backup\")` would wrongly clear this addon: {v:?}"
+    );
+}
+
+/// A `/* */` block comment mentioning backup must be stripped the same way
+/// a `//` line comment is.
+#[test]
+fn a_backup_mention_inside_a_block_comment_does_not_count_as_an_export() {
+    let world = r"
+package greentic:example-cache;
+
+/* export greentic:extension-addon/backup@0.1.0; -- not really, this is
+   commented out on purpose */
+world extension {
+  export greentic:extension-addon/validation@0.1.0;
+  export greentic:extension-addon/workload@0.1.0;
+  export greentic:extension-addon/reconciler@0.1.0;
+}
+";
+    let dir = dir_with_world_wit(world);
+    let v = check_addons(&describe_with_addon(&addon_claiming_backup()), dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_ADDON_BACKUP_NOT_EXPORTED"),
+        "a block-commented-out export must not count as real: {v:?}"
+    );
+}
+
+/// The reverse case: the world genuinely exports `backup` but no addon in
+/// the catalogue says so. Drift, not a lie - a warning, not an error.
+#[test]
+fn a_world_exporting_backup_with_no_addon_declaring_it_is_a_warning() {
+    let dir = dir_with_world_wit(WORLD_WITH_BACKUP);
+    let v = check_addons(&describe_with_addon(&base_addon()), dir.path());
+    let hit = v
+        .iter()
+        .find(|x| x.code == "W_ADDON_BACKUP_UNDECLARED")
+        .unwrap_or_else(|| panic!("expected W_ADDON_BACKUP_UNDECLARED, got: {v:?}"));
+    assert!(
+        matches!(hit.severity, Severity::Warning),
+        "undeclared-but-implemented backup must warn, not fail the run: {hit:?}"
+    );
+}
+
+/// Once some addon in the catalogue does declare `supports_backup: true`,
+/// the drift warning must not also fire.
+#[test]
+fn a_world_exporting_backup_with_an_addon_declaring_it_has_no_warning() {
+    let dir = dir_with_world_wit(WORLD_WITH_BACKUP);
+    let v = check_addons(&describe_with_addon(&addon_claiming_backup()), dir.path());
+    assert!(
+        !v.iter().any(|x| x.code == "W_ADDON_BACKUP_UNDECLARED"),
+        "a correctly-advertised backup must not also warn: {v:?}"
     );
 }
