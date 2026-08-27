@@ -94,9 +94,16 @@ pub fn files_for_kind(kind: &str) -> anyhow::Result<Vec<WitFile>> {
 #[must_use]
 pub fn package_version(bytes: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(bytes).ok()?;
-    let first_line = text.lines().next()?;
-    let at = first_line.find('@')?;
-    let after = &first_line[at + 1..];
+    // The `package` statement is not necessarily the first line: a
+    // package-level `///` doc comment (see `wit/extension-addon.wit`) is
+    // required to precede it, so this scans for the declaration by prefix
+    // rather than assuming line 0 the way an earlier version of this
+    // function did.
+    let decl_line = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("package "))?;
+    let at = decl_line.find('@')?;
+    let after = &decl_line[at + 1..];
     let semi = after.find(';').unwrap_or(after.len());
     Some(after[..semi].trim().to_string())
 }
@@ -106,11 +113,12 @@ pub fn package_version(bytes: &[u8]) -> Option<String> {
 ///
 /// Every renderer of a `world.wit` MUST source its versions here rather than
 /// from [`CONTRACT_VERSION`]. The packages are versioned independently within
-/// a generation (`extension-host` is `@0.1.0`, `extension-base` and
-/// `extension-design` are `@0.3.0`, the rest are `@0.2.0`), so a world
-/// rendered with one uniform version asks for a package that does not exist
-/// and `cargo component build` fails with
-/// `package 'greentic:extension-host@0.2.0' not found`.
+/// a generation — see `tests/contract_version_consistency.rs` for the
+/// current, authoritative per-package versions, rather than trusting a list
+/// enumerated in this comment to stay in sync with it. A world rendered with
+/// one uniform version asks for a package at the wrong version and
+/// `cargo component build` fails with a `package '...' not found` error
+/// naming whichever version was wrongly assumed.
 pub fn package_version_for(suffix: &str) -> Option<String> {
     let file = format!("extension-{suffix}.wit");
     wit_files()

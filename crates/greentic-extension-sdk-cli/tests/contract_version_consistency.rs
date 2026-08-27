@@ -81,11 +81,18 @@ fn wit_files_declare_consistent_package_version() {
         let path = wit_root.join(name);
         let text =
             std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read wit/{name}: {e}"));
-        let first_line = text.lines().next().unwrap_or_default();
-        let at = first_line
+        // The `package` statement is not necessarily the first line: a
+        // package-level `///` doc comment (see `wit/extension-addon.wit`) is
+        // required to precede it, so this scans for the declaration by
+        // prefix rather than assuming line 0.
+        let decl_line = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("package "))
+            .unwrap_or_else(|| panic!("wit/{name} declares no `package` line"));
+        let at = decl_line
             .find('@')
-            .unwrap_or_else(|| panic!("wit/{name} declares no @version: {first_line:?}"));
-        let after = &first_line[at + 1..];
+            .unwrap_or_else(|| panic!("wit/{name} declares no @version: {decl_line:?}"));
+        let after = &decl_line[at + 1..];
         let semi = after.find(';').unwrap_or(after.len());
         let got = after[..semi].trim();
         assert_eq!(got, *want, "wit/{name} declares @{got}, expected @{want}");

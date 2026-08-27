@@ -19,29 +19,36 @@ That declaration ships inside your `.gtxpack` as `contributions.addons[]`.
 > reconciler will ever provision one.
 >
 > A third party shipping their *own* reconciler as WASM — the
-> `AddonExtension` kind, the `extension-addon` WIT world — is phase 2, and it
-> is gated on a contract release (`extension-base@0.3.0`) this repo does not
-> ship. Adding that kind is a breaking WIT change: `extension-base.wit`'s
-> `kind` enum would need a variant, and because `manifest.get-identity()`
-> references it, every existing world would need the runtime to serve two
-> `manifest` versions at once. That is cross-repo coordination, not a
-> feature branch. `ExtensionKind` stays at five variants until it lands.
+> `AddonExtension` kind, the `extension-addon` WIT world (`extension-base
+> @0.3.0`) — now ships in this repo. `ExtensionKind` has an `addon` variant,
+> and `gtdx new --kind addon` scaffolds a component that builds against
+> `greentic:extension-addon@0.1.0`'s `addon-extension` world. What has
+> **not** shipped is a platform that runs the reconciler side: nothing
+> installs, schedules or invokes a third-party addon's `validation`,
+> `workload` or `reconciler` exports yet, so a scaffolded addon builds,
+> installs and validates cleanly and then does nothing at runtime — the
+> same "declares but does not provision" gap phase 1 always had, just one
+> layer further along.
 >
 > Read only the schema and you would reasonably conclude that declaring an
 > addon provisions one. It doesn't, yet.
 >
 > **There is also a compat trap, and it is the more serious half of this
-> note.** `Contributions` is `#[serde(deny_unknown_fields)]`. A designer
-> built against a pre-addons contract crate does not skip an unrecognised
-> `addons` key — it fails to parse your `describe.json` at all, so the
-> whole extension refuses to load. Meanwhile `gtdx new` fills
-> `compat.min_designer_version` from this SDK's `MIN_DESIGNER_VERSION`
-> constant, currently `1.2.0`. So an addon-bearing describe *claims*
-> `>=1.2.0` while actually being unloadable on every designer released to
-> date — the entire released line as of this writing. Do not publish an
-> `addons[]`-carrying extension for general use until a host release that
-> understands it has shipped; until then, `contributions.addons[]` is
-> something you develop and validate locally, not something you ship.
+> note — and this branch widens it.** `Contributions` is
+> `#[serde(deny_unknown_fields)]`. A designer built against a pre-addons
+> contract crate does not skip an unrecognised `addons` key — it fails to
+> parse your `describe.json` at all, so the whole extension refuses to load.
+> Meanwhile `gtdx new` fills `compat.min_designer_version` from this SDK's
+> `MIN_DESIGNER_VERSION` constant, currently `1.2.0`. So an addon-bearing
+> describe *claims* `>=1.2.0` while actually being unloadable on every
+> designer released to date — the entire released line as of this writing.
+> `gtdx new --kind addon` is now the first scaffold that emits
+> `contributions.addons[]` by default, so this is no longer an edge case you
+> have to opt into by hand-writing the block — it is what you get from the
+> default addon scaffold. Do not publish an `addons[]`-carrying extension
+> for general use until a host release that understands it has shipped;
+> until then, `contributions.addons[]` is something you develop and
+> validate locally, not something you ship.
 
 The worked example below is Qdrant throughout, because Qdrant is the addon
 spec §9.3 names as the first one built.
@@ -137,9 +144,13 @@ spec §9.3 names as the first one built.
 
 - **`schema_version`** — see its own section below.
 
-There's no `gtdx new --with-addon` scaffold in phase 1 the way there's
-`--with-view`; you hand-write `contributions.addons[]` and validate it with
-`gtdx validate` and `gtdx lint`.
+There's no `gtdx new --with-addon` flag the way there's `--with-view` — that
+would add a catalogue entry to a scaffold of some *other* kind. What exists
+instead is `gtdx new --kind addon`, a separate scaffold kind whose
+`describe.json` ships a `contributions.addons[]` entry by default (see the
+phase status note above). To attach a catalogue entry to an extension of a
+different kind, you still hand-write `contributions.addons[]` and validate
+it with `gtdx validate` and `gtdx lint`.
 
 ## Why secrets do not go in `desired_state_schema`
 

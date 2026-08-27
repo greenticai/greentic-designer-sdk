@@ -11,7 +11,7 @@
 //! `*.wit` file under one directory as a *single* package, which is the
 //! wrong shape for this directory: pointed at `wit/` it fails immediately
 //! with "package identifier `greentic:extension-bundle@0.2.0` does not match
-//! previous package name of `greentic:extension-base@0.2.0`". So this file
+//! previous package name of `greentic:extension-base@0.3.0`". So this file
 //! pushes each package individually with `Resolve::push_file`, in an order
 //! that satisfies cross-package `use`/`import` — `extension-base` and
 //! `extension-host` first (nothing here depends on anything else), then the

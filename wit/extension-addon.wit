@@ -1,9 +1,22 @@
+/// NOTHING BELOW IS ENFORCED YET. Read this before the claims further down,
+/// not after: this file's doc comments describe platform-side enforcement in
+/// confident present tense — "the platform rejects 0 at plan time", "the
+/// hosted renderer refuses it at plan time", "the host asserts every leaf of
+/// `planned` is present and equal here and fails the apply if not", and more
+/// like them. None of that exists today. They state the contract the
+/// platform will be held to once it implements the reconciler side, not
+/// behaviour any released platform exhibits. In particular: nothing today
+/// catches a `reconciler.apply` that lies about the state it reached: a
+/// guest that returns `outcome: applied` with a fabricated `reached` value
+/// is currently believed, not caught. As of `extension-base@0.3.0`, `kind`
+/// has an `addon` variant, so `manifest.get-identity()` can now honestly
+/// identify a component implementing these worlds — that part does exist.
 package greentic:extension-addon@0.1.0;
 
-/// Shared value shapes used by `validation`, `workload` and `reconciler`.
-/// Package-level so more than one interface can depend on it without
-/// depending on each other — the shape `extension-provider.wit` already uses
-/// for its own `types` interface.
+/// Shared value shapes used by `validation`, `workload`, `reconciler` and
+/// `backup`. Package-level so more than one interface can depend on it
+/// without depending on each other — the shape `extension-provider.wit`
+/// already uses for its own `types` interface.
 interface types {
   /// Identifies one resource an addon manages — the value
   /// `contributions.addons[].id` declares in the catalogue (D18). Not any
@@ -216,16 +229,16 @@ interface reconciler {
     outputs: list<tuple<string, value-ref>>,
   }
 
-  /// Why no plan could be produced yet. Present from v0.1.0 rather than
-  /// retrofitted: day-2 config genuinely cannot be planned before the
-  /// instance is reachable, and "I cannot plan this yet" must be a
-  /// first-class answer rather than an error or a lie.
-  /// The CATEGORY of why no plan could be produced yet. Paired with
-  /// `deferred-detail.message`, which carries the SPECIFICS: this variant
-  /// says *what kind* of thing is missing, `message` says *which* one. That
-  /// division holds for the two built-in reasons too — `absent-prereq` and
-  /// `config-unknown` are the category, `message` names the specific
-  /// prerequisite or output.
+  /// The CATEGORY of why no plan could be produced yet. Present from v0.1.0
+  /// rather than retrofitted: day-2 config genuinely cannot be planned
+  /// before the instance is reachable, and "I cannot plan this yet" must be
+  /// a first-class answer rather than an error or a lie.
+  ///
+  /// Paired with `deferred-detail.message`, which carries the SPECIFICS:
+  /// this variant says *what kind* of thing is missing, `message` says
+  /// *which* one. That division holds for the two built-in reasons too —
+  /// `absent-prereq` and `config-unknown` are the category, `message` names
+  /// the specific prerequisite or output.
   variant deferred-reason {
     /// The instance is not up. Ask again after readiness. `message` names
     /// which prerequisite is missing.
@@ -368,15 +381,10 @@ interface backup {
     -> result<_, extension-error>;
 }
 
-/// NOTE FOR IMPLEMENTERS: as of `extension-base@0.3.0`, `kind` has an
-/// `addon` variant, so `manifest.get-identity()` can now honestly identify
-/// a component implementing these worlds.
-///
-/// More generally: none of the platform-side enforcement described in this
-/// file's doc comments — plan-time refusal, digest-pinning, plan/apply
-/// consistency, capability gating and the rest — is implemented yet. These
-/// comments state the contract the platform will be held to, not behaviour
-/// that exists today.
+/// See the package-level comment at the top of this file for what platform-
+/// side enforcement is and is not implemented yet — the claims made
+/// throughout this file, including in the worlds below, are not all live
+/// today.
 world addon-extension {
   import greentic:extension-base/types@0.3.0;
   import greentic:extension-host/logging@0.1.0;

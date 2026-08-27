@@ -1,10 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 /// `#[non_exhaustive]` so adding a future kind (kind #7 and beyond) is
-/// additive: an exhaustive `match` outside this crate is forced to carry a
-/// wildcard arm already, so it keeps compiling instead of breaking on every
-/// new variant. Exhaustive matching over every variant still works *inside*
-/// this crate (see `dir_name`/`wire_name` below and `tests::all_covers_every_variant`),
+/// additive: from that point on, an exhaustive `match` outside this crate is
+/// forced to carry a wildcard arm, so it keeps compiling instead of breaking
+/// on every new variant after this one. This release is not itself covered
+/// by that guarantee — adding both `#[non_exhaustive]` and `Addon` in the
+/// same release still breaks any downstream exhaustive `match` written
+/// against the previous, five-variant enum, on both counts at once. Source
+/// compatibility starts from the *next* variant added after this one.
+/// Exhaustive matching over every variant still works *inside* this crate
+/// (see `dir_name`/`wire_name` below and `tests::all_covers_every_variant`),
 /// since `non_exhaustive` only restricts construction and matching from
 /// outside the defining crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -54,6 +59,18 @@ impl ExtensionKind {
         Self::WasixMcpRouter,
         Self::Addon,
     ];
+
+    /// A variant added without a matching entry in `ALL` compiles fine —
+    /// nothing here forces `ALL` to be exhaustive; the compiler only forces
+    /// the match arms in `tests::all_covers_every_variant` (and `dir_name`
+    /// and `wire_name` below) to name every variant, because their scrutinee
+    /// is typed as `Self`. This assertion is the actual guard: it fails the
+    /// build the moment `ALL`'s length stops matching the variant count,
+    /// which is exactly the drift `gtdx uninstall` shipped with once
+    /// (omitted `Provider`, so provider extensions could not be removed at
+    /// all while the command still reported success). Bump this alongside
+    /// adding a variant to `ALL`.
+    const _ASSERT_ALL_COVERS_EVERY_VARIANT: () = assert!(Self::ALL.len() == 6);
 
     #[must_use]
     pub const fn dir_name(self) -> &'static str {
@@ -105,8 +122,14 @@ impl ExtensionKind {
 mod tests {
     use super::ExtensionKind;
 
-    /// `ALL` must stay exhaustive. If a variant is added, the match below stops
-    /// compiling — which is the point: the compiler, not review, catches drift.
+    /// The match below is exhaustive over `ExtensionKind`, so adding a
+    /// variant forces a new arm here — but that only proves the arm list is
+    /// complete, not that `ALL` is: the scrutinee is `ALL.iter()`, so a
+    /// variant missing from `ALL` itself would simply never reach this match
+    /// and everything would keep compiling and passing. The actual guard for
+    /// that is `_ASSERT_ALL_COVERS_EVERY_VARIANT`'s `assert!` next to `ALL`'s
+    /// definition, which pins `ALL.len()` to the variant count at compile
+    /// time.
     #[test]
     fn all_covers_every_variant() {
         for kind in ExtensionKind::ALL.iter().copied() {

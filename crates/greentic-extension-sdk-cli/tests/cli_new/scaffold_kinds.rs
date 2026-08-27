@@ -309,15 +309,23 @@ fn scaffolds_llm_extension_as_design_extension_with_tool() {
 /// pins that the scaffold agrees with them.
 #[test]
 fn scaffolded_worlds_reference_versions_the_vendored_packages_declare() {
-    // `mcp` is excluded on purpose: its world imports no greentic package.
-    for kind in ["design", "bundle", "deploy", "provider", "llm"] {
+    // Every scaffoldable kind that ships a `wit/world.wit.tmpl`, derived
+    // rather than hand-listed (see `fixtures::kinds_with_template_file`) so a
+    // new kind's world is checked automatically instead of needing a matching
+    // hand-edit here. `mcp` is excluded on purpose: its world imports no
+    // greentic package. `wasm-component` drops out on its own: it scaffolds
+    // no `wit/world.wit` at all (its node runs an out-of-band OCI component).
+    let kinds = crate::fixtures::kinds_with_template_file("wit/world.wit.tmpl")
+        .into_iter()
+        .filter(|k| k != "mcp");
+    for kind in kinds {
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join("demo");
         let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
             .arg("new")
             .arg("demo")
             .arg("--kind")
-            .arg(kind)
+            .arg(&kind)
             .arg("--dir")
             .arg(&proj)
             .arg("-y")
@@ -329,6 +337,13 @@ fn scaffolded_worlds_reference_versions_the_vendored_packages_declare() {
 
         let mut checked = 0usize;
         for line in world.lines() {
+            // Only `import`/`export` lines are things `cargo component build`
+            // actually resolves — a `//` comment (the `addon` template has
+            // one that names the package in backticked prose) can mention a
+            // package reference without being one.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
             let Some(at) = line.find("greentic:extension-") else {
                 continue;
             };
@@ -349,13 +364,22 @@ fn scaffolded_worlds_reference_versions_the_vendored_packages_declare() {
             let dep = proj.join(format!("wit/deps/greentic/{pkg}/world.wit"));
             let dep_text = std::fs::read_to_string(&dep)
                 .unwrap_or_else(|e| panic!("{kind}: {pkg} referenced but not vendored: {e}"));
-            let first = dep_text.lines().next().unwrap_or_default();
-            let Some(declared) = first
+            // The `package` statement is not necessarily the vendored file's
+            // first line: a package-level `///` doc comment (see
+            // `wit/extension-addon.wit`) is required to precede it, so this
+            // scans for the declaration by prefix rather than assuming line 0.
+            let Some(decl_line) = dep_text
+                .lines()
+                .find(|l| l.trim_start().starts_with("package "))
+            else {
+                panic!("{kind}: {pkg} vendored file declares no `package` line");
+            };
+            let Some(declared) = decl_line
                 .split('@')
                 .nth(1)
                 .map(|s| s.trim_end_matches(';').trim())
             else {
-                panic!("{kind}: {pkg} declares no @version: {first}");
+                panic!("{kind}: {pkg} declares no @version: {decl_line}");
             };
 
             assert_eq!(
@@ -482,7 +506,12 @@ fn design_template_has_no_stray_placeholder_braces() {
 /// host imports and can only be tested up to that boundary.
 #[test]
 fn guest_templates_ship_example_tests() {
-    for kind in ["design", "bundle", "deploy", "provider", "llm", "mcp"] {
+    // Every scaffoldable kind that ships a Rust guest (`src/lib.rs.tmpl`),
+    // derived rather than hand-listed so a newly added kind is covered
+    // automatically — see `fixtures::kinds_with_template_file`. `wasm-component`
+    // drops out on its own: it has no Rust guest at all, only a `describe.json`
+    // pointing at an out-of-band component.
+    for kind in crate::fixtures::kinds_with_template_file("src/lib.rs.tmpl") {
         let path = format!(
             "{}/templates/{kind}/src/lib.rs.tmpl",
             env!("CARGO_MANIFEST_DIR")
