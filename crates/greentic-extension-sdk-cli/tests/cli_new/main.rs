@@ -4,6 +4,7 @@
 mod fixtures;
 mod icon;
 mod openapi;
+mod rustfmt_clean;
 mod scaffold_kinds;
 mod scaffold_validation;
 mod views;

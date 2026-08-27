@@ -167,16 +167,19 @@ mod tests {
         assert_eq!(tools[0].name, ECHO_TOOL);
         // The server advertises tools, so the capability must say so — an
         // executor reads this before it reads the list.
-        assert!(<Router as Guest>::describe_server().capabilities.tools.is_some());
+        assert!(
+            <Router as Guest>::describe_server()
+                .capabilities
+                .tools
+                .is_some()
+        );
     }
 
     #[test]
     fn echo_returns_the_message_field() {
-        let out = <Router as Guest>::call_tool(
-            ECHO_TOOL.to_string(),
-            r#"{"message":"hi"}"#.to_string(),
-        )
-        .expect("echo is implemented");
+        let out =
+            <Router as Guest>::call_tool(ECHO_TOOL.to_string(), r#"{"message":"hi"}"#.to_string())
+                .expect("echo is implemented");
         let Response::Completed(result) = out else {
             panic!("expected a completed response");
         };

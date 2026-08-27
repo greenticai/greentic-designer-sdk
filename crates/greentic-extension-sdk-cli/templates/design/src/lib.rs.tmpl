@@ -216,8 +216,7 @@ mod tests {
     #[test]
     fn an_unknown_tool_is_an_error() {
         assert!(
-            <Component as tools::Guest>::invoke_tool("nope".to_string(), "{}".to_string())
-                .is_err()
+            <Component as tools::Guest>::invoke_tool("nope".to_string(), "{}".to_string()).is_err()
         );
     }
 }

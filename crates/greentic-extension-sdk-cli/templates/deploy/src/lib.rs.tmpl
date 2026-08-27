@@ -213,8 +213,6 @@ mod tests {
 
     #[test]
     fn an_unknown_target_is_an_error() {
-        assert!(
-            <Component as targets::Guest>::credential_schema("nope".to_string()).is_err()
-        );
+        assert!(<Component as targets::Guest>::credential_schema("nope".to_string()).is_err());
     }
 }
