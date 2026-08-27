@@ -10,6 +10,7 @@
 //! / `is_loopback_host` cross-reference comments below.
 
 use greentic_extension_sdk_contract::DescribeJson;
+use greentic_extension_sdk_contract::extension_id::validate_extension_id;
 use semver::Version;
 
 /// Validate describe for publish. All violations are collected before returning.
@@ -22,14 +23,8 @@ pub fn validate_for_publish(describe: &DescribeJson) -> Result<(), Vec<Validatio
             format!("'{}' is not a valid semver", describe.metadata.version),
         ));
     }
-    if !is_valid_id(&describe.metadata.id) {
-        errors.push(ValidationError::new(
-            "metadata.id",
-            format!(
-                "'{}' — must match reverse-DNS regex ^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$",
-                describe.metadata.id
-            ),
-        ));
+    if let Err(e) = validate_extension_id(&describe.metadata.id) {
+        errors.push(ValidationError::new("metadata.id", e.to_string()));
     }
     for (i, cap) in describe.capabilities.offered.iter().enumerate() {
         if Version::parse(&cap.version).is_err() {
@@ -129,36 +124,6 @@ fn http_pattern_host(pattern: &str) -> Option<&str> {
 fn is_loopback_host(host: &str) -> bool {
     let host = host.trim_start_matches('[').trim_end_matches(']');
     host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
-}
-
-fn is_valid_id(id: &str) -> bool {
-    // Regex: ^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$
-    let mut parts = id.split('.');
-    let Some(first) = parts.next() else {
-        return false;
-    };
-    if !part_is_valid(first) {
-        return false;
-    }
-    let mut has_more = false;
-    for p in parts {
-        has_more = true;
-        if !part_is_valid(p) {
-            return false;
-        }
-    }
-    has_more
-}
-
-fn part_is_valid(s: &str) -> bool {
-    let mut chars = s.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_lowercase() {
-        return false;
-    }
-    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +234,44 @@ mod tests {
         d.metadata.id = "NoDots".into();
         let errs = validate_for_publish(&d).unwrap_err();
         assert!(errs.iter().any(|e| e.field == "metadata.id"));
+    }
+
+    /// The publish validator was stricter than `describe-v2.json`, so an id the
+    /// schema and `gtdx lint` both accept could not be published.
+    #[test]
+    fn digit_led_segment_is_publishable() {
+        let mut d = sample_describe();
+        d.metadata.id = "greentic.3aigent-designer".into();
+        let errs = validate_for_publish(&d).err().unwrap_or_default();
+        assert!(
+            !errs.iter().any(|e| e.field == "metadata.id"),
+            "unexpected id error: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn non_greentic_namespace_is_publishable() {
+        let mut d = sample_describe();
+        d.metadata.id = "com.acme.my-ext".into();
+        let errs = validate_for_publish(&d).err().unwrap_or_default();
+        assert!(
+            !errs.iter().any(|e| e.field == "metadata.id"),
+            "unexpected id error: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn bad_id_message_names_the_offending_part() {
+        let mut d = sample_describe();
+        d.metadata.id = "greentic.Telco".into();
+        let errs = validate_for_publish(&d).unwrap_err();
+        let msg = &errs
+            .iter()
+            .find(|e| e.field == "metadata.id")
+            .expect("id error")
+            .message;
+        assert!(msg.contains("Telco"), "{msg}");
+        assert!(msg.contains("lowercase"), "{msg}");
     }
 
     #[test]

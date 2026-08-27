@@ -10,6 +10,7 @@ use std::{
 };
 
 use clap::Args as ClapArgs;
+use greentic_extension_sdk_contract::extension_id::validate_extension_id;
 
 use crate::scaffold::{
     Kind,
@@ -563,44 +564,20 @@ fn detect_git_author() -> String {
 
 /// The `metadata.id` a scaffold gets when the author passes no `--id`.
 ///
-/// Deliberately under the `greentic.` namespace. `gtdx lint`'s `E_ID_PATTERN`
-/// requires `^greentic\.[a-z0-9][a-z0-9-]*$`, so any other default ships a
-/// scaffold that fails the linter shipped beside it — which is exactly what
-/// `com.example.<name>` did for every kind, on an untouched `gtdx new`.
+/// `greentic.` is a default, not a requirement — `E_ID_PATTERN` accepts any
+/// reverse-DNS namespace. It stays the default because a scaffold has no way to
+/// know which namespace its author owns, and `com.example.<name>` (the previous
+/// default) shipped a placeholder namespace nobody controls.
 ///
-/// `validate_id` already constrains each reverse-DNS segment to
-/// `^[a-z][a-z0-9-]*$`, so a name that scaffolds at all is lint-clean here.
+/// A name that scaffolds at all is `<lowercase-kebab>`, and the id rule allows a
+/// later segment to start with a digit, so `greentic.<name>` is always valid
+/// here — including `greentic.3aigent-designer`, which the old rule rejected.
 pub(crate) fn default_id(name: &str) -> String {
     format!("greentic.{name}")
 }
 
 fn validate_id(id: &str) -> anyhow::Result<()> {
-    if !is_reverse_dns(id) {
-        anyhow::bail!("id must match reverse-DNS (got {id:?})");
-    }
-    Ok(())
-}
-
-pub(super) fn is_reverse_dns(id: &str) -> bool {
-    // Reverse-DNS: [a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+
-    let parts: Vec<&str> = id.split('.').collect();
-    if parts.len() < 2 {
-        return false;
-    }
-    for p in parts {
-        if p.is_empty() {
-            return false;
-        }
-        let mut chars = p.chars();
-        let first = chars.next().unwrap();
-        if !first.is_ascii_lowercase() {
-            return false;
-        }
-        if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-            return false;
-        }
-    }
-    true
+    validate_extension_id(id).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn validate_version(version: &str) -> anyhow::Result<()> {

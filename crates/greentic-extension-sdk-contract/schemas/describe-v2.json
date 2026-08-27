@@ -369,7 +369,7 @@
       ],
       "properties": {
         "id": {
-          "description": "Reverse-DNS extension id, e.g. `greentic.telco-x`. `gtdx lint` enforces a stricter form than the pattern here: `E_ID_PATTERN` requires `^greentic\\.[a-z0-9][a-z0-9-]*$`.",
+          "description": "Reverse-DNS extension id, e.g. `greentic.telco-x`. Any namespace the author controls is valid. `gtdx new`, `gtdx lint` (`E_ID_PATTERN`) and `gtdx publish` share a slightly stricter form than the pattern here: `^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$` \u2014 no dots inside a segment, and a segment may not start with `-`.",
           "type": "string",
           "pattern": "^[a-z][a-z0-9.-]*\\.[a-z0-9.-]+$"
         },

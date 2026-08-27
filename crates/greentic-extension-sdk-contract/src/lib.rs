@@ -9,6 +9,7 @@ pub mod component_id;
 pub mod deprecated;
 pub mod describe;
 pub mod error;
+pub mod extension_id;
 pub mod filename;
 pub mod hex;
 pub mod kind;

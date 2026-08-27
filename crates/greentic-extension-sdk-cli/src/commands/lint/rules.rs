@@ -4,6 +4,8 @@
 
 use std::path::Path;
 
+use greentic_extension_sdk_contract::extension_id::validate_extension_id;
+
 use super::Violation;
 
 pub(super) fn check_version_semver(describe: &serde_json::Value) -> Vec<Violation> {
@@ -391,33 +393,20 @@ pub(super) fn check_sha256_zero(describe: &serde_json::Value, publish: bool) -> 
     out
 }
 
-/// Matches `^greentic\.[a-z0-9][a-z0-9-]*$`.
-fn is_valid_extension_id(id: &str) -> bool {
-    let Some(slug) = id.strip_prefix("greentic.") else {
-        return false;
-    };
-    let mut chars = slug.chars();
-    let Some(first) = chars.next() else {
-        return false; // empty slug
-    };
-    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return false;
-    }
-    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-/// `E_ID_PATTERN` — `metadata.id` must be `greentic.<lowercase-kebab-slug>`.
+/// `E_ID_PATTERN` — `metadata.id` must be reverse-DNS.
+///
+/// The rule lives in `greentic_extension_sdk_contract::extension_id`, shared
+/// with `gtdx new` and `gtdx publish`, so all three agree and quote the same
+/// pattern. It no longer requires the `greentic.` namespace: any reverse-DNS
+/// namespace the author controls is valid, matching `describe-v2.json`.
 pub(super) fn check_id_pattern(describe: &serde_json::Value) -> Vec<Violation> {
     let Some(id) = describe.pointer("/metadata/id").and_then(|v| v.as_str()) else {
         return Vec::new();
     };
-    if is_valid_extension_id(id) {
-        return Vec::new();
+    match validate_extension_id(id) {
+        Ok(()) => Vec::new(),
+        Err(e) => vec![Violation::error("E_ID_PATTERN", e.to_string())],
     }
-    vec![Violation::error(
-        "E_ID_PATTERN",
-        format!("metadata.id {id:?} must match ^greentic\\.[a-z0-9][a-z0-9-]*$"),
-    )]
 }
 
 /// `snake_case`: starts with a lowercase letter, then lowercase / digits / `_`.
