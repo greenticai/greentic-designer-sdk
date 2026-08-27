@@ -1,5 +1,6 @@
 //! Typed `contributions` block. Nine children, each its own typed list, plus
-//! the optional `connection_test` self-test descriptor.
+//! the optional `connection_test` self-test descriptor and the optional
+//! `messaging_channel` a provider extension offers.
 
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +8,7 @@ pub mod connection_test;
 pub mod dw_provider;
 pub mod guardrail;
 pub mod knowledge;
+pub mod messaging_channel;
 pub mod node_type;
 pub mod prompt;
 pub mod recipe;
@@ -18,6 +20,7 @@ pub use connection_test::ConnectionTest;
 pub use dw_provider::DwProvider;
 pub use guardrail::Guardrail;
 pub use knowledge::Knowledge;
+pub use messaging_channel::MessagingChannel;
 pub use node_type::{NodeType, OutputPort};
 pub use prompt::Prompt;
 pub use recipe::Recipe;
@@ -60,6 +63,20 @@ pub struct Contributions {
         skip_serializing_if = "Option::is_none"
     )]
     pub connection_test: Option<ConnectionTest>,
+    /// The messaging channel a provider extension offers for selection and
+    /// deployment. `snake_case` on the wire, matching `connection_test`
+    /// above rather than this struct's `camelCase` default — the two optional
+    /// descriptors are read side by side and a split spelling is a trap for
+    /// extension authors.
+    ///
+    /// Optional, and absent on every provider extension published before this
+    /// field existed: absent means "offers no channel", never an error.
+    #[serde(
+        rename = "messaging_channel",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub messaging_channel: Option<MessagingChannel>,
 }
 
 #[cfg(test)]
