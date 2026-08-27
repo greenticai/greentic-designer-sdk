@@ -62,6 +62,19 @@
 //!   instead
 //! - `W_ADDON_FAMILY_UNKNOWN` — `family` is not one this SDK version knows.
 //!   A warning, for the same reason as `W_VIEW_SLOT_UNKNOWN`
+//!
+//! Addon backup rules (August 2026), making `supports_backup` a verifiable
+//! claim instead of an unchecked boolean by reading it against the
+//! extension's own `wit/world.wit` (silent when that file is absent, e.g.
+//! linting a packed or installed extension with no source tree):
+//! - `E_ADDON_BACKUP_NOT_EXPORTED` — an addon declares `supports_backup:
+//!   true` but `wit/world.wit` does not export
+//!   `greentic:extension-addon/backup`. The platform would offer a
+//!   pre-destroy snapshot and call an export that does not exist.
+//! - `W_ADDON_BACKUP_UNDECLARED` — `wit/world.wit` exports
+//!   `greentic:extension-addon/backup` but no addon declares
+//!   `supports_backup: true`. Drift, not a lie — the capability exists and
+//!   is simply never advertised — so a warning, not an error.
 
 use std::path::{Path, PathBuf};
 
@@ -179,6 +192,6 @@ fn collect_violations(
     out.extend(check_perms_secrets_plain_key(describe));
     out.extend(check_secret_key_canonical(describe));
     out.extend(check_views(describe, dir));
-    out.extend(check_addons(describe));
+    out.extend(check_addons(describe, dir));
     out
 }

@@ -29,10 +29,13 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.14 or newer.** The addon kind arrived in 1.2.13, but that release's
+**Use 1.2.15 or newer.** The addon kind arrived in 1.2.13, but that release's
 scaffold shipped a `build.sh` pointing at a directory cargo never writes and a
 `ci/local_check.sh` that could not run before the first build — so a fresh
-project of *any* kind failed its own documented checks. 1.2.14 fixes both.
+project of *any* kind failed its own documented checks. 1.2.14 fixes both, and
+1.2.15 makes `supports_backup` a checked claim rather than an honour-system
+boolean — `gtdx lint` now reads your `wit/world.wit` and fails an addon that
+advertises a snapshot its world does not export.
 
 `gtdx new --kind addon` scaffolds a project that compiles to a wasm component
 implementing `greentic:extension-addon@0.1.0` — the contract an addon uses to

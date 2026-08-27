@@ -140,7 +140,29 @@ spec §9.3 names as the first one built.
 - **`supports_backup`** — whether the addon can snapshot before a
   destructive change. The platform offers to back up on the strength of
   this flag alone, so declare `true` only when a snapshot genuinely
-  happens — there's no code path that verifies the claim.
+  happens.
+
+  `gtdx lint` now checks the declared half of that claim: it reads your
+  extension's own `wit/world.wit` and compares it against every
+  `supports_backup` in `contributions.addons[]`.
+  - `E_ADDON_BACKUP_NOT_EXPORTED` — some addon declares `supports_backup:
+    true` but the world does not export `greentic:extension-addon/backup`.
+    The platform would offer a pre-destroy snapshot and call an export that
+    does not exist — the exact failure mode this flag exists to prevent.
+  - `W_ADDON_BACKUP_UNDECLARED` — the world exports `backup` but no addon
+    declares `supports_backup: true`. Drift, not a lie: the capability is
+    implemented and simply never advertised, so it warns rather than fails.
+
+  Both rules are silent when `wit/world.wit` isn't on disk — linting a
+  packed or installed extension (`gtdx lint --dir <install>`) has no source
+  tree to read, and that's a legitimate use of `--dir`, not a reason to
+  reject the describe.
+
+  **What is still not checked**: the lint reads the *declared* world, not
+  the *built* component. Nothing yet verifies that the `.wasm` you actually
+  ship exports `backup` the way `wit/world.wit` says it does, or that
+  calling it really produces a usable snapshot. A `world.wit` that claims
+  `backup` and a component that doesn't implement it will still lint clean.
 
 - **`schema_version`** — see its own section below.
 
