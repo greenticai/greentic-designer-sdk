@@ -36,7 +36,7 @@
     },
     "permissions": {
       "network": [],
-      "secrets": [],
+      "secrets": ["cache-password"],
       "callExtensionKinds": []
     }
   },
@@ -51,7 +51,7 @@
         "desired_state_schema": "{\"type\":\"object\",\"properties\":{\"max_connections\":{\"type\":\"integer\",\"minimum\":1,\"default\":100,\"title\":\"Max connections\"},\"eviction_policy\":{\"type\":\"string\",\"enum\":[\"noeviction\",\"allkeys-lru\",\"volatile-lru\"],\"default\":\"noeviction\",\"title\":\"Eviction policy\"}},\"required\":[\"max_connections\"]}",
         "outputs": [
           { "name": "CACHE_URL", "type": "text", "description": "host:port of the running instance." },
-          { "name": "CACHE_PASSWORD", "type": "text", "sensitive": true, "description": "Auth password, materialised by the platform and injected via a secret reference — never a literal." }
+          { "name": "CACHE_PASSWORD", "type": "text", "sensitive": true, "description": "Auth password materialised by the platform for the \"cache-password\" secret requested in render_workload's env (SECRET_CACHE_PASSWORD in src/lib.rs, granted in runtime.permissions.secrets above) and injected via a secret reference — never a literal." }
         ],
         "supports_backup": false,
         "schema_version": 1

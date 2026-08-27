@@ -7,16 +7,23 @@
 // so a fresh build has something real to validate, plan and render, not to
 // be shipped as-is.
 //
-// `greentic:extension-addon` splits its five exported functions by what a
+// `greentic:extension-addon` splits its six exported functions by what a
 // scaffold can honestly do without a real backing service:
 //
 //   - `validation` and `workload` are fully implemented below: real checks
-//     against the schemas in `describe.json`, and a real digest-pinned
-//     `container-workload`.
-//   - `reconciler.plan` is fully implemented too — a genuine diff of
-//     `current` against `desired`. It is PURE (no network), which is what
-//     lets `tests::plan_is_idempotent_and_stable` hold it to the same two
-//     properties the platform will hold every addon to.
+//     against the schemas in `describe.json`, and a `container-workload`
+//     whose image is a placeholder digest — see `IMAGE`'s doc comment below
+//     — that must be replaced with a real one before this addon ships.
+//   - `reconciler.plan` is fully implemented too. It does NOT diff `current`
+//     against `desired` itself: per `planned-change.planned`'s doc comment
+//     in `wit/deps/greentic/extension-addon`, `plan` returns `desired`
+//     amended with this addon's own defaults, and the PLATFORM diffs
+//     `current` against that returned document to render the plan — the
+//     addon never names an action. `plan` does separately compare `current`
+//     against the amended document to populate `requires-replace`, because
+//     only that one decision needs both documents. It is PURE (no network),
+//     which is what lets `tests::plan_is_idempotent_and_stable` hold it to
+//     the same two properties the platform will hold every addon to.
 //   - `reconciler.observe` and `reconciler.apply` need a real backing
 //     service to talk to over the network, which this scaffold does not
 //     have. They fail LOUDLY — an `extension-error` from `observe`, an
@@ -54,6 +61,14 @@ const IMAGE: &str = "docker.io/library/redis@sha256:0000000000000000000000000000
 
 const DEFAULT_MAX_CONNECTIONS: u64 = 100;
 const DEFAULT_EVICTION_POLICY: &str = "noeviction";
+
+/// Logical secret name `render_workload` requests for `REDIS_PASSWORD` (see
+/// below) — the same value the `CACHE_PASSWORD` output declared in
+/// `describe.json`'s `contributions.addons[].outputs` resolves to once the
+/// platform materialises it. Named once here so the two documents cannot
+/// silently drift apart; `describe.json`'s `runtime.permissions.secrets`
+/// grants this exact name.
+const SECRET_CACHE_PASSWORD: &str = "cache-password";
 
 // ---- extension-base/manifest ----
 impl manifest::Guest for Component {
@@ -160,21 +175,45 @@ impl validation::Guest for Component {
             }];
         }
 
-        let memory_mb = serde_json::from_str::<serde_json::Value>(&config_json)
-            .ok()
-            .and_then(|v| v.get("memory_mb").and_then(serde_json::Value::as_u64).map(|n| n));
-        let max_connections = serde_json::from_str::<serde_json::Value>(&desired.json)
-            .ok()
-            .and_then(|v| {
-                v.get("max_connections")
-                    .and_then(serde_json::Value::as_u64)
-            });
+        // A total parse failure is diagnosed HERE, not deferred to
+        // `validate-config`: a caller of `validate-desired-state` is not
+        // guaranteed to have called `validate-config` too, so a `config_json`
+        // that is not even JSON would otherwise never reach any check on
+        // this path and this function would return `[]` — indistinguishable
+        // from "checked and fine".
+        let Ok(serde_json::Value::Object(config)) =
+            serde_json::from_str::<serde_json::Value>(&config_json)
+        else {
+            return vec![types::Diagnostic {
+                severity: types::Severity::Error,
+                code: "E_CONFIG_NOT_AN_OBJECT".to_string(),
+                message: "config must be a JSON object matching config_schema".to_string(),
+                path: None,
+            }];
+        };
+        let Ok(serde_json::Value::Object(desired_obj)) =
+            serde_json::from_str::<serde_json::Value>(&desired.json)
+        else {
+            return vec![types::Diagnostic {
+                severity: types::Severity::Error,
+                code: "E_DESIRED_STATE_NOT_AN_OBJECT".to_string(),
+                message: "desired state must be a JSON object matching desired_state_schema"
+                    .to_string(),
+                path: None,
+            }];
+        };
+
+        let memory_mb = config.get("memory_mb").and_then(serde_json::Value::as_u64);
+        let max_connections = desired_obj
+            .get("max_connections")
+            .and_then(serde_json::Value::as_u64);
 
         let (Some(memory_mb), Some(max_connections)) = (memory_mb, max_connections) else {
-            // Either document failed to parse or is missing the field: that
-            // is `validate-config`'s / the schema's job to report, not this
-            // function's — there is nothing to cross-check without both
-            // numbers.
+            // Both documents parsed as JSON objects; a missing or
+            // wrong-typed `memory_mb` / `max_connections` field within an
+            // otherwise-valid object is `validate-config`'s / the schema's
+            // job to report, not this function's — there is nothing to
+            // cross-check without both numbers.
             return Vec::new();
         };
 
@@ -231,7 +270,7 @@ impl workload::Guest for Component {
                 // comment in wit/deps/greentic/extension-addon.
                 env: vec![(
                     "REDIS_PASSWORD".to_string(),
-                    addon_types::ValueRef::SecretRef("cache-password".to_string()),
+                    addon_types::ValueRef::SecretRef(SECRET_CACHE_PASSWORD.to_string()),
                 )],
                 ports: vec![workload::Port {
                     name: "redis".to_string(),
@@ -269,16 +308,29 @@ impl workload::Guest for Component {
 /// basing it on `desired` alone is what keeps `plan(x, x)` a no-op (see
 /// `tests::plan_is_idempotent_and_stable`) instead of the "normalises an
 /// absent key to `{}` on every call" bug this addon must not repeat.
-fn defaulted_desired_state(desired_json: &str) -> serde_json::Value {
+///
+/// Returns `Err` when `desired_json` is not a JSON object — a truncated
+/// document, `"[1,2,3]"`, anything that isn't `{...}`. Silently treating
+/// that as `{}` would let `plan` fabricate a full destroy-and-recreate
+/// proposal — every field reset to this addon's scaffold defaults — from a
+/// document nothing here actually read. `plan` turns this `Err` into
+/// `extension-error::schema-invalid`, the same way `render-workload` already
+/// does for its own parse failure.
+fn defaulted_desired_state(desired_json: &str) -> Result<serde_json::Value, String> {
     let mut obj = match serde_json::from_str::<serde_json::Value>(desired_json) {
         Ok(serde_json::Value::Object(map)) => map,
-        _ => serde_json::Map::new(),
+        Ok(other) => {
+            return Err(format!(
+                "desired state must be a JSON object matching desired_state_schema, got {other}"
+            ));
+        }
+        Err(e) => return Err(format!("desired state: {e}")),
     };
     obj.entry("max_connections")
         .or_insert_with(|| serde_json::json!(DEFAULT_MAX_CONNECTIONS));
     obj.entry("eviction_policy")
         .or_insert_with(|| serde_json::json!(DEFAULT_EVICTION_POLICY));
-    serde_json::Value::Object(obj)
+    Ok(serde_json::Value::Object(obj))
 }
 
 // ---- extension-addon/reconciler ----
@@ -290,6 +342,15 @@ impl reconciler::Guest for Component {
     /// without a real Redis to talk to. Fails loudly rather than fabricating
     /// an observed state — an addon that lies here breaks drift detection
     /// for every resource it manages.
+    ///
+    /// When you implement this for real: `describe.json`'s
+    /// `runtime.permissions.network` is deliberately left `[]` in this
+    /// scaffold, because the real target — `CACHE_URL` from
+    /// `binding.outputs` — is only known per-instance at runtime, not at
+    /// scaffold time, so there is no fixed host pattern this template could
+    /// honestly grant up front. `extension-host/http` calls this addon makes
+    /// to that address will be denied until you add the pattern your own
+    /// deployment actually uses.
     fn observe(
         resource_id: String,
         _binding: reconciler::Binding,
@@ -302,10 +363,16 @@ impl reconciler::Guest for Component {
         )))
     }
 
-    /// PURE — a real diff of `current` against `desired`, amended with this
-    /// addon's defaults. The scaffold's centrepiece: everything here can be
-    /// computed with no network, so there is no honest reason to defer or
-    /// fake it.
+    /// PURE. Returns `desired`, amended with this addon's own defaults —
+    /// NOT a diff of `current` against `desired`; see
+    /// `defaulted_desired_state`'s doc comment for why, and
+    /// `planned-change.planned`'s doc comment in
+    /// `wit/deps/greentic/extension-addon` for why the platform does that
+    /// diffing, not the addon. Separately compares `current` against the
+    /// amended document to populate `requires-replace`, since only that one
+    /// decision needs both documents. The scaffold's centrepiece: everything
+    /// here can be computed with no network, so there is no honest reason to
+    /// defer or fake it.
     fn plan(
         resource_id: String,
         current: addon_types::VersionedState,
@@ -316,37 +383,65 @@ impl reconciler::Guest for Component {
         }
         if desired.schema_version != 1 {
             return Err(types::ExtensionError::SchemaInvalid(format!(
-                "this addon only understands desired_state_schema version 1, got {}",
+                "this addon only understands desired_state_schema version 1 for desired state, got {}",
                 desired.schema_version
             )));
         }
+        // `current` and `desired` may legitimately be different versions
+        // mid-migration (see `versioned-state`'s doc comment), so both are
+        // checked — reading a `current` tagged version 7 as if it were
+        // version 1 would report a clean change against state this addon
+        // structurally does not understand.
+        if current.schema_version != 1 {
+            return Err(types::ExtensionError::SchemaInvalid(format!(
+                "this addon only understands desired_state_schema version 1 for current state, got {}",
+                current.schema_version
+            )));
+        }
 
-        let planned_value = defaulted_desired_state(&desired.json);
+        let planned_value =
+            defaulted_desired_state(&desired.json).map_err(types::ExtensionError::SchemaInvalid)?;
 
-        // A change to `eviction_policy` cannot be applied to a running
-        // instance — the eviction algorithm is chosen at process start — so
-        // it forces destroy-and-recreate. Compared against `current`
-        // directly (not against a default): a resource that does not exist
-        // yet (`current` is `"{}"`) has nothing to replace.
+        let current_obj = match serde_json::from_str::<serde_json::Value>(&current.json) {
+            Ok(serde_json::Value::Object(map)) => map,
+            Ok(other) => {
+                return Err(types::ExtensionError::SchemaInvalid(format!(
+                    "current state must be a JSON object matching desired_state_schema, got {other}"
+                )));
+            }
+            Err(e) => {
+                return Err(types::ExtensionError::SchemaInvalid(format!(
+                    "current state: {e}"
+                )));
+            }
+        };
+
+        // A change to `eviction_policy` is treated here as forcing
+        // destroy-and-recreate — illustrative of what belongs in
+        // `requires-replace`, NOT a fact about real Redis: real Redis
+        // changes `maxmemory-policy` at runtime via `CONFIG SET`. An addon
+        // adapting this scaffold to a real backing service should not
+        // inherit this rule as-is. Compared against `current` directly (not
+        // against a default): a resource that does not exist yet (`current`
+        // is `"{}"`) has nothing to replace.
         let mut requires_replace = Vec::new();
-        if let Ok(serde_json::Value::Object(current_obj)) =
-            serde_json::from_str::<serde_json::Value>(&current.json)
-            && let (Some(before), Some(after)) = (
-                current_obj.get("eviction_policy"),
-                planned_value.get("eviction_policy"),
-            )
-            && before != after
+        if let (Some(before), Some(after)) = (
+            current_obj.get("eviction_policy"),
+            planned_value.get("eviction_policy"),
+        ) && before != after
         {
             requires_replace.push("/eviction_policy".to_string());
         }
 
-        Ok(reconciler::PlanOutcome::Planned(reconciler::PlannedChange {
-            planned: addon_types::VersionedState {
-                schema_version: 1,
-                json: planned_value.to_string(),
+        Ok(reconciler::PlanOutcome::Planned(
+            reconciler::PlannedChange {
+                planned: addon_types::VersionedState {
+                    schema_version: 1,
+                    json: planned_value.to_string(),
+                },
+                requires_replace,
             },
-            requires_replace,
-        }))
+        ))
     }
 
     /// Converging the live instance toward `planned`. Like `observe`, this
@@ -435,8 +530,50 @@ mod tests {
         assert!(diags.is_empty(), "got: {diags:?}");
     }
 
+    /// Regression: an unparseable document must never come back as `[]`.
+    /// Empty diagnostics is the USABLE answer ("checked and fine"), so a
+    /// caller who never called `validate_config` separately — nothing
+    /// requires them to — must still be told when `config_json` was never
+    /// JSON at all, rather than reading silence as a clean bill of health.
     #[test]
-    fn render_workload_returns_a_digest_pinned_container_with_a_readiness_probe() {
+    fn validate_desired_state_reports_unparseable_documents_instead_of_silence() {
+        let diags = <Component as validation::Guest>::validate_desired_state(
+            resource_id(),
+            "not json".to_string(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: r#"{"max_connections":100}"#.to_string(),
+            },
+        );
+        assert!(
+            !diags.is_empty(),
+            "an unparseable config must not read as \"checked and fine\""
+        );
+
+        let diags = <Component as validation::Guest>::validate_desired_state(
+            resource_id(),
+            r#"{"memory_mb":256}"#.to_string(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: "[1,2,3]".to_string(),
+            },
+        );
+        assert!(
+            !diags.is_empty(),
+            "a non-object desired state must not read as \"checked and fine\""
+        );
+    }
+
+    /// Checks SHAPE only: an `@sha256:`-suffixed image reference, resources
+    /// sized off `memory_mb`, and a TCP readiness probe. It CANNOT tell a
+    /// real digest from `IMAGE`'s scaffold placeholder — `render_workload`
+    /// is pure and this test calls it with no registry to check against —
+    /// so unlike the function name this used to have, this one does not
+    /// claim "digest-pinned": see `IMAGE`'s doc comment for why shipping the
+    /// placeholder this test happily accepts is a live bug, not a passing
+    /// test.
+    #[test]
+    fn render_workload_returns_a_digest_shaped_container_with_a_readiness_probe() {
         let spec = <Component as workload::Guest>::render_workload(
             resource_id(),
             r#"{"memory_mb":256}"#.to_string(),
@@ -447,11 +584,14 @@ mod tests {
         };
         assert!(
             container.primary.image.contains("@sha256:"),
-            "image must be digest-pinned, got: {}",
+            "image must carry a digest reference, got: {}",
             container.primary.image
         );
         assert_eq!(container.resources.min_memory_mb, 256);
-        assert!(matches!(container.readiness.kind, workload::ProbeKind::Tcp(_)));
+        assert!(matches!(
+            container.readiness.kind,
+            workload::ProbeKind::Tcp(_)
+        ));
         assert_eq!(container.volumes.len(), 1);
     }
 
@@ -474,16 +614,105 @@ mod tests {
         };
         assert!(change.planned.json.contains("\"max_connections\":100"));
         assert!(change.planned.json.contains("allkeys-lru"));
-        assert_eq!(change.requires_replace, vec!["/eviction_policy".to_string()]);
+        assert_eq!(
+            change.requires_replace,
+            vec!["/eviction_policy".to_string()]
+        );
+    }
+
+    /// Regression for the fabricated-plan bug: a `desired` document that
+    /// fails to parse (truncated JSON) or parses to something other than an
+    /// object (a bare array) must not be silently treated as `{}` and
+    /// planned as a full reset to this addon's scaffold defaults. Against a
+    /// `current` holding non-default values, that bug would report an
+    /// approvable destroy-and-recreate plan built from a document nothing
+    /// here actually read.
+    #[test]
+    fn plan_rejects_unparseable_desired_state_instead_of_fabricating_defaults() {
+        let current = addon_types::VersionedState {
+            schema_version: 1,
+            json: r#"{"max_connections":500,"eviction_policy":"allkeys-lru"}"#.to_string(),
+        };
+
+        let truncated = <Component as reconciler::Guest>::plan(
+            resource_id(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: current.json.clone(),
+            },
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: r#"{"max_connections":"#.to_string(),
+            },
+        )
+        .expect_err("truncated desired state must not silently plan scaffold defaults");
+        assert!(matches!(truncated, types::ExtensionError::SchemaInvalid(_)));
+
+        let non_object = <Component as reconciler::Guest>::plan(
+            resource_id(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: current.json,
+            },
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: "[1,2,3]".to_string(),
+            },
+        )
+        .expect_err("a non-object desired state must not silently plan scaffold defaults");
+        assert!(matches!(
+            non_object,
+            types::ExtensionError::SchemaInvalid(_)
+        ));
+    }
+
+    /// Regression: an unparseable `current` must not be silently read as
+    /// `{}` (which would drop `requires_replace` and report a destructive
+    /// `eviction_policy` change as a safe in-place one), and a `current`
+    /// tagged a `schema_version` this addon does not understand must not be
+    /// read as if it were version 1.
+    #[test]
+    fn plan_rejects_unparseable_or_wrong_version_current_state() {
+        let desired = || addon_types::VersionedState {
+            schema_version: 1,
+            json: r#"{"max_connections":100,"eviction_policy":"allkeys-lru"}"#.to_string(),
+        };
+
+        let malformed = <Component as reconciler::Guest>::plan(
+            resource_id(),
+            addon_types::VersionedState {
+                schema_version: 1,
+                json: "not json".to_string(),
+            },
+            desired(),
+        )
+        .expect_err("malformed current state must not silently report a clean, in-place change");
+        assert!(matches!(malformed, types::ExtensionError::SchemaInvalid(_)));
+
+        let wrong_version = <Component as reconciler::Guest>::plan(
+            resource_id(),
+            addon_types::VersionedState {
+                schema_version: 7,
+                json: r#"{"eviction_policy":"noeviction"}"#.to_string(),
+            },
+            desired(),
+        )
+        .expect_err("a current document in an unrecognised schema version must not be read as v1");
+        assert!(matches!(
+            wrong_version,
+            types::ExtensionError::SchemaInvalid(_)
+        ));
     }
 
     #[test]
     fn observe_fails_loudly_instead_of_faking_success() {
-        let err =
-            <Component as reconciler::Guest>::observe(resource_id(), reconciler::Binding {
+        let err = <Component as reconciler::Guest>::observe(
+            resource_id(),
+            reconciler::Binding {
                 outputs: Vec::new(),
-            })
-            .expect_err("observe must fail until a real backing service is wired up");
+            },
+        )
+        .expect_err("observe must fail until a real backing service is wired up");
         let types::ExtensionError::Internal(message) = err else {
             panic!("expected Internal, got a different ExtensionError variant");
         };
@@ -506,24 +735,31 @@ mod tests {
         };
         let report = <Component as reconciler::Guest>::apply(
             resource_id(),
-            reconciler::Binding { outputs: Vec::new() },
+            reconciler::Binding {
+                outputs: Vec::new(),
+            },
             current_for_apply,
             planned,
         )
         .expect("apply reports failure through apply-report, not Err");
-        assert!(matches!(report.outcome, reconciler::Outcome::FailedTerminal));
+        assert!(matches!(
+            report.outcome,
+            reconciler::Outcome::FailedTerminal
+        ));
         assert_eq!(report.observed.json, current.json);
         assert!(report.message.contains("not implemented"));
     }
 
     /// The property every addon `plan` is held to. Uses
     /// `greentic-extension-sdk-testing`'s conformance helpers against this
-    /// addon's own `plan` — see the crate doc comment above for why
-    /// `defaulted_desired_state` reads only `desired`, which is what keeps
-    /// this passing.
+    /// addon's own `plan` — see `defaulted_desired_state`'s own doc comment
+    /// above for why it reads only `desired`, which is what keeps this
+    /// passing.
     #[test]
     fn plan_is_idempotent_and_stable() {
-        use greentic_extension_sdk_testing::{PlanResult, assert_plan_idempotent, assert_plan_stable};
+        use greentic_extension_sdk_testing::{
+            PlanResult, assert_plan_idempotent, assert_plan_stable,
+        };
 
         let call = |current: &str, desired: &str| -> Option<PlanResult> {
             let outcome = <Component as reconciler::Guest>::plan(
@@ -575,8 +811,11 @@ mod tests {
             .any(|d| d.code == "E_UNKNOWN_RESOURCE")
         );
         assert!(
-            <Component as workload::Guest>::render_workload("not-cache".to_string(), "{}".to_string())
-                .is_err()
+            <Component as workload::Guest>::render_workload(
+                "not-cache".to_string(),
+                "{}".to_string()
+            )
+            .is_err()
         );
         assert!(
             <Component as reconciler::Guest>::plan(
