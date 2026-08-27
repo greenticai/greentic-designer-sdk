@@ -369,7 +369,7 @@
       ],
       "properties": {
         "id": {
-          "description": "Reverse-DNS extension id, e.g. `greentic.telco-x`. Any namespace the author controls is valid. `gtdx new`, `gtdx lint` (`E_ID_PATTERN`) and `gtdx publish` share a slightly stricter form than the pattern here: `^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$` \u2014 no dots inside a segment, and a segment may not start with `-`.",
+          "description": "Reverse-DNS extension id, e.g. `greentic.telco-x`. Any namespace the author controls is valid. `gtdx new`, `gtdx lint` (`E_ID_PATTERN`) and `gtdx publish` share a stricter form than the pattern here: `^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*(\\.[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*)+$`. The id becomes the WIT package name (`greentic.telco-x` -> `package greentic:telco-x;`), so each segment must be a WIT kebab-name: every dash-separated word starts with a letter. `greentic.3aigent-designer` matches the pattern here but cannot be built.",
           "type": "string",
           "pattern": "^[a-z][a-z0-9.-]*\\.[a-z0-9.-]+$"
         },

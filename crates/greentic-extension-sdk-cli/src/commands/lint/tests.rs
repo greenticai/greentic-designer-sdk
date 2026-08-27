@@ -423,6 +423,10 @@ fn id_pattern_rejects_bad_id() {
         "greentic.-x",
         "3aigent.designer",
         "greentic.telco_x",
+        // A digit-led word becomes an invalid WIT label: 1.2.16 let these
+        // through and they scaffolded projects `cargo component build` refused.
+        "greentic.3aigent-designer",
+        "greentic.provider-3aigent",
     ] {
         let d = json!({ "metadata": { "id": bad } });
         let v = check_id_pattern(&d);
@@ -437,12 +441,12 @@ fn id_pattern_accepts_good_id() {
         "greentic.sorla",
         "greentic.telco-x-tools",
         "greentic.operala",
-        // A later segment may start with a digit, and the namespace is the
-        // author's to choose — both were rejected before, in disagreement with
-        // `describe-v2.json`.
-        "greentic.3aigent-designer",
+        // The namespace is the author's to choose — this was rejected before
+        // 1.2.16, in disagreement with `describe-v2.json`.
         "com.acme.my-ext",
-        "io.github.someone.3d-viewer",
+        // Digits are fine once a word has started.
+        "greentic.aigent3-designer",
+        "io.github.someone.viewer3d",
     ] {
         let d = json!({ "metadata": { "id": good } });
         assert!(
@@ -709,11 +713,12 @@ fn secret_key_canonical_rejects_star_wildcard() {
 ///
 /// The namespace requirement is gone, but the pairing still needs asserting:
 /// the scaffold default must satisfy the linter shipped beside it, whatever
-/// either one becomes. `a1` and `3d` cover the digits that the pre-1.2.16 rule
-/// choked on.
+/// either one becomes. `a1` and `viewer3d` cover the digits that the pre-1.2.16
+/// rule choked on — a name whose *word* starts with a digit is rejected as a
+/// name, so it never reaches the id rule.
 #[test]
 fn the_scaffold_default_id_passes_the_id_rule() {
-    for name in ["demo", "telco-x", "a1", "3aigent-designer", "3d"] {
+    for name in ["demo", "telco-x", "a1", "viewer3d", "aigent3-designer"] {
         let id = crate::commands::new::default_id(name);
         let d = json!({ "metadata": { "id": id } });
         let v = check_id_pattern(&d);

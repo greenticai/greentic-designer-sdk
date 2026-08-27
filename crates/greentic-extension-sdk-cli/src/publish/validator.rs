@@ -236,17 +236,25 @@ mod tests {
         assert!(errs.iter().any(|e| e.field == "metadata.id"));
     }
 
-    /// The publish validator was stricter than `describe-v2.json`, so an id the
-    /// schema and `gtdx lint` both accept could not be published.
     #[test]
-    fn digit_led_segment_is_publishable() {
+    fn digits_inside_a_word_are_publishable() {
         let mut d = sample_describe();
-        d.metadata.id = "greentic.3aigent-designer".into();
+        d.metadata.id = "greentic.aigent3-designer".into();
         let errs = validate_for_publish(&d).err().unwrap_or_default();
         assert!(
             !errs.iter().any(|e| e.field == "metadata.id"),
             "unexpected id error: {errs:?}"
         );
+    }
+
+    /// Publishing an id whose WIT package name is invalid ships an extension
+    /// nobody can rebuild from source.
+    #[test]
+    fn a_digit_led_word_is_not_publishable() {
+        let mut d = sample_describe();
+        d.metadata.id = "greentic.provider-3aigent".into();
+        let errs = validate_for_publish(&d).unwrap_err();
+        assert!(errs.iter().any(|e| e.field == "metadata.id"), "{errs:?}");
     }
 
     #[test]
