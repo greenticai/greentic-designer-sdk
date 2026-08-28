@@ -35,21 +35,12 @@ pub fn validate_for_publish(describe: &DescribeJson) -> Result<(), Vec<Validatio
         }
     }
     for (i, url) in describe.runtime.permissions.network.iter().enumerate() {
-        if url.starts_with("https://") {
-            continue;
-        }
-        // Loopback-http exception: the runtime (greentic-ext-runtime v1.2.19)
-        // honours plain `http://` for loopback hosts only — it drops
-        // non-loopback http patterns with a warn and never opens cleartext to
-        // public hosts. The publish validator must accept exactly the same set
-        // the runtime would honour, so a valid loopback-declaring extension
-        // (e.g. telco-x, `http://127.0.0.1:8787/*`) is publishable.
-        if http_pattern_host(url).is_some_and(is_loopback_host) {
+        if network_pattern_allowed(url) {
             continue;
         }
         errors.push(ValidationError::new(
             format!("runtime.permissions.network[{i}]"),
-            format!("'{url}' — must be https:// (plain http allowed only for loopback hosts)"),
+            format!("'{url}' — {NETWORK_PATTERN_RULE}"),
         ));
     }
 
@@ -58,6 +49,25 @@ pub fn validate_for_publish(describe: &DescribeJson) -> Result<(), Vec<Validatio
     } else {
         Err(errors)
     }
+}
+
+/// What a network address pattern must look like, phrased once so `gtdx
+/// publish` and `gtdx new --permit-network` / `--view-fetch-host` report the
+/// same rule in the same words.
+pub(crate) const NETWORK_PATTERN_RULE: &str =
+    "must be https:// (plain http allowed only for loopback hosts)";
+
+/// Whether a `runtime.permissions.network` / `permissions.ui.fetchHosts`
+/// pattern is one the extension runtime will actually honour.
+///
+/// Loopback-http exception: the runtime (greentic-ext-runtime v1.2.19) honours
+/// plain `http://` for loopback hosts only — it drops non-loopback http
+/// patterns with a warn and never opens cleartext to public hosts. Every caller
+/// must accept exactly the same set the runtime would honour, so a valid
+/// loopback-declaring extension (e.g. telco-x, `http://127.0.0.1:8787/*`) is
+/// publishable and scaffoldable.
+pub(crate) fn network_pattern_allowed(pattern: &str) -> bool {
+    pattern.starts_with("https://") || http_pattern_host(pattern).is_some_and(is_loopback_host)
 }
 
 /// Return the host portion of a plain-`http://` pattern, or `None` when the

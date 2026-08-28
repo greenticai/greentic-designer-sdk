@@ -67,11 +67,30 @@ pub fn load_templates_common() -> Vec<TemplateEntry> {
     collect(&TEMPLATES_COMMON)
 }
 
-/// Assets for `gtdx new --with-view`. An additive overlay rather than a kind:
-/// a view is a contribution, so it layers onto whichever kind the author chose
-/// instead of replacing it.
-pub fn load_templates_view_addon() -> Vec<TemplateEntry> {
+/// The view id the `view-addon` template tree is authored under. Every entry
+/// lands beneath `assets/views/<VIEW_TEMPLATE_ID>/` on disk.
+const VIEW_TEMPLATE_ID: &str = "hello";
+
+/// Assets for `gtdx new --with-view`, rehomed under `assets/views/<view_id>/`.
+///
+/// An additive overlay rather than a kind: a view is a contribution, so it
+/// layers onto whichever kind the author chose instead of replacing it.
+///
+/// The rehoming is not cosmetic. `contributions.views[].entry` resolves against
+/// `assets/views/<the view's own id>/`, so a template tree left at its authored
+/// `hello` path while the describe names another id produces a view whose page
+/// is not where the describe says it is — `E_VIEW_ENTRY_MISSING`, on a project
+/// the author configured exactly as documented.
+pub fn load_templates_view_addon(view_id: &str) -> Vec<TemplateEntry> {
+    let authored = format!("assets/views/{VIEW_TEMPLATE_ID}/");
+    let wanted = format!("assets/views/{view_id}/");
     collect(&TEMPLATES_VIEW_ADDON)
+        .into_iter()
+        .map(|mut entry| {
+            entry.dst_rel = entry.dst_rel.replacen(&authored, &wanted, 1);
+            entry
+        })
+        .collect()
 }
 
 /// Layer `over` on top of `base`, keyed by destination path: an entry in
@@ -119,6 +138,38 @@ pub fn load_templates_kind(kind: &str) -> anyhow::Result<Vec<TemplateEntry>> {
         other => anyhow::bail!("no scaffold templates for kind `{other}`"),
     };
     Ok(entries)
+}
+
+/// Whether a kind's scaffold contributes at least one tool.
+///
+/// Derived from the kind's own `describe.json.tmpl` rather than a hand-written
+/// list of kinds, which is the shape that has gone stale here before. Every
+/// placeholder in a describe template sits inside a JSON string
+/// (`"{{runtime_ref_key}}"`), so the template parses as JSON without being
+/// rendered first.
+///
+/// Fails **open**: a template this cannot parse, or a kind with no template at
+/// all, reports `true` so the caller offers the option and the authoritative
+/// check — which runs against the rendered describe — produces the real error.
+/// Reporting `false` would silently hide a legitimate choice instead.
+#[must_use]
+pub fn kind_contributes_tools(kind: &str) -> bool {
+    let Ok(entries) = load_templates_kind(kind) else {
+        return true;
+    };
+    let Some(describe) = entries
+        .iter()
+        .find(|e| e.dst_rel.ends_with("describe.json"))
+    else {
+        return true;
+    };
+    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(describe.src_bytes) else {
+        return true;
+    };
+    parsed
+        .pointer("/contributions/tools")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|tools| !tools.is_empty())
 }
 
 pub struct Context {
@@ -446,6 +497,118 @@ mod tests {
                 "kind {kind} describe.json still has v1 singular `runtime.component`:\n{content}",
             );
         }
+    }
+
+    /// The page must land under the id the describe names, or the scaffold
+    /// ships a view whose entry file is not where its own describe points.
+    #[test]
+    fn view_assets_are_rehomed_under_the_chosen_id() {
+        let entries = load_templates_view_addon("usage");
+        assert!(!entries.is_empty(), "the view overlay must ship files");
+        for entry in &entries {
+            assert!(
+                entry.dst_rel.starts_with("assets/views/usage/"),
+                "{} was not rehomed",
+                entry.dst_rel
+            );
+        }
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.dst_rel == "assets/views/usage/index.html"),
+            "the entry HTML must be present under the chosen id"
+        );
+    }
+
+    /// The default id is the one the tree is authored under, so the common
+    /// case rewrites to exactly what it already was.
+    #[test]
+    fn the_default_view_id_leaves_the_authored_paths_alone() {
+        let default = load_templates_view_addon(VIEW_TEMPLATE_ID);
+        assert!(
+            default.iter().all(|e| e
+                .dst_rel
+                .starts_with(&format!("assets/views/{VIEW_TEMPLATE_ID}/"))),
+            "authored paths changed under the default id"
+        );
+    }
+
+    /// Every kind's describe template must parse as JSON without being
+    /// rendered first — that is what lets `kind_contributes_tools` and the
+    /// wizard's per-kind gating read the template instead of carrying a
+    /// hand-written list of kinds.
+    ///
+    /// It holds because every placeholder sits inside a JSON string. A
+    /// template that interpolated one bare (`"memoryLimitMB": {{mb}}`) would
+    /// break the derivation, and this test is where that shows up.
+    #[test]
+    fn every_kind_describe_template_parses_as_json() {
+        for kind in all_kind_strs() {
+            let entries = load_templates_kind(kind).expect("templates resolve");
+            let describe = entries
+                .iter()
+                .find(|e| e.dst_rel == "describe.json")
+                .unwrap_or_else(|| panic!("kind {kind} missing describe.json template"));
+            serde_json::from_slice::<serde_json::Value>(describe.src_bytes)
+                .unwrap_or_else(|e| panic!("kind {kind} describe.json.tmpl is not JSON: {e}"));
+        }
+    }
+
+    /// `memoryLimitMB` defaults to 64 when omitted, so a template that never
+    /// writes it produces extensions whose authors have no way to learn the
+    /// field exists. Declaring the default explicitly is what makes it
+    /// discoverable — and `mcp` already did, which is how the gap in the other
+    /// eight went unnoticed.
+    #[test]
+    fn every_kind_declares_its_memory_limit_explicitly() {
+        for kind in all_kind_strs() {
+            let entries = load_templates_kind(kind).expect("templates resolve");
+            let describe = entries
+                .iter()
+                .find(|e| e.dst_rel == "describe.json")
+                .unwrap_or_else(|| panic!("kind {kind} missing describe.json template"));
+            let parsed: serde_json::Value =
+                serde_json::from_slice(describe.src_bytes).expect("template is JSON");
+            let mb = parsed
+                .pointer("/runtime/memoryLimitMB")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_else(|| panic!("kind {kind} does not declare runtime.memoryLimitMB"));
+            assert!(
+                (1..=1024).contains(&mb),
+                "kind {kind} declares memoryLimitMB {mb}, outside the contract bound 1..=1024"
+            );
+        }
+    }
+
+    /// The tool-surface flag is only offered for kinds that contribute tools,
+    /// and that answer is read off the template rather than hand-listed.
+    #[test]
+    fn tool_contribution_is_read_off_each_kind_template() {
+        for kind in all_kind_strs() {
+            let entries = load_templates_kind(kind).expect("templates resolve");
+            let describe = entries
+                .iter()
+                .find(|e| e.dst_rel == "describe.json")
+                .expect("describe template");
+            let parsed: serde_json::Value =
+                serde_json::from_slice(describe.src_bytes).expect("template is JSON");
+            let expected = parsed
+                .pointer("/contributions/tools")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|tools| !tools.is_empty());
+            assert_eq!(
+                kind_contributes_tools(kind),
+                expected,
+                "kind {kind}: derivation disagrees with its own template"
+            );
+        }
+    }
+
+    /// Fails open, so an unparseable or missing template offers the choice and
+    /// lets the authoritative post-render check produce the real error.
+    #[test]
+    fn tool_contribution_fails_open_for_an_unknown_kind() {
+        assert!(kind_contributes_tools("no-such-kind"));
     }
 
     /// E.4.b: the `llm` template tree resolves through `load_templates_kind`

@@ -90,11 +90,11 @@ use std::path::{Path, PathBuf};
 
 use clap::Args as ClapArgs;
 
-mod rules;
+pub(crate) mod rules;
 mod rules_addons;
 mod rules_config_schema;
 mod rules_secret_key;
-mod rules_views;
+pub(crate) mod rules_views;
 #[cfg(test)]
 mod tests;
 

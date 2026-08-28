@@ -6,6 +6,12 @@
 //! describe template and would drift from all of them. `commands::openapi`
 //! already authors a describe this way.
 
+use anyhow::Result;
+use greentic_extension_sdk_contract::describe::UiPermissions;
+use greentic_extension_sdk_contract::describe::contributions::{Placement, View};
+
+use super::capabilities::ViewSpec;
+
 /// The tool the example view is allowed to call, plus a placeholder argument
 /// object shaped to satisfy that tool's own `input_schema`.
 #[derive(Debug)]
@@ -81,66 +87,111 @@ fn derive_placeholder_args(input_schema_json: &str) -> serde_json::Value {
     serde_json::Value::Object(args)
 }
 
-/// Insert the example view and its `permissions.ui` block into a rendered
-/// describe. Returns the re-serialized document and the chosen tool (if
-/// any), so the caller can render the example page's `{{view_tool}}` and
-/// `{{view_tool_args}}` placeholders to match.
+/// Insert the contributed view and its `permissions.ui` block into a rendered
+/// describe. Returns the chosen tool (if any), so the caller can render the
+/// example page's `{{view_tool}}` and `{{view_tool_args}}` placeholders to
+/// match.
+///
+/// The view is built as the contract's own [`View`] and serialized, rather
+/// than assembled as hand-written JSON: a renamed or added field on the
+/// contract then shows up here as a compile error instead of as a describe the
+/// designer silently refuses to parse.
+///
+/// # Errors
+///
+/// Fails when the rendered describe carries no `contributions` object or no
+/// `runtime.permissions` block to attach the grants to.
 pub(super) fn add_view_to_describe(
-    describe_json: &str,
-    view_id: &str,
-) -> anyhow::Result<(String, Option<ChosenTool>)> {
-    let mut describe: serde_json::Value = serde_json::from_str(describe_json)
-        .map_err(|e| anyhow::anyhow!("parse rendered describe.json: {e}"))?;
+    describe: &mut serde_json::Value,
+    spec: &ViewSpec,
+) -> Result<Option<ChosenTool>> {
+    let chosen_tool = first_contributed_tool(describe);
 
-    let chosen_tool = first_contributed_tool(&describe);
-    let tools_value = match &chosen_tool {
-        Some(tool) => serde_json::json!([tool.name]),
-        None => serde_json::json!([]),
+    let view = View {
+        id: spec.id.clone(),
+        surface: spec.surface,
+        title_key: format!("view.{}.label", spec.id),
+        title_fallback: spec.title_fallback.clone(),
+        icon: None,
+        entry: "index.html".to_string(),
+        placement: Placement {
+            slot: spec.slot.clone(),
+            path: Vec::new(),
+            order: None,
+        },
+        min_visibility: spec.min_visibility,
+        tools: chosen_tool
+            .as_ref()
+            .map(|tool| vec![tool.name.clone()])
+            .unwrap_or_default(),
     };
 
     let contributions = describe
         .get_mut("contributions")
         .and_then(|c| c.as_object_mut())
         .ok_or_else(|| anyhow::anyhow!("rendered describe.json has no contributions object"))?;
-
     contributions.insert(
         "views".to_string(),
-        serde_json::json!([{
-            "id": view_id,
-            "surface": "designer",
-            "title_key": format!("view.{view_id}.label"),
-            "title_fallback": "Hello",
-            "entry": "index.html",
-            "placement": { "slot": "designer.sidebar" },
-            "tools": tools_value
-        }]),
+        serde_json::Value::Array(vec![serde_json::to_value(&view)?]),
     );
 
+    // `UiPermissions` skips both lists when empty, but the block itself is
+    // written unconditionally: its presence is what tells an author where the
+    // view's grants go, and an absent `ui` key reads as "this view only
+    // renders" rather than "you have not filled this in yet".
+    let ui = UiPermissions {
+        fetch_hosts: spec.fetch_hosts.clone(),
+        platform_api: spec.platform_api.clone(),
+    };
     let permissions = describe
         .pointer_mut("/runtime/permissions")
         .and_then(|p| p.as_object_mut())
         .ok_or_else(|| anyhow::anyhow!("rendered describe.json has no runtime.permissions"))?;
     permissions.insert(
         "ui".to_string(),
-        serde_json::json!({ "fetchHosts": [], "platformApi": [] }),
+        serde_json::json!({
+            "fetchHosts": ui.fetch_hosts,
+            "platformApi": serde_json::to_value(&ui.platform_api)?,
+        }),
     );
 
-    Ok((serde_json::to_string_pretty(&describe)? + "\n", chosen_tool))
+    Ok(chosen_tool)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use greentic_extension_sdk_contract::describe::ApiGrant;
+    use greentic_extension_sdk_contract::describe::contributions::{Surface, Visibility};
 
     const RENDERED: &str = r#"{
   "contributions": { "tools": [{ "name": "echo" }] },
   "runtime": { "permissions": { "network": [] } }
 }"#;
 
+    /// The defaults `--with-view` alone produces.
+    fn spec() -> ViewSpec {
+        ViewSpec {
+            id: "hello".to_string(),
+            surface: Surface::Designer,
+            slot: "designer.sidebar".to_string(),
+            title_fallback: "Hello".to_string(),
+            min_visibility: Visibility::Member,
+            fetch_hosts: Vec::new(),
+            platform_api: Vec::new(),
+        }
+    }
+
+    fn patch(rendered: &str, spec: &ViewSpec) -> (serde_json::Value, Option<ChosenTool>) {
+        let mut describe: serde_json::Value =
+            serde_json::from_str(rendered).expect("valid rendered json");
+        let tool = add_view_to_describe(&mut describe, spec).expect("patch describe");
+        (describe, tool)
+    }
+
     #[test]
     fn inserts_view_and_ui_permissions() {
-        let (out, tool) = add_view_to_describe(RENDERED, "hello").expect("patch describe");
-        let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+        let (v, tool) = patch(RENDERED, &spec());
         assert_eq!(v["contributions"]["views"][0]["id"], "hello");
         assert_eq!(v["contributions"]["views"][0]["entry"], "index.html");
         assert_eq!(v["contributions"]["views"][0]["tools"][0], "echo");
@@ -148,10 +199,63 @@ mod tests {
             v["contributions"]["views"][0]["placement"]["slot"],
             "designer.sidebar"
         );
+        assert_eq!(v["contributions"]["views"][0]["surface"], "designer");
+        assert_eq!(
+            v["contributions"]["views"][0]["title_key"],
+            "view.hello.label"
+        );
         assert!(v["runtime"]["permissions"]["ui"].is_object());
         let tool = tool.expect("a tool was contributed");
         assert_eq!(tool.name, "echo");
         assert_eq!(tool.args, serde_json::json!({}));
+    }
+
+    /// Every view field the author can set must reach the describe — an
+    /// accepted flag that lands nowhere is worse than a rejected one.
+    #[test]
+    fn carries_every_configured_view_field_through() {
+        let (v, _) = patch(
+            RENDERED,
+            &ViewSpec {
+                id: "usage".to_string(),
+                surface: Surface::Admin,
+                slot: "admin.tenantDetail".to_string(),
+                title_fallback: "Usage".to_string(),
+                min_visibility: Visibility::TenantAdmin,
+                fetch_hosts: vec!["https://api.acme.com/*".to_string()],
+                platform_api: vec![ApiGrant {
+                    method: "GET".to_string(),
+                    path_pattern: "/api/flows".to_string(),
+                }],
+            },
+        );
+        let view = &v["contributions"]["views"][0];
+        assert_eq!(view["id"], "usage");
+        assert_eq!(view["surface"], "admin");
+        assert_eq!(view["title_key"], "view.usage.label");
+        assert_eq!(view["title_fallback"], "Usage");
+        assert_eq!(view["placement"]["slot"], "admin.tenantDetail");
+        assert_eq!(view["min_visibility"], "tenant_admin");
+
+        let ui = &v["runtime"]["permissions"]["ui"];
+        assert_eq!(ui["fetchHosts"][0], "https://api.acme.com/*");
+        assert_eq!(ui["platformApi"][0]["method"], "GET");
+        assert_eq!(ui["platformApi"][0]["path_pattern"], "/api/flows");
+    }
+
+    /// `Visibility::Member` is the contract's default and is skipped on the
+    /// wire; writing it explicitly would be a diff against every describe the
+    /// designer produces for the same view.
+    #[test]
+    fn the_default_visibility_is_not_written_out() {
+        let (v, _) = patch(RENDERED, &spec());
+        assert!(
+            v["contributions"]["views"][0]
+                .get("min_visibility")
+                .is_none(),
+            "default visibility should be skipped: {}",
+            v["contributions"]["views"][0]
+        );
     }
 
     /// The tool name must be derived, not hardcoded: a kind that contributes
@@ -167,8 +271,7 @@ mod tests {
           }] },
           "runtime": { "permissions": {} }
         }"#;
-        let (out, tool) = add_view_to_describe(rendered, "hello").expect("patch describe");
-        let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+        let (v, tool) = patch(rendered, &spec());
         assert_eq!(v["contributions"]["views"][0]["tools"][0], "complete");
         let tool = tool.expect("a tool was contributed");
         assert_eq!(tool.name, "complete");
@@ -181,33 +284,36 @@ mod tests {
     }
 
     /// A kind with no `contributions.tools` at all (`bundle`/`deploy`/
-    /// `provider`) must scaffold `tools: []`, not a dangling reference.
+    /// `provider`) must scaffold `tools: []`, not a dangling reference. The
+    /// contract skips an empty `tools`, so the key is absent rather than `[]`.
     #[test]
     fn empty_tools_when_kind_contributes_none() {
         let rendered = r#"{
           "contributions": {},
           "runtime": { "permissions": {} }
         }"#;
-        let (out, tool) = add_view_to_describe(rendered, "hello").expect("patch describe");
-        let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
-        assert_eq!(
-            v["contributions"]["views"][0]["tools"]
-                .as_array()
-                .expect("tools array"),
-            &Vec::<serde_json::Value>::new()
+        let (v, tool) = patch(rendered, &spec());
+        assert!(
+            v["contributions"]["views"][0].get("tools").is_none(),
+            "an empty tools list is skipped on the wire: {}",
+            v["contributions"]["views"][0]
         );
         assert!(tool.is_none());
     }
 
     #[test]
     fn rejects_describe_without_contributions() {
-        let err = add_view_to_describe(r#"{"runtime":{"permissions":{}}}"#, "hello").unwrap_err();
+        let mut describe: serde_json::Value =
+            serde_json::from_str(r#"{"runtime":{"permissions":{}}}"#).unwrap();
+        let err = add_view_to_describe(&mut describe, &spec()).unwrap_err();
         assert!(err.to_string().contains("contributions"));
     }
 
     #[test]
     fn rejects_describe_without_runtime_permissions() {
-        let err = add_view_to_describe(r#"{"contributions":{}}"#, "hello").unwrap_err();
+        let mut describe: serde_json::Value =
+            serde_json::from_str(r#"{"contributions":{}}"#).unwrap();
+        let err = add_view_to_describe(&mut describe, &spec()).unwrap_err();
         assert!(err.to_string().contains("runtime.permissions"));
     }
 

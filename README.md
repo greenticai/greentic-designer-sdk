@@ -228,7 +228,8 @@ gtdx new my-node --kind wasm-component \
     --component-ref oci://ghcr.io/greenticai/component/component-my-node@sha256:461c6a68…
 
 # 2) Interactive wizard — just run `gtdx new` with no name on a terminal
-gtdx new                          # prompts for name, kind, id, version, author, license
+gtdx new                          # prompts for name, kind, id, version, author,
+                                  # license, then capabilities and permissions
 gtdx new --wizard                 # force the wizard even when flags are given
 
 cd my-ext
@@ -238,6 +239,40 @@ gtdx dev --once
 The wizard uses any flags you pass as prompt defaults, so `gtdx new my-ext --wizard`
 pre-fills the name. Pass `--yes` to skip the wizard and resolve everything from
 flags/defaults (useful in scripts and CI, where there is no terminal).
+
+#### Declare what the extension needs, offers and shows
+
+Everything an extension declares about itself — the hosts it may reach, the
+secrets it may read, the capability contracts it provides, its memory ceiling,
+its UI page, its icon — is settable both interactively and from flags. The
+wizard asks once which of these apply and only drills into those; the flags do
+the same thing without a terminal:
+
+```bash
+gtdx new my-ext --kind design -y \
+    --memory-mb 128 \
+    --permit-network 'https://api.acme.com/*' \
+    --permit-secret 'secret://acme/' \
+    --permit-llm-role sorla_composer \
+    --permit-oauth hubspot \
+    --offer-capability 'greentic:guardrail/topic@1.0.0' \
+    --require-capability 'greentic:llm/chat@^1' \
+    --tool-capability flow --tool-capability agentic_worker \
+    --with-view --view-id usage --view-surface admin \
+    --view-api 'GET /api/flows' \
+    --icon ./logo.svg \
+    --summary 'Acme connector.' --keyword crm
+```
+
+Every value is checked against the rule `gtdx lint` or `gtdx publish` would
+apply later, so a scaffold these flags accept passes its own first lint:
+plain `http://` to a public host, a credential field name in `--permit-secret`,
+a version range in `--offer-capability`, and a capability that is both offered
+and required are all refused up front, each naming the lint code it pre-empts.
+
+See [`docs/authoring-capabilities.md`](./docs/authoring-capabilities.md) for
+the full flag reference and for what "capability" means in each of the five
+places `describe.json` uses the word.
 
 This rebuilds, packs, and produces `dist/<name>-<version>.gtxpack`. The
 pack includes a `manifest.json` integrity ledger (sha256 of every entry)
@@ -257,7 +292,10 @@ gtdx new my-ext --kind design --with-view   # adds a working example page
 
 Scaffolds an example `assets/views/hello/` page (HTML/JS/CSS) wired through
 the host's `postMessage` bridge, plus the matching `contributions.views[]`
-and `runtime.permissions.ui` entries in `describe.json`. See
+and `runtime.permissions.ui` entries in `describe.json`. `--view-id`,
+`--view-surface`, `--view-slot`, `--view-title`, `--view-min-visibility`,
+`--view-fetch-host` and `--view-api` configure all of that; the page is
+scaffolded under the id you choose. See
 [`docs/authoring-views.md`](./docs/authoring-views.md) for the full authoring
 guide — what ships, what the sandboxed page can and can't reach, and the
 `E_VIEW_*` / `W_VIEW_SLOT_UNKNOWN` lint codes.
