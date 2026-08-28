@@ -481,7 +481,10 @@ pub(super) fn check_tool_naming(describe: &serde_json::Value) -> Vec<Violation> 
 ///
 /// Anything else is treated as a plain field-name key that belongs in
 /// `requiredSecrets`, not in `runtime.permissions.secrets`.
-fn looks_like_grant(entry: &str) -> bool {
+///
+/// `pub(crate)` so `gtdx new --permit-secret` rejects a plain key up front
+/// rather than scaffolding a project that fails its own first `gtdx lint`.
+pub(crate) fn looks_like_grant(entry: &str) -> bool {
     entry == "*" || entry.contains("://") || entry.ends_with('/')
 }
 

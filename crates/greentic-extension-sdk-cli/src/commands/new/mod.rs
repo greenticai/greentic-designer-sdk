@@ -1,3 +1,4 @@
+mod capabilities;
 mod view_addon;
 mod wizard;
 
@@ -60,10 +61,6 @@ pub struct Args {
     #[arg(long)]
     pub force: bool,
 
-    /// Scaffold an example contributed view (a UI page) alongside the extension.
-    #[arg(long, default_value_t = false)]
-    pub with_view: bool,
-
     /// Skip the interactive wizard; resolve everything from flags/defaults.
     #[arg(short = 'y', long)]
     pub yes: bool,
@@ -97,10 +94,171 @@ pub struct Args {
     #[arg(long, value_name = "SPEC")]
     pub from_openapi: Option<PathBuf>,
 
+    // --- runtime limits -----------------------------------------------------
+    /// Memory ceiling for the extension's components (`runtime.memoryLimitMB`),
+    /// 1..=1024. Omitted, the scaffold keeps the contract default of 64.
+    #[arg(long, value_name = "MB", help_heading = "Capabilities")]
+    pub memory_mb: Option<u32>,
+
+    // --- host permissions ---------------------------------------------------
+    /// URL pattern the guest may reach, e.g. `https://api.acme.com/*`. Repeat
+    /// for more. https only; plain http is accepted for loopback hosts only.
+    #[arg(long, value_name = "PATTERN", help_heading = "Capabilities")]
+    pub permit_network: Vec<String>,
+
+    /// Secret read *grant* the guest may use — `*`, a `secret://…/` URI, or a
+    /// path prefix ending in `/`. Repeat for more. Credential field names an
+    /// operator supplies belong in `requiredSecrets`, not here.
+    #[arg(long, value_name = "GRANT", help_heading = "Capabilities")]
+    pub permit_secret: Vec<String>,
+
+    /// Extension kind this extension may call into (`runtime.permissions.
+    /// callExtensionKinds`), e.g. `ProviderExtension`. Repeat for more.
+    #[arg(long, value_name = "KIND", help_heading = "Capabilities")]
+    pub permit_call_kind: Vec<String>,
+
+    /// LLM role the extension may request from the host `llm` import, e.g.
+    /// `sorla_composer`. Repeat for more.
+    #[arg(long, value_name = "ROLE", help_heading = "Capabilities")]
+    pub permit_llm_role: Vec<String>,
+
+    /// OAuth provider id the extension may request tokens for, e.g. `hubspot`.
+    /// Repeat for more.
+    #[arg(long, value_name = "PROVIDER", help_heading = "Capabilities")]
+    pub permit_oauth: Vec<String>,
+
+    // --- capability contracts ----------------------------------------------
+    /// Capability contract this extension provides, as `<id>@<exact-version>`
+    /// (e.g. `greentic:guardrail/topic@1.0.0`). Repeat for more.
+    #[arg(long, value_name = "ID@VERSION", help_heading = "Capabilities")]
+    pub offer_capability: Vec<String>,
+
+    /// Capability contract this extension needs, as `<id>@<version-req>`
+    /// (e.g. `greentic:llm/chat@^1`). Repeat for more.
+    #[arg(long, value_name = "ID@REQ", help_heading = "Capabilities")]
+    pub require_capability: Vec<String>,
+
+    // --- contributed view ---------------------------------------------------
+    /// Scaffold an example contributed view (a UI page) alongside the extension.
+    #[arg(long, default_value_t = false, help_heading = "Capabilities")]
+    pub with_view: bool,
+
+    /// Id of the scaffolded view. Requires `--with-view`. Default: `hello`.
+    #[arg(long, value_name = "ID", help_heading = "Capabilities")]
+    pub view_id: Option<String>,
+
+    /// Host application the view targets. Requires `--with-view`.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "SURFACE",
+        default_value_t,
+        help_heading = "Capabilities"
+    )]
+    pub view_surface: capabilities::ViewSurfaceArg,
+
+    /// Placement slot for the view. Requires `--with-view`. Default:
+    /// `designer.sidebar` / `admin.sidebar`, following `--view-surface`.
+    #[arg(long, value_name = "SLOT", help_heading = "Capabilities")]
+    pub view_slot: Option<String>,
+
+    /// Literal title shown when the view's `title_key` has no translation.
+    /// Requires `--with-view`. Defaults to the view id, humanised.
+    #[arg(long, value_name = "TEXT", help_heading = "Capabilities")]
+    pub view_title: Option<String>,
+
+    /// Floor on who may see the view. Requires `--with-view`.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "VISIBILITY",
+        default_value_t,
+        help_heading = "Capabilities"
+    )]
+    pub view_min_visibility: capabilities::ViewVisibilityArg,
+
+    /// Host the view may reach through the host's server-side proxy
+    /// (`permissions.ui.fetchHosts`). Requires `--with-view`. Repeat for more.
+    #[arg(long, value_name = "PATTERN", help_heading = "Capabilities")]
+    pub view_fetch_host: Vec<String>,
+
+    /// Platform REST endpoint the view may call through the bridge, as
+    /// `"<METHOD> <path-pattern>"` (e.g. `"GET /api/flows"`). Requires
+    /// `--with-view`. Repeat for more.
+    #[arg(long, value_name = "METHOD PATH", help_heading = "Capabilities")]
+    pub view_api: Vec<String>,
+
+    // --- tool surfaces ------------------------------------------------------
+    /// Runtime context a contributed tool may be invoked from. Repeat to
+    /// declare both. Only valid for a kind that contributes tools.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "SURFACE",
+        help_heading = "Capabilities"
+    )]
+    pub tool_capability: Vec<capabilities::ToolSurfaceArg>,
+
+    // --- icon + catalogue metadata ------------------------------------------
     /// Path to an icon file (svg/png/jpg/webp, <= 1 MiB) to attach as the
     /// extension's `metadata.icon`. Copied into the scaffold's `assets/` dir.
-    #[arg(long)]
+    #[arg(long, value_name = "PATH", help_heading = "Capabilities")]
     pub icon: Option<PathBuf>,
+
+    /// One-line summary shown in catalogue listings (`metadata.summary`).
+    #[arg(long, value_name = "TEXT", help_heading = "Capabilities")]
+    pub summary: Option<String>,
+
+    /// Long-form description (`metadata.description`).
+    #[arg(long, value_name = "TEXT", help_heading = "Capabilities")]
+    pub description: Option<String>,
+
+    /// Project homepage URL (`metadata.homepage`).
+    #[arg(long, value_name = "URL", help_heading = "Capabilities")]
+    pub homepage: Option<String>,
+
+    /// Source repository URL (`metadata.repository`).
+    #[arg(long, value_name = "URL", help_heading = "Capabilities")]
+    pub repository: Option<String>,
+
+    /// Catalogue keyword (`metadata.keywords`). Repeat for more.
+    #[arg(long, value_name = "KEYWORD", help_heading = "Capabilities")]
+    pub keyword: Vec<String>,
+}
+
+impl Args {
+    /// The capability inputs exactly as the command line supplied them.
+    ///
+    /// Both resolution paths start here: the flag path validates this as-is,
+    /// and the wizard uses it for prompt defaults before overriding what the
+    /// author changes. One constructor means the two cannot drift into
+    /// carrying different fields.
+    fn raw_capabilities(&self) -> capabilities::RawCapabilities {
+        capabilities::RawCapabilities {
+            memory_mb: self.memory_mb,
+            network: self.permit_network.clone(),
+            secrets: self.permit_secret.clone(),
+            call_extension_kinds: self.permit_call_kind.clone(),
+            llm_roles: self.permit_llm_role.clone(),
+            oauth_providers: self.permit_oauth.clone(),
+            offered: self.offer_capability.clone(),
+            required: self.require_capability.clone(),
+            tool_surfaces: self.tool_capability.clone(),
+            summary: self.summary.clone(),
+            description: self.description.clone(),
+            homepage: self.homepage.clone(),
+            repository: self.repository.clone(),
+            keywords: self.keyword.clone(),
+            with_view: self.with_view,
+            view_id: self.view_id.clone(),
+            view_surface: self.view_surface,
+            view_slot: self.view_slot.clone(),
+            view_title: self.view_title.clone(),
+            view_min_visibility: self.view_min_visibility,
+            view_fetch_hosts: self.view_fetch_host.clone(),
+            view_apis: self.view_api.clone(),
+        }
+    }
 }
 
 /// Fully-resolved scaffold inputs, produced either from CLI flags
@@ -120,8 +278,20 @@ pub(super) struct Resolved {
     component_ref: Option<String>,
     /// `OpenAPI` spec path for `--kind mcp` seeded scaffolds.
     from_openapi: Option<PathBuf>,
-    /// Scaffold the example `assets/views/hello/` contribution.
-    with_view: bool,
+    /// Icon to copy into `assets/` and record as `metadata.icon`.
+    ///
+    /// Held here rather than read straight off `Args` in `run`, so the wizard
+    /// can set it — while it lived only on `Args` the interactive path had no
+    /// way to reach the field at all.
+    icon: Option<PathBuf>,
+    /// Validated capability, permission and catalogue-metadata declarations.
+    capabilities: capabilities::CapabilitySpec,
+    /// The contributed view, when `--with-view` was asked for. `Some` is what
+    /// drives scaffolding `assets/views/<id>/`, so there is no separate bool
+    /// that could disagree with it.
+    view: Option<capabilities::ViewSpec>,
+    /// Advisory notes from capability resolution, printed before scaffolding.
+    capability_notes: Vec<String>,
 }
 
 /// Pull the digest out of a digest-pinned OCI reference.
@@ -149,7 +319,11 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from(&resolved.name));
 
     validate_from_openapi(resolved.kind, resolved.from_openapi.as_deref())?;
-    validate_with_view(resolved.kind, resolved.with_view)?;
+    validate_with_view(resolved.kind, resolved.view.is_some())?;
+
+    for note in &resolved.capability_notes {
+        println!("  ! {note}");
+    }
 
     run_preflight(&target, resolved.force)?;
     prepare_target(&target, resolved.force)?;
@@ -157,19 +331,14 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
     let mut ctx = build_context(&resolved);
 
     let files_written = if let Some(spec) = resolved.from_openapi.as_deref() {
-        scaffold_from_openapi(&ctx, spec, &target)?
+        scaffold_from_openapi(&ctx, &resolved, spec, &target)?
     } else {
-        let mut n = render_templates(
-            &mut ctx,
-            resolved.kind.as_str(),
-            &target,
-            resolved.with_view,
-        )?;
+        let mut n = render_templates(&mut ctx, &resolved, &target)?;
         n += write_wit_and_lock(resolved.kind.as_str(), &target)?;
         n
     };
 
-    if let Some(icon) = args.icon.as_deref() {
+    if let Some(icon) = resolved.icon.as_deref() {
         let rel = crate::icon::apply_icon(&target, icon)?;
         println!("  icon: {rel}");
     }
@@ -223,6 +392,7 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
         }
     })?;
     validate_version(&args.version)?;
+    let caps = capabilities::resolve(&args.raw_capabilities())?;
     Ok(Resolved {
         name,
         kind: args.kind,
@@ -237,7 +407,10 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
         label: args.label.clone(),
         component_ref: args.component_ref.clone(),
         from_openapi: args.from_openapi.clone(),
-        with_view: args.with_view,
+        icon: args.icon.clone(),
+        capabilities: caps.spec,
+        view: caps.view,
+        capability_notes: caps.notes,
     })
 }
 
@@ -404,7 +577,12 @@ fn build_context(resolved: &Resolved) -> Context {
     ctx
 }
 
-fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::Result<usize> {
+fn scaffold_from_openapi(
+    ctx: &Context,
+    resolved: &Resolved,
+    spec: &Path,
+    target: &Path,
+) -> anyhow::Result<usize> {
     use crate::scaffold::openapi;
 
     let bin = openapi::resolve_mcp_gen()?;
@@ -418,6 +596,18 @@ fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::R
         .ok_or_else(|| anyhow::anyhow!("mcp describe.json template missing"))?;
     let rendered = ctx.render(std::str::from_utf8(describe_tmpl.src_bytes)?)?;
     let authored = openapi::author_describe_json(&rendered, artifacts.meta.as_deref())?;
+    // The capability flags apply here too. `author_describe_json` has already
+    // filled `runtime.permissions.network` from the spec's `servers` block, and
+    // `capabilities::apply` appends rather than replaces, so a `--permit-network`
+    // on top of a seeded scaffold widens the allowlist instead of erasing it.
+    let authored = if resolved.capabilities.is_empty() {
+        authored
+    } else {
+        let mut describe: serde_json::Value = serde_json::from_str(&authored)
+            .map_err(|e| anyhow::anyhow!("parse authored describe.json: {e}"))?;
+        capabilities::apply(&mut describe, &resolved.capabilities)?;
+        serde_json::to_string_pretty(&describe)? + "\n"
+    };
     template::write_file(&target.join("describe.json"), authored.as_bytes())?;
     files += 1;
 
@@ -444,9 +634,8 @@ fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::R
 
 fn render_templates(
     ctx: &mut Context,
-    kind: &str,
+    resolved: &Resolved,
     target: &Path,
-    with_view: bool,
 ) -> anyhow::Result<usize> {
     let mut files_written = 0usize;
     for entry in template::load_templates_common() {
@@ -455,24 +644,41 @@ fn render_templates(
         template::write_file(&dst, rendered.as_bytes())?;
         files_written += 1;
     }
-    for entry in template::load_templates_kind(kind)? {
+    for entry in template::load_templates_kind(resolved.kind.as_str())? {
         let dst = target.join(&entry.dst_rel);
         let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;
         template::write_file(&dst, rendered.as_bytes())?;
         files_written += 1;
     }
-    if with_view {
-        // The describe must be read and patched *before* the view-addon
-        // templates render: the example page's `{{view_tool}}` placeholder
-        // needs the tool name this kind actually contributes (or none), and
-        // that is only known once `contributions.tools` has been inspected.
+
+    // The describe is read, patched and written once — and only when there is
+    // something to patch, so an unconfigured scaffold keeps the template's own
+    // bytes rather than a round-trip through serde_json.
+    //
+    // The view patch in particular must land *before* the view-addon templates
+    // render: the example page's `{{view_tool}}` placeholder needs the tool
+    // name this kind actually contributes (or none), and that is only known
+    // once `contributions.tools` has been inspected.
+    let mut chosen_tool = None;
+    if !resolved.capabilities.is_empty() || resolved.view.is_some() {
         let describe_path = target.join("describe.json");
         let current = std::fs::read_to_string(&describe_path)
             .map_err(|e| anyhow::anyhow!("read {}: {e}", describe_path.display()))?;
-        let (authored, tool) = view_addon::add_view_to_describe(&current, "hello")?;
-        template::write_file(&describe_path, authored.as_bytes())?;
+        let mut describe: serde_json::Value = serde_json::from_str(&current)
+            .map_err(|e| anyhow::anyhow!("parse rendered {}: {e}", describe_path.display()))?;
 
-        let (tool_name, tool_args) = match tool {
+        capabilities::apply(&mut describe, &resolved.capabilities)?;
+        if let Some(view) = &resolved.view {
+            chosen_tool = view_addon::add_view_to_describe(&mut describe, view)?;
+        }
+        template::write_file(
+            &describe_path,
+            (serde_json::to_string_pretty(&describe)? + "\n").as_bytes(),
+        )?;
+    }
+
+    if let Some(view) = &resolved.view {
+        let (tool_name, tool_args) = match chosen_tool {
             Some(tool) => (tool.name, tool.args),
             None => (String::new(), serde_json::json!({})),
         };
@@ -482,7 +688,7 @@ fn render_templates(
             serde_json::to_string(&tool_args)
                 .map_err(|e| anyhow::anyhow!("serialize placeholder tool args: {e}"))?,
         );
-        for entry in template::load_templates_view_addon() {
+        for entry in template::load_templates_view_addon(&view.id) {
             let dst = target.join(&entry.dst_rel);
             let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;
             template::write_file(&dst, rendered.as_bytes())?;

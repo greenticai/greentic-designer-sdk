@@ -154,11 +154,16 @@ fn scaffold_with_view_names_the_kinds_actual_tool_not_echo() {
 }
 
 /// A kind with no contributed tools at all (`deploy`, `provider`) must not
-/// scaffold a dangling `views[].tools` reference — the view ships with an
-/// empty `tools` array instead, which is valid and simply means the example
-/// page can't call a tool yet.
+/// scaffold a dangling `views[].tools` reference. The view simply references
+/// no tool, which is valid and means the example page can't call one yet.
+///
+/// The field is *absent* rather than `[]`: the view is serialized through the
+/// contract's own `View`, whose `tools` is `skip_serializing_if =
+/// "Vec::is_empty"`, so an empty list has no wire form. Absent and `[]` decode
+/// identically; what matters is that no name appears that
+/// `contributions.tools` does not back.
 #[test]
-fn scaffold_with_view_for_a_toolless_kind_ships_empty_tools() {
+fn scaffold_with_view_for_a_toolless_kind_references_no_tool() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let target = tmp.path().join("deployy");
 
@@ -182,9 +187,12 @@ fn scaffold_with_view_for_a_toolless_kind_ships_empty_tools() {
         .expect("views array");
     assert_eq!(views.len(), 1);
     assert_eq!(
-        views[0]["tools"].as_array().expect("tools array").len(),
+        views[0]
+            .get("tools")
+            .and_then(|t| t.as_array())
+            .map_or(0, Vec::len),
         0,
-        "a toolless kind must scaffold an empty tools array, not a dangling reference: {}",
+        "a toolless kind must reference no tool, not a dangling one: {}",
         describe["contributions"]["views"][0]
     );
 
