@@ -245,16 +245,37 @@ fn prompt_capabilities(
     let defaults: Vec<bool> = rows.iter().map(|row| row.preselected(args)).collect();
 
     println!();
+    println!("Capabilities — all optional. Every one of these can also be added later");
+    println!("by editing describe.json, so choosing none here is the normal answer.");
+    println!("Space toggles a row, Enter continues.\n");
     let chosen = MultiSelect::new()
-        .with_prompt("Capabilities (space to toggle, enter to continue, none is fine)")
+        .with_prompt("Capabilities to configure now")
+        // dialoguer would otherwise echo every selected item back on one line;
+        // with twelve rows carrying descriptions that is an unreadable wall,
+        // and the "About to scaffold" summary already reports the choices.
+        .report(false)
         .items(&labels)
         .defaults(&defaults)
         .interact()?;
     let chosen: Vec<Row> = chosen.into_iter().map(|i| rows[i]).collect();
+    if chosen.is_empty() {
+        println!("  (none selected)");
+    }
 
-    // A row left unchecked clears whatever the command line put there: the
-    // picker is the author's final say, so unchecking `Network` after passing
-    // `--permit-network` must actually drop it rather than silently keep it.
+    clear_unchecked(&mut raw, &mut icon, &chosen);
+    for row in chosen {
+        drill_into(row, &mut raw, &mut icon)?;
+    }
+
+    Ok((raw, icon))
+}
+
+/// Apply the picker's verdict to rows the author left unchecked.
+///
+/// Unchecking clears whatever the command line put there: the picker is the
+/// author's final say, so unchecking `Network` after passing `--permit-network`
+/// must actually drop it rather than silently keep it.
+fn clear_unchecked(raw: &mut RawCapabilities, icon: &mut Option<PathBuf>, chosen: &[Row]) {
     raw.with_view = false;
     if !chosen.contains(&Row::Network) {
         raw.network.clear();
@@ -284,50 +305,67 @@ fn prompt_capabilities(
         raw.tool_surfaces.clear();
     }
     if !chosen.contains(&Row::Icon) {
-        icon = None;
+        *icon = None;
     }
+}
 
-    for row in chosen {
-        match row {
-            Row::Network => {
-                raw.network = prompt_list("Network host pattern", &raw.network)?;
-            }
-            Row::Secrets => {
-                raw.secrets = prompt_list("Secret grant", &raw.secrets)?;
-            }
-            Row::CallKinds => {
-                raw.call_extension_kinds =
-                    prompt_list("Extension kind to call", &raw.call_extension_kinds)?;
-            }
-            Row::LlmRoles => {
-                raw.llm_roles = prompt_list("LLM role", &raw.llm_roles)?;
-            }
-            Row::OauthProviders => {
-                raw.oauth_providers = prompt_list("OAuth provider id", &raw.oauth_providers)?;
-            }
-            Row::Memory => {
-                raw.memory_mb = Some(
-                    Input::<u32>::new()
-                        .with_prompt("Memory limit (MB)")
-                        .default(raw.memory_mb.unwrap_or(64))
-                        .validate_with(validate_memory_input)
-                        .interact_text()?,
-                );
-            }
-            Row::Offered => {
-                raw.offered = prompt_list("Offered capability <id>@<version>", &raw.offered)?;
-            }
-            Row::Required => {
-                raw.required = prompt_list("Required capability <id>@<req>", &raw.required)?;
-            }
-            Row::View => prompt_view(&mut raw)?,
-            Row::ToolSurfaces => raw.tool_surfaces = prompt_tool_surfaces(&raw.tool_surfaces)?,
-            Row::Icon => icon = Some(prompt_icon(icon.as_deref())?),
-            Row::Catalogue => prompt_catalogue(&mut raw)?,
+/// Ask for the detail behind one checked row.
+fn drill_into(
+    row: Row,
+    raw: &mut RawCapabilities,
+    icon: &mut Option<PathBuf>,
+) -> anyhow::Result<()> {
+    match row {
+        Row::Network => {
+            raw.network = prompt_list(
+                "Network host pattern",
+                "https://api.acme.com/*",
+                &raw.network,
+            )?;
         }
+        Row::Secrets => {
+            raw.secrets = prompt_list("Secret grant", "secret://acme/", &raw.secrets)?;
+        }
+        Row::CallKinds => {
+            raw.call_extension_kinds = prompt_list(
+                "Extension kind to call",
+                "ProviderExtension",
+                &raw.call_extension_kinds,
+            )?;
+        }
+        Row::LlmRoles => {
+            raw.llm_roles = prompt_list("LLM role", "sorla_composer", &raw.llm_roles)?;
+        }
+        Row::OauthProviders => {
+            raw.oauth_providers =
+                prompt_list("OAuth provider id", "hubspot", &raw.oauth_providers)?;
+        }
+        Row::Memory => {
+            raw.memory_mb = Some(
+                Input::<u32>::new()
+                    .with_prompt("Memory limit (MB)")
+                    .default(raw.memory_mb.unwrap_or(64))
+                    .validate_with(validate_memory_input)
+                    .interact_text()?,
+            );
+        }
+        Row::Offered => {
+            raw.offered = prompt_list(
+                "Offered capability",
+                "greentic:guardrail/topic@1.0.0",
+                &raw.offered,
+            )?;
+        }
+        Row::Required => {
+            raw.required =
+                prompt_list("Required capability", "greentic:llm/chat@^1", &raw.required)?;
+        }
+        Row::View => prompt_view(raw)?,
+        Row::ToolSurfaces => raw.tool_surfaces = prompt_tool_surfaces(&raw.tool_surfaces)?,
+        Row::Icon => *icon = Some(prompt_icon(icon.as_deref())?),
+        Row::Catalogue => prompt_catalogue(raw)?,
     }
-
-    Ok((raw, icon))
+    Ok(())
 }
 
 fn prompt_view(raw: &mut RawCapabilities) -> anyhow::Result<()> {
@@ -395,11 +433,12 @@ fn prompt_view(raw: &mut RawCapabilities) -> anyhow::Result<()> {
         .interact()?;
     raw.view_min_visibility = visibilities[visibility_index];
 
-    raw.view_fetch_hosts = prompt_list("View proxied fetch host", &raw.view_fetch_hosts)?;
-    raw.view_apis = prompt_list(
-        "View platform API grant \"<METHOD> <path>\"",
-        &raw.view_apis,
+    raw.view_fetch_hosts = prompt_list(
+        "View proxied fetch host",
+        "https://api.acme.com/*",
+        &raw.view_fetch_hosts,
     )?;
+    raw.view_apis = prompt_list("View platform API grant", "GET /api/flows", &raw.view_apis)?;
     Ok(())
 }
 
@@ -444,20 +483,24 @@ fn prompt_catalogue(raw: &mut RawCapabilities) -> anyhow::Result<()> {
     raw.description = prompt_optional("Description (long form)", raw.description.as_deref())?;
     raw.homepage = prompt_optional("Homepage URL", raw.homepage.as_deref())?;
     raw.repository = prompt_optional("Repository URL", raw.repository.as_deref())?;
-    raw.keywords = prompt_list("Keyword", &raw.keywords)?;
+    raw.keywords = prompt_list("Keyword", "crm", &raw.keywords)?;
     Ok(())
 }
 
 /// Collect a repeatable list, one entry per prompt, until the author submits an
 /// empty line. `existing` values (from flags) are kept and shown first.
-fn prompt_list(prompt: &str, existing: &[String]) -> anyhow::Result<Vec<String>> {
+///
+/// `example` is not decoration: "empty to finish" told an author how to stop but
+/// never what a valid entry looks like, which left every one of these prompts a
+/// blank line with no clue what to type.
+fn prompt_list(prompt: &str, example: &str, existing: &[String]) -> anyhow::Result<Vec<String>> {
     let mut out: Vec<String> = existing.to_vec();
     for value in &out {
         println!("  · {value}");
     }
     loop {
         let entry: String = Input::new()
-            .with_prompt(format!("{prompt} (empty to finish)"))
+            .with_prompt(format!("{prompt} (e.g. {example} — empty to finish)"))
             .allow_empty(true)
             .interact_text()?;
         let entry = entry.trim().to_string();
