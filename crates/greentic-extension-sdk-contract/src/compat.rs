@@ -34,11 +34,25 @@ use serde::{Deserialize, Serialize};
 /// `additionalProperties: false`, so an older consumer rejects an `addons`
 /// key at both the schema layer and the serde layer, not just one.
 ///
+/// The top-level `configSchema` (August 2026) joins that same list and does
+/// not lengthen it in kind: `DescribeJson` is `#[serde(deny_unknown_fields)]`
+/// and `describe-v2.json`'s root is `additionalProperties: false`, so an
+/// older consumer rejects a `configSchema`-bearing describe at both layers —
+/// the doubled hazard already described for `addons`, arrived at by the same
+/// route. It fails closed, which is the wanted behaviour: the extension does
+/// not load, rather than loading with the operator's configuration silently
+/// dropped and the form never rendered.
+///
 /// This constant is not raised yet because that floor isn't knowable until
-/// a host version ships support for both fields. **Do not drop this note
-/// when views support ships and addons has not, or vice versa — raise the
-/// constant, and only remove this note, once every describe this SDK can
-/// emit (views *and* addons, together) is safe again at the new floor.**
+/// a host version ships support for all three fields. Raising it now would
+/// also be wrong in a second way: this constant is stamped unconditionally
+/// into every describe the SDK scaffolds (`gtdx new`, `gtdx openapi`), not
+/// only into describes that use the field, so a raise would gate installs of
+/// extensions that carry no `views`, no `addons` and no `configSchema` and
+/// are perfectly safe on a 1.2.x designer. **Do not drop this note when one
+/// of the three ships and the others have not — raise the constant, and only
+/// remove this note, once every describe this SDK can emit (views, addons
+/// *and* `configSchema`, together) is safe again at the new floor.**
 pub const MIN_DESIGNER_VERSION: &str = "1.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -116,7 +116,7 @@ fn last_segment(property: &str) -> String {
     segments(property).pop().unwrap_or_default()
 }
 
-fn looks_like_a_secret(property: &str) -> bool {
+pub(super) fn looks_like_a_secret(property: &str) -> bool {
     let segs = segments(property);
 
     // A benign head noun (the final segment) means the property is a
@@ -220,7 +220,7 @@ fn looks_like_a_secret(property: &str) -> bool {
 /// graph - this function needs an explicit depth guard, because it would
 /// then be walking attacker-controlled, effectively unbounded recursion at
 /// publish/install time.
-fn walk_schema_properties(
+pub(super) fn walk_schema_properties(
     schema: &serde_json::Value,
     path: &str,
     on_property: &mut impl FnMut(&str, &str),

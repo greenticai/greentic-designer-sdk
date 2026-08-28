@@ -102,6 +102,7 @@ fn write_provider_fixture_with_capabilities(
         signature: None,
         manifest_sha256: None,
         required_secrets: vec![],
+        config_schema: None,
     };
 
     let describe_path = provider_dir.join("describe.json");
