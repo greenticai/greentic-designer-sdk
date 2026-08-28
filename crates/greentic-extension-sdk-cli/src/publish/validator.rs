@@ -212,6 +212,7 @@ mod tests {
             signature: None,
             manifest_sha256: None,
             required_secrets: vec![],
+            config_schema: None,
         }
     }
 

@@ -286,6 +286,10 @@
       "items": {
         "$ref": "#/$defs/secretRequirement"
       }
+    },
+    "configSchema": {
+      "description": "JSON Schema (Draft 2020-12) for this extension's non-secret operator configuration - a service URL, a collection name, a page size. The admin console renders it as a form and stores the answers as the tenant overlay handed to the guest at runtime; without it the console can only offer a raw JSON textarea. Top-level rather than per-contribution because the overlay it describes is per-extension: one stored document shared by every view, tool and component the extension ships, whereas the `config_schema` on a recipe, addon or node type configures that one entry. Secrets do not belong here: they go in `requiredSecrets`, whose storage path keeps the value out of the tenant overlay, and `gtdx lint` reports a secret-looking property here as an error. Stringly-encoded because it is a payload passed to a renderer, not host control data. Must parse as JSON, and must parse to a JSON object; the Rust deserializer rejects both failures, because a non-object renders as an empty form with no error at all.",
+      "type": "string"
     }
   },
   "$defs": {

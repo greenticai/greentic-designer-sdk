@@ -24,6 +24,7 @@ pub use localization_block::Localization;
 ///   legitimate — see `validate_addons`'s call site)
 /// - every `runtime_ref` in `contributions.node_types` and `contributions.tools`
 ///   must reference a key that exists in `runtime.components`
+/// - `configSchema`, when present, must parse as a JSON object
 #[derive(Debug, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DescribeJson {
@@ -67,6 +68,39 @@ pub struct DescribeJson {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub required_secrets: Vec<SecretRequirement>,
+    /// JSON Schema (Draft 2020-12) for this extension's **non-secret**
+    /// operator configuration — a service URL, a collection name, a page
+    /// size. The admin console renders it as a form and stores the answers
+    /// as the tenant overlay the guest is handed at runtime; without it the
+    /// console can only offer a raw JSON textarea, which a non-technical
+    /// operator cannot use.
+    ///
+    /// Top-level rather than per-contribution, because the overlay it
+    /// describes is per-extension: one stored document, one form, shared by
+    /// every view, tool and component the extension ships. The three
+    /// existing `config_schema` fields (`Recipe`, `Addon`, `NodeType`) are
+    /// per-contribution because each of *those* configures one palette entry
+    /// or one provisioned service. This one sits beside `requiredSecrets`,
+    /// which is the other half of the same operator-setup story and is also
+    /// top-level.
+    ///
+    /// **Not a secrets channel.** Credentials go in `requiredSecrets`, which
+    /// has the richer shape for them (`key`/`required`/`format`/
+    /// `description`/`examples`) and, crucially, a storage path that keeps
+    /// the value out of the tenant overlay. A value declared here is stored
+    /// and echoed back as plain configuration; `gtdx lint` reports a
+    /// secret-looking property here as `E_CONFIG_SCHEMA_SECRET`.
+    ///
+    /// Stringly-encoded for the same reason `NodeType.config_schema` is: it
+    /// is a payload passed through to a renderer, not host control data.
+    /// Optional, so every describe written before this field existed still
+    /// parses unchanged.
+    #[serde(
+        rename = "configSchema",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub config_schema: Option<String>,
     /// Snake-case secret requirements emitted by `kind: wasix:mcp/router`
     /// artifacts (the MCP schema types this only as an array of objects, so it
     /// is carried through untyped rather than reinterpreted).
@@ -107,6 +141,8 @@ struct DescribeJsonRaw {
     manifest_sha256: Option<String>,
     #[serde(rename = "requiredSecrets", default)]
     required_secrets: Vec<SecretRequirement>,
+    #[serde(rename = "configSchema", default)]
+    config_schema: Option<String>,
     #[serde(default)]
     secret_requirements: Vec<serde_json::Value>,
 }
@@ -155,25 +191,32 @@ fn validate_addons(addons: &[contributions::Addon]) -> Result<(), String> {
             ("config_schema", &addon.config_schema),
             ("desired_state_schema", &addon.desired_state_schema),
         ] {
-            match serde_json::from_str::<serde_json::Value>(text) {
-                Ok(serde_json::Value::Object(_)) => {}
-                Ok(_) => {
-                    return Err(format!(
-                        "addon {:?} has a {field} that parses as JSON but is not a JSON \
-                         object - a JSON Schema for a form must be an object",
-                        addon.id
-                    ));
-                }
-                Err(_) => {
-                    return Err(format!(
-                        "addon {:?} has a {field} that is not valid JSON",
-                        addon.id
-                    ));
-                }
-            }
+            validate_schema_string(text, &format!("addon {:?} has a {field}", addon.id))?;
         }
     }
     Ok(())
+}
+
+/// A stringly-encoded JSON Schema must at least parse, and must parse to a
+/// JSON *object*. `"42"` and `"null"` are valid JSON but render as an empty
+/// form with no error — the worst place to discover the typo — so both are
+/// rejected here rather than at the renderer.
+///
+/// `subject` is the sentence prefix, e.g. `addon "qdrant" has a
+/// config_schema`, so the two call sites read naturally with the same tail.
+/// This deliberately does not attempt full JSON Schema meta-validation: the
+/// describe is signed and immutable once published, so a meta-schema this
+/// crate version happened to be strict about would permanently reject a
+/// document a newer platform understands.
+fn validate_schema_string(text: &str, subject: &str) -> Result<(), String> {
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Object(_)) => Ok(()),
+        Ok(_) => Err(format!(
+            "{subject} that parses as JSON but is not a JSON object - a JSON Schema for a \
+             form must be an object"
+        )),
+        Err(_) => Err(format!("{subject} that is not valid JSON")),
+    }
 }
 
 impl TryFrom<DescribeJsonRaw> for DescribeJson {
@@ -271,6 +314,14 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
 
         validate_addons(&raw.contributions.addons)?;
 
+        // Same reasoning as the addon schemas: a `configSchema` that is not a
+        // JSON object renders as an empty form in the admin console with no
+        // error at all, so the operator sees "this extension needs no
+        // configuration" instead of a typo.
+        if let Some(text) = &raw.config_schema {
+            validate_schema_string(text, "configSchema is a value")?;
+        }
+
         Ok(DescribeJson {
             schema_ref: raw.schema_ref,
             api_version: raw.api_version,
@@ -286,6 +337,7 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
             signature: raw.signature,
             manifest_sha256: raw.manifest_sha256,
             required_secrets: raw.required_secrets,
+            config_schema: raw.config_schema,
             secret_requirements: raw.secret_requirements,
         })
     }
