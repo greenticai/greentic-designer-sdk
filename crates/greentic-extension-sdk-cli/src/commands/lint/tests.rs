@@ -1702,3 +1702,126 @@ fn a_world_exporting_backup_with_an_addon_declaring_it_has_no_warning() {
         "a correctly-advertised backup must not also warn: {v:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Top-level `configSchema` — `E_CONFIG_SCHEMA_INVALID` / `E_CONFIG_SCHEMA_SECRET`
+// ---------------------------------------------------------------------------
+
+fn codes(v: &[Violation]) -> Vec<&'static str> {
+    v.iter().map(|x| x.code).collect()
+}
+
+/// The overwhelmingly common case: the field is optional and most extensions
+/// have no operator configuration at all. Silence here is what keeps the rule
+/// from being noise on every existing describe.
+#[test]
+fn an_absent_config_schema_is_clean() {
+    let d = json!({"metadata": {"version": "1.0.0"}});
+    assert!(rules_config_schema::check_config_schema(&d).is_empty());
+}
+
+#[test]
+fn a_well_formed_config_schema_is_clean() {
+    let d = json!({
+        "configSchema": r#"{"type":"object","properties":{"service_url":{"type":"string"}}}"#
+    });
+    assert!(
+        rules_config_schema::check_config_schema(&d).is_empty(),
+        "got: {:?}",
+        rules_config_schema::check_config_schema(&d)
+    );
+}
+
+#[test]
+fn a_config_schema_that_is_not_json_is_flagged() {
+    let d = json!({ "configSchema": "{\"type\":\"object\",}" });
+    assert_eq!(
+        codes(&rules_config_schema::check_config_schema(&d)),
+        ["E_CONFIG_SCHEMA_INVALID"]
+    );
+}
+
+/// `"42"` parses but is not a form. It renders as an empty form with no
+/// error, so the operator is told the extension needs no configuration.
+#[test]
+fn a_config_schema_that_is_not_an_object_is_flagged() {
+    let d = json!({ "configSchema": "42" });
+    assert_eq!(
+        codes(&rules_config_schema::check_config_schema(&d)),
+        ["E_CONFIG_SCHEMA_INVALID"]
+    );
+}
+
+/// The field is stringly-encoded on purpose; an inline object is the mistake
+/// an author makes exactly once, and the message says which way to go.
+#[test]
+fn an_inline_object_config_schema_is_flagged() {
+    let d = json!({ "configSchema": {"type": "object"} });
+    let v = rules_config_schema::check_config_schema(&d);
+    assert_eq!(codes(&v), ["E_CONFIG_SCHEMA_INVALID"]);
+    assert!(v[0].message.contains("string"), "got: {}", v[0].message);
+}
+
+/// The boundary against `requiredSecrets`. `configSchema` values are stored
+/// and handed back as the plain tenant overlay, so a credential declared here
+/// is a credential stored in the clear.
+#[test]
+fn a_credential_in_config_schema_is_flagged() {
+    let d = json!({
+        "configSchema": r#"{"type":"object","properties":{"service_url":{"type":"string"},"api_key":{"type":"string"}}}"#
+    });
+    let v = rules_config_schema::check_config_schema(&d);
+    assert_eq!(codes(&v), ["E_CONFIG_SCHEMA_SECRET"]);
+    assert!(
+        v[0].message.contains("requiredSecrets"),
+        "the message must point at the field to use instead, got: {}",
+        v[0].message
+    );
+}
+
+/// The same benign-name carve-outs the addon rule relies on apply here, since
+/// both rules share `looks_like_a_secret`. `secret_ref` is a *reference* to
+/// where a credential lives, which is the shape to encourage, not punish.
+#[test]
+fn a_secret_reference_in_config_schema_is_not_flagged() {
+    let d = json!({
+        "configSchema": r#"{"type":"object","properties":{"secret_ref":{"type":"string"},"password_policy":{"type":"string"}}}"#
+    });
+    assert!(
+        rules_config_schema::check_config_schema(&d).is_empty(),
+        "got: {:?}",
+        rules_config_schema::check_config_schema(&d)
+    );
+}
+
+/// An addon's own `config_schema` is a different field with a different
+/// storage path; this rule must not reach into `contributions`.
+#[test]
+fn an_addon_config_schema_is_not_reached_by_the_extension_level_rule() {
+    let d = json!({
+        "contributions": {
+            "addons": [{
+                "id": "qdrant",
+                "config_schema": r#"{"type":"object","properties":{"api_key":{"type":"string"}}}"#
+            }]
+        }
+    });
+    assert!(rules_config_schema::check_config_schema(&d).is_empty());
+}
+
+/// The rule is actually wired into `collect_violations`, not merely present.
+/// A rule module nobody calls is the failure mode this repo has hit before.
+#[test]
+fn the_config_schema_rule_is_wired_into_collect_violations() {
+    let home = empty_home();
+    let d = json!({
+        "metadata": {"id": "x", "version": "1.0.0"},
+        "configSchema": "not json at all"
+    });
+    let v = collect_violations(&d, Path::new("."), home.path(), false);
+    assert!(
+        v.iter().any(|x| x.code == "E_CONFIG_SCHEMA_INVALID"),
+        "got: {:?}",
+        codes(&v)
+    );
+}

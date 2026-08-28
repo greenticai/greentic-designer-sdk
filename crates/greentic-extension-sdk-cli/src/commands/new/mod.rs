@@ -385,6 +385,16 @@ fn build_context(resolved: &Resolved) -> Context {
         "min_designer_version",
         greentic_extension_sdk_contract::compat::MIN_DESIGNER_VERSION,
     );
+    // No `config_schema` placeholder is set, and the templates emit no
+    // top-level `configSchema` — deliberately, including under
+    // `--with-view`. Unlike the per-contribution `config_schema` fields on
+    // `Recipe`/`Addon`/`NodeType`, which are *required* and so must be
+    // scaffolded with something, this one is optional and most extensions
+    // have no operator configuration at all. An empty placeholder schema
+    // would render as an empty form in the admin console — worse for the
+    // operator than the field's absence, which the console reads as
+    // "nothing to configure". See `docs/authoring-config.md`.
+    //
     // `runtime_ref_key` is the key used in v2 `runtime.components` map and
     // in every `nodeTypes[].runtime_ref` / `tools[].runtime_ref`. Default
     // is the last dotted segment of the extension id (matches the

@@ -69,6 +69,7 @@ fn sample_req() -> PublishRequest {
             signature: None,
             manifest_sha256: None,
             required_secrets: vec![],
+            config_schema: None,
         },
         signature: None,
         force: false,

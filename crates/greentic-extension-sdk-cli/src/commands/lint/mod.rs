@@ -63,6 +63,16 @@
 //! - `W_ADDON_FAMILY_UNKNOWN` — `family` is not one this SDK version knows.
 //!   A warning, for the same reason as `W_VIEW_SLOT_UNKNOWN`
 //!
+//! Extension config rules (August 2026), for the top-level `configSchema`:
+//! - `E_CONFIG_SCHEMA_INVALID` — `configSchema` is not a string, is not
+//!   valid JSON, or parses to something that is not a JSON object. A
+//!   non-object renders as an empty form with no error, so the operator is
+//!   told the extension needs no configuration
+//! - `E_CONFIG_SCHEMA_SECRET` — a property in `configSchema` names a
+//!   credential. `configSchema` values are stored and handed back as the
+//!   plain tenant overlay; credentials belong in the top-level
+//!   `requiredSecrets`, whose storage path keeps the value out of it
+//!
 //! Addon backup rules (August 2026), making `supports_backup` a verifiable
 //! claim instead of an unchecked boolean by reading it against the
 //! extension's own `wit/world.wit` (silent when that file is absent, e.g.
@@ -82,6 +92,7 @@ use clap::Args as ClapArgs;
 
 mod rules;
 mod rules_addons;
+mod rules_config_schema;
 mod rules_secret_key;
 mod rules_views;
 #[cfg(test)]
@@ -93,6 +104,7 @@ use rules::{
     check_schema_host, check_sha256_zero, check_tool_naming, check_version_semver,
 };
 use rules_addons::check_addons;
+use rules_config_schema::check_config_schema;
 use rules_secret_key::check_secret_key_canonical;
 use rules_views::check_views;
 
@@ -193,5 +205,6 @@ fn collect_violations(
     out.extend(check_secret_key_canonical(describe));
     out.extend(check_views(describe, dir));
     out.extend(check_addons(describe, dir));
+    out.extend(check_config_schema(describe));
     out
 }
