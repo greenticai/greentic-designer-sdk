@@ -1,0 +1,420 @@
+/// NOTHING BELOW IS ENFORCED YET. Read this before the claims further down,
+/// not after: this file's doc comments describe platform-side enforcement in
+/// confident present tense — "the platform rejects 0 at plan time", "the
+/// hosted renderer refuses it at plan time", "the host asserts every leaf of
+/// `planned` is present and equal here and fails the apply if not", and more
+/// like them. None of that exists today. They state the contract the
+/// platform will be held to once it implements the reconciler side, not
+/// behaviour any released platform exhibits. In particular: nothing today
+/// catches a `reconciler.apply` that lies about the state it reached: a
+/// guest that returns `outcome: applied` with a fabricated `reached` value
+/// is currently believed, not caught. As of `extension-base@0.3.0`, `kind`
+/// has an `addon` variant, so `manifest.get-identity()` can now honestly
+/// identify a component implementing these worlds — that part does exist.
+package greentic:extension-addon@0.1.0;
+
+/// Shared value shapes used by `validation`, `workload`, `reconciler` and
+/// `backup`. Package-level so more than one interface can depend on it
+/// without depending on each other — the shape `extension-provider.wit`
+/// already uses for its own `types` interface.
+interface types {
+  /// Identifies one resource an addon manages — the value
+  /// `contributions.addons[].id` declares in the catalogue (D18). Not any
+  /// string: every function below that takes a `resource-id` is being told
+  /// which cataloged addon it is operating on.
+  type resource-id = string;
+
+  /// A value that may be a literal or a reference the platform resolves.
+  /// Same variant, two directions, and the direction — which interface a
+  /// `value-ref` travels through — is what disambiguates it. A value the
+  /// guest *returns* cannot point at something the guest already has, so
+  /// there is no ambiguity in practice, but say the two directions
+  /// explicitly so neither is later "fixed" into two variants:
+  ///
+  /// - **Passed to the guest** (`reconciler.binding.outputs`):
+  ///   `secret-ref` carries a secrets URI for `extension-host/secrets.get`.
+  ///   It is a POINTER to a value that already exists. This is how a
+  ///   sensitive value reaches an addon without ever appearing in a plan
+  ///   document, a plan UI or a support bundle: the platform hands over the
+  ///   reference, the guest fetches the value.
+  /// - **Returned by the guest** (`workload.container.env`): `secret-ref`
+  ///   carries a logical secret name, not a URI. It is a REQUEST — the
+  ///   guest is asking the platform to materialise a secret it needs (a
+  ///   `POSTGRES_PASSWORD` it cannot itself generate, since `render-workload`
+  ///   is pure). The platform materialises it — generating a value if none
+  ///   exists — before the workload runs, and injects the real value into
+  ///   the container's environment. The guest never sees it.
+  variant value-ref {
+    literal(string),
+    secret-ref(string),
+  }
+
+  /// A desired-state or observed-state document, tagged with the schema
+  /// version it is shaped for.
+  ///
+  /// An addon's `desired_state_schema` can change between versions (D17).
+  /// During a migration `current` and `desired` may be *different*
+  /// versions, so a bare JSON string is not enough for the addon to know
+  /// which shape it is looking at. The catalogue's `Addon.schema_version` is
+  /// the addon's *declared current* version; `schema-version` here is what
+  /// this specific document, in flight, is shaped for.
+  record versioned-state {
+    schema-version: u32,
+    json: string,
+  }
+}
+
+/// Behavioural validation the JSON Schema cannot express.
+///
+/// `contributions.addons[].config_schema` already checked shape. This checks
+/// meaning: that a collection's vector size matches the embedding model the
+/// config selects, that a name is free in this instance. Shape is a schema's
+/// job; meaning needs code.
+interface validation {
+  use greentic:extension-base/types@0.3.0.{diagnostic};
+  use types.{resource-id, versioned-state};
+
+  /// Returns `[]` when the config is usable. Diagnostic-only rather than
+  /// `result<>`: there is no failure mode distinct from "here is what is
+  /// wrong". Mirrors `bundling.validate-config`.
+  validate-config: func(resource-id: resource-id, config-json: string) -> list<diagnostic>;
+
+  /// Takes `config-json` as well as the desired state. The most common thing
+  /// wrong with desired state is disagreement with config — a collection's
+  /// vector size against the model config selects — and without config the
+  /// addon cannot check it, so the error surfaces at apply instead.
+  validate-desired-state: func(
+    resource-id: resource-id,
+    config-json: string,
+    desired: versioned-state,
+  ) -> list<diagnostic>;
+}
+
+/// What the addon needs run on its behalf. The addon never provisions; the
+/// platform does. That split is what lets one declaration serve both hosted
+/// and bring-your-own-cloud placement.
+interface workload {
+  use greentic:extension-base/types@0.3.0.{extension-error};
+  use types.{resource-id, value-ref};
+
+  record port {
+    name: string,
+    number: u16,
+  }
+
+  record volume {
+    name: string,
+    size-gb: u32,
+    mount-path: string,
+  }
+
+  record http-probe {
+    path: string,
+    /// Names an entry in `container.ports`. Ordering-independent on purpose:
+    /// an addon serving HTTP and gRPC has two ports and the probe must say
+    /// which.
+    port-name: string,
+  }
+
+  variant probe-kind {
+    http(http-probe),
+    /// Names an entry in `container.ports`. Readiness is a successful TCP
+    /// connect — what Redis and most wire protocols can actually offer.
+    tcp(string),
+    /// Argv run inside the primary container; exit 0 means ready.
+    /// `pg_isready` is the motivating case.
+    exec(list<string>),
+    /// Ready as soon as the container runs. Honest for a process with no
+    /// readiness signal; a poor default for anything with one.
+    process,
+  }
+
+  record probe {
+    kind: probe-kind,
+    initial-delay-seconds: u32,
+    /// Must be non-zero; the platform rejects 0 at plan time.
+    period-seconds: u32,
+  }
+
+  record resource-request {
+    /// What the addon needs to function at all. The platform refuses at plan
+    /// time when the environment's cap is below this, naming both numbers —
+    /// rather than scheduling a container that OOMs, which reads as an
+    /// infrastructure fault and points at everything except the cause.
+    min-memory-mb: u32,
+    min-cpu-millis: u32,
+    /// What the addon would prefer. Advisory; the platform may grant less.
+    recommended-memory-mb: option<u32>,
+    recommended-cpu-millis: option<u32>,
+  }
+
+  record container {
+    /// OCI reference, digest-pinned. A mutable tag means the workload the
+    /// plan approved is not necessarily the workload that runs, which drains
+    /// the plan/apply consistency guarantee through the one field that
+    /// guarantee does not cover.
+    image: string,
+    args: list<string>,
+    /// Literal values and secret references landing as environment
+    /// variables. `render-workload` is PURE, so a sensitive value — a
+    /// generated `POSTGRES_PASSWORD`, say — cannot originate here as a
+    /// literal: the addon can neither generate one (purity), nor embed one
+    /// (that puts it in the plan document), nor self-reference one (a
+    /// cycle). It arrives instead as `value-ref::secret-ref` — here, a
+    /// REQUEST naming the logical secret this workload needs, not a pointer
+    /// to one that already exists (contrast `reconciler.binding.outputs`,
+    /// where the guest receives rather than requests). The platform
+    /// resolves the request before the container starts — generating a
+    /// value if none exists — and injects the real value into the
+    /// container's environment. The guest never sees it.
+    env: list<tuple<string, value-ref>>,
+    ports: list<port>,
+  }
+
+  record container-workload {
+    primary: container,
+    sidecars: list<container>,
+    volumes: list<volume>,
+    resources: resource-request,
+    readiness: probe,
+    /// Renderer-specific settings the contract does not model — node
+    /// selectors, anti-affinity, storage class, security context. Opaque
+    /// here; each renderer interprets what it understands and reports what
+    /// it does not at plan time rather than dropping it silently.
+    ///
+    /// Present in 0.1.0 deliberately: a WIT record cannot gain a field
+    /// without a breaking bump, and `managed-workload` already has its
+    /// equivalent.
+    extra-json: option<string>,
+  }
+
+  record managed-workload {
+    /// Vendor-neutral class the BYOC renderer maps to a cloud resource —
+    /// `postgres`, `redis`. The hosted renderer refuses it at plan time with
+    /// an explicit message rather than silently substituting a container: an
+    /// addon asking for a managed Postgres wants managed backups and
+    /// failover, which a container does not provide.
+    service-class: string,
+    params-json: string,
+  }
+
+  variant workload-spec {
+    container(container-workload),
+    managed(managed-workload),
+  }
+
+  /// PURE. No network, no side effects. Called at plan time and cacheable.
+  render-workload: func(resource-id: resource-id, config-json: string)
+    -> result<workload-spec, extension-error>;
+}
+
+/// Day-2 state inside a running instance: Qdrant collections, Redis ACL
+/// users. Level-triggered — the platform re-derives everything from observed
+/// state rather than remembering which step it was on.
+interface reconciler {
+  use greentic:extension-base/types@0.3.0.{extension-error};
+  use types.{resource-id, value-ref, versioned-state};
+
+  /// How to reach the live instance. Every value the addon needs in order to
+  /// authenticate arrives here and nowhere else. Credentials never appear in
+  /// desired state, because a value `observe` cannot read back diffs forever
+  /// and no plan is ever clean.
+  ///
+  /// An output whose `OutputSpec.sensitive` is true arrives as a
+  /// `value-ref::secret-ref`, never as a `literal`: the guest resolves it by
+  /// calling `extension-host/secrets.get` with the carried URI, which is why
+  /// both worlds import `extension-host/secrets` — this is the only place
+  /// this contract expects that import to be used.
+  record binding {
+    outputs: list<tuple<string, value-ref>>,
+  }
+
+  /// The CATEGORY of why no plan could be produced yet. Present from v0.1.0
+  /// rather than retrofitted: day-2 config genuinely cannot be planned
+  /// before the instance is reachable, and "I cannot plan this yet" must be
+  /// a first-class answer rather than an error or a lie.
+  ///
+  /// Paired with `deferred-detail.message`, which carries the SPECIFICS:
+  /// this variant says *what kind* of thing is missing, `message` says
+  /// *which* one. That division holds for the two built-in reasons too —
+  /// `absent-prereq` and `config-unknown` are the category, `message` names
+  /// the specific prerequisite or output.
+  variant deferred-reason {
+    /// The instance is not up. Ask again after readiness. `message` names
+    /// which prerequisite is missing.
+    absent-prereq,
+    /// A referenced output is not resolved yet. `message` names which
+    /// output.
+    config-unknown,
+    /// Anything this contract version did not anticipate. Present because
+    /// §7.4's argument against closed vocabularies for third-party-reported
+    /// state applies here too.
+    ///
+    /// The payload is a short, stable CATEGORY token — `"quota-exhausted"`,
+    /// not `"quota exhausted for tenant acme, 4 of 4 collections used"` —
+    /// stable across occurrences so a platform can group and count by it.
+    /// The specifics for a human belong in `deferred-detail.message`, not
+    /// here.
+    other(string),
+  }
+
+  record deferred-detail {
+    reason: deferred-reason,
+    /// The SPECIFICS, for a human: which output is unresolved, which
+    /// prerequisite is missing. Free to vary on every occurrence, unlike
+    /// `reason`'s category. `config-unknown` with an empty message is not
+    /// actionable, which is why this field is not optional.
+    message: string,
+  }
+
+  record planned-change {
+    /// The addon's own desired-state document, amended with any defaults the
+    /// addon knows. The platform diffs `current` against this to render the
+    /// plan — the addon never names an action. An opaque action payload
+    /// would mean only the addon could say what an apply will do, and the
+    /// platform would have to take its word.
+    planned: versioned-state,
+    /// JSON Pointer paths whose change cannot be applied in place and require
+    /// destroy-and-recreate. This is what surfaces as destructive in the plan
+    /// UI and what gates approval — a list the platform reads, not a boolean
+    /// the addon asserts.
+    requires-replace: list<string>,
+  }
+
+  variant plan-outcome {
+    planned(planned-change),
+    deferred(deferred-detail),
+  }
+
+  /// What an `apply` did to the live instance.
+  ///
+  /// Deliberately closed, unlike `deferred-reason` above. `applied` /
+  /// `failed-retryable` / `failed-terminal` is genuinely exhaustive for what
+  /// an apply can conclude — it worked, or it failed in one of the two ways
+  /// a caller must react to differently — and `apply-report.message` already
+  /// carries whatever detail a specific failure needs, so there is no
+  /// third-party-unanticipated case to leave room for. `deferred-reason` is
+  /// open because it describes state an addon *discovers*, which this
+  /// contract version cannot fully enumerate in advance (§7.4); `outcome`
+  /// describes the fixed set of things `apply` itself is capable of
+  /// concluding, which is a different kind of vocabulary and does not need
+  /// the same escape hatch.
+  enum outcome {
+    applied,
+    /// A connection reset. The platform may retry.
+    failed-retryable,
+    /// A schema violation. Retrying changes nothing.
+    failed-terminal,
+  }
+
+  record apply-report {
+    /// State actually reached. When `outcome` is `applied`, the host asserts
+    /// every leaf of `planned` is present and equal here and fails the apply
+    /// if not: without that assertion a plan is a dry run — a suggestion,
+    /// not a contract. When `outcome` is `failed-retryable` or
+    /// `failed-terminal`, `observed` is not required to match `planned` —
+    /// by definition it does not, and asserting otherwise would turn every
+    /// connection reset into "the addon is buggy".
+    observed: versioned-state,
+    outcome: outcome,
+    message: string,
+  }
+
+  /// Deliberately does NOT receive desired state. An observer that can see
+  /// intent will reconcile toward it, and drift detection becomes
+  /// unfalsifiable. Terraform withholds config from `ReadResource` for the
+  /// same reason.
+  observe: func(resource-id: resource-id, binding: binding)
+    -> result<versioned-state, extension-error>;
+
+  /// PURE. No network, no side effects.
+  plan: func(
+    resource-id: resource-id,
+    current: versioned-state,
+    desired: versioned-state,
+  ) -> result<plan-outcome, extension-error>;
+
+  apply: func(
+    resource-id: resource-id,
+    binding: binding,
+    current: versioned-state,
+    planned: versioned-state,
+  ) -> result<apply-report, extension-error>;
+}
+
+/// OPTIONAL. Exported only by `addon-extension-with-backup`.
+///
+/// A retention schedule is NOT here — that is observable, diffable and
+/// convergent, so it is ordinary desired state and belongs in
+/// `desired_state_schema`. What is here has no desired state at all: no
+/// `observe` returns "a snapshot was taken before the thing that has not
+/// happened yet". Modelling it as desired state would make it diff forever.
+interface backup {
+  use greentic:extension-base/types@0.3.0.{extension-error};
+  use types.{resource-id};
+  use reconciler.{binding};
+
+  record backup-handle {
+    /// Opaque to the platform, meaningful to the addon. The platform stores
+    /// it against the revision that triggered the backup and hands it back to
+    /// `restore` unchanged.
+    id: string,
+    /// Shown next to the destructive change it guarded.
+    summary: string,
+    size-bytes: option<u64>,
+  }
+
+  /// Snapshot before a destructive change. The PLATFORM calls this; an author
+  /// never schedules it.
+  backup: func(resource-id: resource-id, binding: binding)
+    -> result<backup-handle, extension-error>;
+
+  /// Destructive by definition. The platform gates it the way it gates a
+  /// `requires-replace` path.
+  restore: func(resource-id: resource-id, binding: binding, handle: backup-handle)
+    -> result<_, extension-error>;
+
+  /// Release a snapshot this addon produced. Without this, pre-destroy
+  /// snapshots accumulate forever: they are platform-initiated, so by D19
+  /// they have no desired state and no reconcile reclaims them.
+  delete-backup: func(resource-id: resource-id, binding: binding, handle: backup-handle)
+    -> result<_, extension-error>;
+}
+
+/// See the package-level comment at the top of this file for what platform-
+/// side enforcement is and is not implemented yet — the claims made
+/// throughout this file, including in the worlds below, are not all live
+/// today.
+world addon-extension {
+  import greentic:extension-base/types@0.3.0;
+  import greentic:extension-host/logging@0.1.0;
+  import greentic:extension-host/i18n@0.1.0;
+  import greentic:extension-host/secrets@0.1.0;
+  import greentic:extension-host/http@0.1.0;
+
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
+  export validation;
+  export workload;
+  export reconciler;
+}
+
+/// The same, for an addon that can genuinely snapshot. WIT has no optional
+/// export, so the capability is expressed as a second world — the shape
+/// `extension-provider.wit` already uses for its own combinations. A platform
+/// therefore reads the capability off the declared world rather than trusting
+/// a boolean.
+world addon-extension-with-backup {
+  import greentic:extension-base/types@0.3.0;
+  import greentic:extension-host/logging@0.1.0;
+  import greentic:extension-host/i18n@0.1.0;
+  import greentic:extension-host/secrets@0.1.0;
+  import greentic:extension-host/http@0.1.0;
+
+  export greentic:extension-base/manifest@0.3.0;
+  export greentic:extension-base/lifecycle@0.3.0;
+  export validation;
+  export workload;
+  export reconciler;
+  export backup;
+}

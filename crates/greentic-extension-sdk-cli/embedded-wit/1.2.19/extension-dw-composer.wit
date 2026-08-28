@@ -1,0 +1,46 @@
+package greentic:dw-composer@0.2.0;
+
+/// Composer interface exported by `DesignExtension` components whose kind
+/// is `DwComposer`. These components do NOT export the generic
+/// `greentic:extension-design/tools` interface; instead they expose a
+/// domain-specific, intent-to-manifest pipeline through this interface.
+///
+/// All input and output values are JSON strings. The host (designer) is
+/// responsible for serialising its strongly-typed request structs into JSON
+/// before calling and for parsing the returned JSON into its own types.
+interface composer {
+    use greentic:extension-base/types@0.3.0.{extension-error};
+
+    /// Return a JSON descriptor string (`ComposerDescriptor`) describing
+    /// this composer — its id, display name, supported intents, and
+    /// template catalogue version. Called once at boot to populate the
+    /// designer's composer registry.
+    metadata: func() -> string;
+
+    /// Execute a composition intent and return the rendered manifest JSON.
+    ///
+    /// `intent-json` is a JSON-serialised `ComposeIntent` object (schema
+    /// defined by the extension). On success returns the manifest JSON;
+    /// on failure returns the canonical `extension-error` (v0.1.0 returned
+    /// a bare string — hosts map that to `internal`).
+    compose: func(intent-json: string) -> result<string, extension-error>;
+
+    /// Validate a manifest JSON blob against this composer's schema.
+    ///
+    /// Returns a JSON-serialised `ValidationReport` (array of diagnostics
+    /// or an object with a `valid` flag). Empty diagnostics / `valid: true`
+    /// means the manifest passes. Never returns an error variant — validation
+    /// failures are encoded as diagnostics inside the report.
+    validate: func(manifest-json: string) -> string;
+
+    /// Return a JSON array of `ComposerTemplate` objects that seed the
+    /// designer's template picker. Each template carries an id, display
+    /// name, description, and a starter intent JSON the designer pre-fills
+    /// into the compose dialog.
+    templates: func() -> string;
+}
+
+world dw-composer-extension {
+    import greentic:extension-base/types@0.3.0;
+    export composer;
+}
