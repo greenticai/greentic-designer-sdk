@@ -30,7 +30,11 @@ Run `gtdx new` with no name on a terminal. After the usual name / kind / id /
 version / author / license questions it asks one multi-select:
 
 ```
-? Capabilities (space to toggle, enter to continue, none is fine)
+Capabilities — all optional. Every one of these can also be added later
+by editing describe.json, so choosing none here is the normal answer.
+Space toggles a row, Enter continues.
+
+? Capabilities to configure now
   [ ] Network access         hosts the guest may fetch (runtime.permissions.network)
   [ ] Secrets                secret read grants (runtime.permissions.secrets)
   [ ] Call other extensions  kinds it may call into (callExtensionKinds)
@@ -46,8 +50,16 @@ version / author / license questions it asks one multi-select:
 ```
 
 Only the rows you check are drilled into, so an extension that needs none of
-this is still one keystroke past the picker. List-valued rows prompt repeatedly
-until you submit an empty line.
+this is still one keystroke past the picker — and none is a perfectly good
+answer, since every field here can be added to `describe.json` later.
+
+List-valued rows prompt repeatedly until you submit an empty line, and each
+carries a worked example of what a valid entry looks like:
+
+```
+Network host pattern (e.g. https://api.acme.com/* — empty to finish):
+Offered capability (e.g. greentic:guardrail/topic@1.0.0 — empty to finish):
+```
 
 Rows that cannot apply are not offered: **Contributed view** is absent for
 `--kind mcp` (a `wasix:mcp/router` artifact has no `contributions` block for a
