@@ -17,7 +17,7 @@ use super::Violation;
 /// snapshot embedded in a released CLI goes stale by construction — which is
 /// exactly why an unknown slot is a warning and never an error. An author on
 /// an older `gtdx` must still be able to target a slot shipped last week.
-pub(super) const KNOWN_SLOTS: [&str; 3] =
+pub(crate) const KNOWN_SLOTS: [&str; 3] =
     ["designer.sidebar", "admin.sidebar", "admin.tenantDetail"];
 
 /// `src=` markers that count as a remote *asset* reference, checked only
@@ -82,7 +82,10 @@ fn find_remote_asset_marker(html: &str) -> Option<&'static str> {
 /// machine checks it: `TryFrom<DescribeJsonRaw>` doesn't, and `gtdx lint`
 /// never runs schema validation. Left unchecked, this id is joined straight
 /// into a filesystem path a few lines down.
-fn is_valid_view_id(id: &str) -> bool {
+/// `pub(crate)` so `gtdx new --view-id` applies the same rule at scaffold
+/// time; a view id rejected here would otherwise only surface as
+/// `E_VIEW_ID_PATTERN` on the author's first lint.
+pub(crate) fn is_valid_view_id(id: &str) -> bool {
     let mut chars = id.chars();
     match chars.next() {
         Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}

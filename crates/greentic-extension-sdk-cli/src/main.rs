@@ -21,6 +21,10 @@ struct Cli {
     command: Command,
 }
 
+// A clap subcommand enum is constructed once per process and immediately
+// destructured, so the size spread between `New`'s flag surface and the
+// smaller commands costs nothing worth boxing for.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Command {
     /// Validate an extension directory against the describe.json schema
