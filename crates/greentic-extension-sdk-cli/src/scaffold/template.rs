@@ -387,6 +387,100 @@ mod tests {
         }
     }
 
+    /// `build.sh` must locate the built `.wasm` by globbing
+    /// `target/wasm32-wasip*/release/` and fail loudly if nothing was
+    /// produced, rather than `cd`-ing straight into
+    /// `target/wasm32-wasip2/release`. `cargo component build --release`
+    /// writes under a `wasm32-wasip1`-named directory even when the
+    /// toolchain targets wasip2, so the hard-coded path made every freshly
+    /// scaffolded project's own documented build step fail with "No such
+    /// file or directory" (ported from PR #156 / SDK 1.2.14).
+    #[test]
+    fn common_build_sh_locates_wasm_by_glob_instead_of_hardcoded_path() {
+        let entries = load_templates_common();
+        let build_sh = entries
+            .iter()
+            .find(|e| e.dst_rel == "build.sh")
+            .expect("build.sh present");
+        let content = std::str::from_utf8(build_sh.src_bytes).expect("utf8");
+        assert!(
+            !content.contains("cd target/wasm32-wasip2/release"),
+            "build.sh must not hard-code target/wasm32-wasip2/release, cargo \
+             component build can write to wasip1 instead:\n{content}",
+        );
+        assert!(
+            content.contains("target/wasm32-wasip*/release/"),
+            "build.sh must glob target/wasm32-wasip*/release/ to find the \
+             built component regardless of which wasip cargo-component used:\n{content}",
+        );
+        assert!(
+            content.contains("exit 1"),
+            "build.sh must fail loudly when the build produced no .wasm:\n{content}",
+        );
+    }
+
+    /// `ci/local_check.sh` must run `cargo component bindings` before
+    /// `cargo fmt`, so `src/bindings.rs` exists before anything tries to
+    /// resolve `mod bindings;`. Without it, fmt/clippy/test all fail to
+    /// compile on a freshly scaffolded, unbuilt project (ported from PR
+    /// #156 / SDK 1.2.14).
+    #[test]
+    fn common_local_check_sh_generates_bindings_before_fmt() {
+        let entries = load_templates_common();
+        let local_check = entries
+            .iter()
+            .find(|e| e.dst_rel == "ci/local_check.sh")
+            .expect("ci/local_check.sh present");
+        let content = std::str::from_utf8(local_check.src_bytes).expect("utf8");
+        let bindings_pos = content.find("cargo component bindings").unwrap_or_else(|| {
+            panic!("ci/local_check.sh must run `cargo component bindings` before fmt:\n{content}")
+        });
+        let fmt_pos = content
+            .find("cargo fmt --all -- --check")
+            .expect("ci/local_check.sh must run cargo fmt --all -- --check");
+        assert!(
+            bindings_pos < fmt_pos,
+            "ci/local_check.sh must generate bindings before running cargo fmt:\n{content}",
+        );
+    }
+
+    /// Every kind whose `src/lib.rs` declares `mod bindings;` for a
+    /// wit-bindgen-generated `src/bindings.rs` must mark that declaration
+    /// `#[rustfmt::skip]`. The generated file doesn't exist before the first
+    /// build (so `cargo fmt --all -- --check` can't even resolve the module)
+    /// and is never rustfmt-clean once it does exist — failing the check on
+    /// a freshly scaffolded, unbuilt project either way (ported from PR
+    /// #156 / SDK 1.2.14). `mcp` is exempt: it generates bindings inline via
+    /// `wit_bindgen::generate!` and has no `mod bindings;` declaration to
+    /// skip.
+    #[test]
+    fn every_kind_skips_rustfmt_on_generated_bindings_module() {
+        for kind in ["design", "bundle", "deploy", "provider", "llm"] {
+            let entries = load_templates_kind(kind);
+            let lib_rs = entries
+                .iter()
+                .find(|e| e.dst_rel == "src/lib.rs")
+                .unwrap_or_else(|| panic!("kind {kind} missing src/lib.rs template"));
+            let content = std::str::from_utf8(lib_rs.src_bytes).expect("utf8");
+            let bindings_pos = content.find("mod bindings;").unwrap_or_else(|| {
+                panic!("kind {kind} src/lib.rs has no `mod bindings;` declaration:\n{content}")
+            });
+            let preceding = &content[..bindings_pos];
+            let last_line = preceding
+                .trim_end_matches('\n')
+                .lines()
+                .last()
+                .unwrap_or("");
+            assert_eq!(
+                last_line.trim(),
+                "#[rustfmt::skip]",
+                "kind {kind} `mod bindings;` must be immediately preceded by \
+                 #[rustfmt::skip] so cargo fmt --all -- --check passes before \
+                 the generated file exists:\n{content}",
+            );
+        }
+    }
+
     /// Audit P1 (E.3.b): extension kinds that use cargo-component's generated
     /// bindings must scaffold `wit-bindgen-rt = "0.41"` (the current pinned
     /// version for those kinds). 0.35 emits older intrinsics that newer
