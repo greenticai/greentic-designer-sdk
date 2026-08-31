@@ -387,6 +387,42 @@ mod tests {
         }
     }
 
+    /// Every kind's `rust-toolchain.toml` must also declare
+    /// `components = ["rustfmt", "clippy"]`. The scaffolded
+    /// `ci/local_check.sh` runs `cargo fmt` and `cargo clippy`, but without
+    /// this line rustup only ever provisions the bare toolchain — so on any
+    /// machine that doesn't already have both components installed (a CI
+    /// runner, a fresh clone), the very first gate step fails with
+    /// `error: 'cargo-fmt' is not installed for the toolchain ...`. This was
+    /// hit for real in a scaffolded extension's GitHub Actions run and was
+    /// masked locally because developers usually have both components
+    /// installed already.
+    #[test]
+    fn every_kind_template_ships_toolchain_components_rustfmt_and_clippy() {
+        for kind in [
+            "design",
+            "bundle",
+            "deploy",
+            "provider",
+            "wasm-component",
+            "llm",
+            "mcp",
+            "openapi-connector",
+        ] {
+            let entries = load_templates_kind(kind);
+            let toolchain = entries
+                .iter()
+                .find(|e| e.dst_rel == "rust-toolchain.toml")
+                .unwrap_or_else(|| panic!("kind {kind} missing rust-toolchain.toml template"));
+            let content = std::str::from_utf8(toolchain.src_bytes).expect("utf8");
+            assert!(
+                content.contains("components = [\"rustfmt\", \"clippy\"]"),
+                "kind {kind} toolchain template does not declare rustfmt+clippy components, \
+                 so ci/local_check.sh's fmt/clippy steps fail on a clean machine:\n{content}",
+            );
+        }
+    }
+
     /// `build.sh` must locate the built `.wasm` by globbing
     /// `target/wasm32-wasip*/release/` and fail loudly if nothing was
     /// produced, rather than `cd`-ing straight into
