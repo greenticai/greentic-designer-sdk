@@ -165,11 +165,7 @@ mod tests {
     /// empty schema — the designer treats an error as "ask someone else".
     #[test]
     fn an_unknown_recipe_is_an_error() {
-        assert!(
-            <Component as recipes::Guest>::recipe_config_schema("nope".to_string()).is_err()
-        );
-        assert!(
-            <Component as recipes::Guest>::supported_capabilities("nope".to_string()).is_err()
-        );
+        assert!(<Component as recipes::Guest>::recipe_config_schema("nope".to_string()).is_err());
+        assert!(<Component as recipes::Guest>::supported_capabilities("nope".to_string()).is_err());
     }
 }

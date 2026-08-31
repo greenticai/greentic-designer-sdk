@@ -501,6 +501,46 @@ fn guest_templates_ship_example_tests() {
     }
 }
 
+/// `ci/local_check.sh` runs `cargo fmt --all -- --check` as its first real
+/// step. A guest template that is not itself rustfmt-clean fails a freshly
+/// scaffolded, untouched project's own gate before the author has written a
+/// line of code — exactly the class of bug ported from PR #156 / SDK 1.2.14,
+/// which reformatted design and mcp (later found to also need bundle,
+/// deploy, and llm) for the same reason. Checked directly against the raw
+/// `.tmpl` source: every placeholder (`{{id}}`, `{{name}}`, …) sits inside a
+/// string literal, so it's syntactically valid Rust without rendering.
+#[test]
+fn guest_template_src_lib_rs_is_rustfmt_clean() {
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let rustfmt_toml = workspace_root.join("rustfmt.toml");
+    assert!(rustfmt_toml.is_file(), "{rustfmt_toml:?} must exist");
+
+    for kind in ["design", "bundle", "deploy", "provider", "llm", "mcp"] {
+        let src_path = format!(
+            "{}/templates/{kind}/src/lib.rs.tmpl",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let candidate = tmp.path().join("lib.rs");
+        std::fs::copy(&src_path, &candidate).unwrap_or_else(|e| panic!("{src_path}: {e}"));
+
+        let (ok, _stdout, stderr) = run(Command::new("rustfmt")
+            .arg("--check")
+            .arg("--config-path")
+            .arg(&rustfmt_toml)
+            .arg(&candidate));
+        assert!(
+            ok,
+            "{kind}: templates/{kind}/src/lib.rs.tmpl is not rustfmt-clean, so \
+             `cargo fmt --all -- --check` fails on a freshly scaffolded project \
+             before any authored change:\n{stderr}"
+        );
+    }
+}
+
 /// The scaffolded AGENTS.md has to say how to test, including the one
 /// prerequisite that otherwise reads as a broken project: `cargo test` needs
 /// generated bindings, so a fresh clone must build once first.

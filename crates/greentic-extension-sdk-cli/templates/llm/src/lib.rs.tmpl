@@ -83,10 +83,7 @@ impl tools::Guest for Component {
         }]
     }
 
-    fn invoke_tool(
-        name: String,
-        args_json: String,
-    ) -> Result<String, types::ExtensionError> {
+    fn invoke_tool(name: String, args_json: String) -> Result<String, types::ExtensionError> {
         if name != "complete" {
             return Err(types::ExtensionError::InvalidInput(format!(
                 "unknown tool: {name}"
@@ -139,9 +136,7 @@ impl prompting::Guest for Component {
 
 // ---- extension-design/knowledge ----
 impl knowledge::Guest for Component {
-    fn list_entries(
-        _category_filter: Option<String>,
-    ) -> Vec<knowledge::EntrySummary> {
+    fn list_entries(_category_filter: Option<String>) -> Vec<knowledge::EntrySummary> {
         Vec::new()
     }
 
@@ -151,10 +146,7 @@ impl knowledge::Guest for Component {
         )))
     }
 
-    fn suggest_entries(
-        _query: String,
-        _limit: u32,
-    ) -> Vec<knowledge::EntrySummary> {
+    fn suggest_entries(_query: String, _limit: u32) -> Vec<knowledge::EntrySummary> {
         Vec::new()
     }
 }
@@ -199,8 +191,7 @@ mod tests {
     #[test]
     fn an_unknown_tool_is_rejected_before_any_host_call() {
         assert!(
-            <Component as tools::Guest>::invoke_tool("nope".to_string(), "{}".to_string())
-                .is_err()
+            <Component as tools::Guest>::invoke_tool("nope".to_string(), "{}".to_string()).is_err()
         );
     }
 }
