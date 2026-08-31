@@ -2,6 +2,20 @@
 set -euo pipefail
 cargo component build --release
 mkdir -p dist
-cd target/wasm32-wasip2/release
+
+# Locate the component rather than assuming its directory. `cargo component`
+# 0.21 writes the artifact under a `wasm32-wasip1`-named directory even when
+# the toolchain targets wasip2 (see `dev/builder.rs`, which passes
+# `--target wasm32-wasip2` and documents the same quirk), and the spelling has
+# moved between releases. This script previously hard-coded
+# `target/wasm32-wasip2/release` and failed with "No such file or directory"
+# on every freshly scaffolded project, for every kind.
+shopt -s nullglob
+artifacts=(target/wasm32-wasip*/release/*.wasm)
+if [ ${#artifacts[@]} -eq 0 ]; then
+  echo "build.sh: cargo component build produced no .wasm under target/wasm32-wasip*/release/" >&2
+  exit 1
+fi
+
 # Additional packaging done by `gtdx publish`; this script just builds the wasm.
-ls -lh *.wasm
+ls -lh "${artifacts[@]}"
