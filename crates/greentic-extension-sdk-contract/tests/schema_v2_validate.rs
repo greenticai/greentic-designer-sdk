@@ -204,3 +204,80 @@ fn tool_with_capabilities_and_secrets_passes_schema_and_deserializes() {
     let caps = tools[0].capabilities.as_deref().unwrap_or_default();
     assert_eq!(caps, ["agentic_worker"]);
 }
+
+/// The two layers that can disagree about a contribution, asserted together:
+/// the JSON schema (which `gtdx` and the store validate against) and the typed
+/// `deny_unknown_fields` struct (which the runtime decodes with). A field added
+/// to one and not the other fails in opposite directions — the schema alone
+/// admits a describe the runtime then refuses to load, and the struct alone
+/// parses a describe `gtdx` refuses to publish — so neither half is evidence
+/// on its own.
+#[test]
+fn messaging_channel_contribution_passes_schema_and_roundtrips() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["messaging_channel"] = serde_json::json!({
+        "id": "messaging-3aigent-gui",
+        "ref": "oci://ghcr.io/greenticai/packs/messaging/messaging-3aigent-gui@sha256:36a0c547",
+        "label": "3AIgent GUI"
+    });
+
+    validate_describe_v2(&v)
+        .expect("messaging_channel contribution should pass describe-v2 schema");
+
+    let parsed: DescribeJson =
+        serde_json::from_value(v).expect("messaging_channel contribution should parse typed");
+    let channel = parsed
+        .contributions
+        .messaging_channel
+        .as_ref()
+        .expect("messaging_channel should be Some");
+    assert_eq!(channel.id, "messaging-3aigent-gui");
+    assert_eq!(channel.label.as_deref(), Some("3AIgent GUI"));
+
+    // Snake_case on the wire, matching `connection_test` rather than the
+    // block's camelCase siblings.
+    let serialized = serde_json::to_string(&parsed).unwrap();
+    assert!(
+        serialized.contains("\"messaging_channel\":"),
+        "messaging_channel must serialize snake_case on the wire; got: {serialized}"
+    );
+    // And the reference keeps the key `providers-registry.json` already uses.
+    assert!(serialized.contains("\"ref\":\"oci://ghcr.io/greenticai/"));
+}
+
+/// `label` is the only optional member; a channel without one is the common
+/// case, since `metadata.name` is already a display name.
+#[test]
+fn a_messaging_channel_without_a_label_is_valid() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["messaging_channel"] = serde_json::json!({
+        "id": "messaging-x",
+        "ref": "oci://ghcr.io/x@sha256:ab"
+    });
+    validate_describe_v2(&v).expect("a label-less channel should pass the schema");
+    let parsed: DescribeJson = serde_json::from_value(v).expect("should parse typed");
+    assert!(
+        parsed
+            .contributions
+            .messaging_channel
+            .unwrap()
+            .label
+            .is_none()
+    );
+}
+
+/// The schema refuses a reference that is not an OCI URI. Everything
+/// downstream treats this string as one, and a bare name fails deep inside a
+/// bundle build naming neither the extension nor the channel.
+#[test]
+fn a_messaging_channel_ref_must_be_an_oci_uri() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["messaging_channel"] = serde_json::json!({
+        "id": "messaging-x",
+        "ref": "ghcr.io/x:latest"
+    });
+    assert!(
+        validate_describe_v2(&v).is_err(),
+        "a non-oci:// ref must be refused by the schema"
+    );
+}
