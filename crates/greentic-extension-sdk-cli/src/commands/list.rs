@@ -125,12 +125,20 @@ mod tests {
     /// exists that `gtdx list --kind` cannot name.
     #[test]
     fn kind_arg_covers_every_extension_kind() {
+        // Kinds that are never INSTALLED under `~/.greentic/extensions/<dir>/`,
+        // so `gtdx list --kind <it>` could only ever print nothing. Offering
+        // the flag would advertise a lookup that cannot succeed.
+        const NOT_INSTALLED_AS_EXTENSIONS: &[ExtensionKind] = &[ExtensionKind::AgenticWorker];
+
         let reachable: Vec<ExtensionKind> = KindArg::value_variants()
             .iter()
             .filter_map(|k| k.to_extension_kind())
             .collect();
 
         for kind in ExtensionKind::ALL.iter().copied() {
+            if NOT_INSTALLED_AS_EXTENSIONS.contains(&kind) {
+                continue;
+            }
             assert!(
                 reachable.contains(&kind),
                 "no KindArg variant maps to {kind:?} — add one, with \

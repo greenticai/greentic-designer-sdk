@@ -72,7 +72,13 @@ mod tests {
 
         // Deliberately non-scaffoldable `ExtensionKind`s go here, with a
         // comment saying why `gtdx new` cannot produce them.
-        const NON_SCAFFOLDABLE: &[ExtensionKind] = &[];
+        const NON_SCAFFOLDABLE: &[ExtensionKind] = &[
+            // An agentic worker is composed in the Designer and published as
+            // its own artifact class; there is no source tree for `gtdx new`
+            // to lay down. It is modelled as a kind because its descriptor is
+            // a describe-v2 document the Store validates as one.
+            ExtensionKind::AgenticWorker,
+        ];
 
         let scaffoldable: Vec<&'static str> =
             Kind::value_variants().iter().map(|k| k.as_str()).collect();

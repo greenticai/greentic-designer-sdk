@@ -138,3 +138,20 @@ fn unknown_strings_are_rejected() {
     assert_eq!(ExtensionKind::from_dir_name("bogus"), None);
     assert_eq!(ExtensionKind::from_dir_name(""), None);
 }
+
+/// An agentic worker's descriptor is a describe-v2 document like any other —
+/// greentic-store-server validates it against the same v2 schema and only then
+/// asserts `kind == "AgenticWorker"` (`handlers/agentic_workers/publish.rs`).
+/// The contract modelled five kinds and not this one, so the store could not
+/// delegate validation here without breaking every agentic-worker publish, and
+/// kept a drifting copy of the schema instead. That copy is what silently
+/// rejected `contributions.messaging_channel`, `guardrails`, `views`, `addons`
+/// and `connection_test` for months.
+#[test]
+fn agentic_worker_is_a_modelled_kind() {
+    let kind =
+        ExtensionKind::from_wire("AgenticWorker").expect("AgenticWorker must be a modelled kind");
+    assert_eq!(kind.wire_name(), "AgenticWorker");
+    assert_eq!(kind.dir_name(), "agentic-worker");
+    assert!(ExtensionKind::ALL.contains(&kind));
+}

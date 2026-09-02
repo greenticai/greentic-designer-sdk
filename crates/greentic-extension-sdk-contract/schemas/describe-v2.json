@@ -23,13 +23,14 @@
       "const": "greentic.ai/v2"
     },
     "kind": {
-      "description": "Which extension family this artifact belongs to; selects the on-disk install directory (`design`, `bundle`, `deploy`, `provider`, `addon`). `wasix:mcp/router` is deliberately absent from this enum: those artifacts are validated against describe-mcp-v1.json instead. `AddonExtension` is a component the platform provisions and reconciles as declarative infrastructure (a Qdrant, a Redis) rather than a flow-time or design-time extension; it declares itself through `contributions.addons[]` like any other kind, but its runtime component implements `greentic:extension-addon@0.1.0`'s `addon-extension` world instead of a design/bundle/deploy/provider one.",
+      "description": "Which extension family this artifact belongs to; selects the on-disk install directory (`design`, `bundle`, `deploy`, `provider`, `addon`). `wasix:mcp/router` is deliberately absent from this enum: those artifacts are validated against describe-mcp-v1.json instead. `AddonExtension` is a component the platform provisions and reconciles as declarative infrastructure (a Qdrant, a Redis) rather than a flow-time or design-time extension; it declares itself through `contributions.addons[]` like any other kind, but its runtime component implements `greentic:extension-addon@0.1.0`'s `addon-extension` world instead of a design/bundle/deploy/provider one. `AgenticWorker` is a packaged agentic worker rather than a host-installed extension; it is listed here because its descriptor is a describe-v2 document validated by this schema before the Store asserts its kind.",
       "enum": [
         "DesignExtension",
         "BundleExtension",
         "DeployExtension",
         "ProviderExtension",
-        "AddonExtension"
+        "AddonExtension",
+        "AgenticWorker"
       ]
     },
     "compat": {
@@ -102,7 +103,9 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["export"],
+            "required": [
+              "export"
+            ],
             "properties": {
               "export": {
                 "description": "Fully-qualified WIT export implementing the guardrail, e.g. `greentic:extension-design/guardrail.evaluate`.",
@@ -121,7 +124,14 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "surface", "title_key", "title_fallback", "entry", "placement"],
+            "required": [
+              "id",
+              "surface",
+              "title_key",
+              "title_fallback",
+              "entry",
+              "placement"
+            ],
             "properties": {
               "id": {
                 "description": "Unique within the extension. The host namespaces it as `<extension_id>/<id>`.",
@@ -130,7 +140,10 @@
               },
               "surface": {
                 "description": "Which host application the view targets. A view that belongs in both declares two entries, because placement differs per surface.",
-                "enum": ["designer", "admin"]
+                "enum": [
+                  "designer",
+                  "admin"
+                ]
               },
               "title_key": {
                 "description": "Key resolved against the top-level `localization` block.",
@@ -152,7 +165,9 @@
                 "description": "The author's suggested placement. Every configuration layer may override it. `slot` and `path` are free strings rather than an enum because the hosts' tab sets change with the product while a published describe is signed and immutable; `gtdx lint` reports an unknown slot as the warning `W_VIEW_SLOT_UNKNOWN`, and a host that cannot resolve a placement mounts the view under an \"Extensions\" section with a diagnostic rather than dropping it.",
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["slot"],
+                "required": [
+                  "slot"
+                ],
                 "properties": {
                   "slot": {
                     "description": "Host-defined mount point naming where the view appears, e.g. `designer.sidebar`, `admin.sidebar`, `admin.tenantDetail`. Free string rather than an enum because the hosts' navigation changes with the product while a published describe is signed and immutable; `gtdx lint` warns on an unknown slot rather than erroring, and a host that cannot resolve a slot mounts the view under an \"Extensions\" section with a diagnostic rather than dropping it.",
@@ -161,7 +176,9 @@
                   "path": {
                     "description": "The section/group path beneath the slot, e.g. `[\"Governance\"]` or `[\"access\", \"teams\"]`. Empty or absent means the top level of the slot.",
                     "type": "array",
-                    "items": { "type": "string" }
+                    "items": {
+                      "type": "string"
+                    }
                   },
                   "order": {
                     "description": "Sort hint among siblings under the same parent. Hosts break ties by extension id then view id, so ordering stays total and stable even when two extensions pick the same number.",
@@ -171,12 +188,18 @@
               },
               "min_visibility": {
                 "description": "Floor on who may see the view. Only a floor: the operative gate is the tenant and team configuration the host holds. `tenant_admin` covers the Admin `partnership` tier as well.",
-                "enum": ["member", "tenant_admin", "platform_admin"]
+                "enum": [
+                  "member",
+                  "tenant_admin",
+                  "platform_admin"
+                ]
               },
               "tools": {
-                "description": "Names of this extension's own contributed tools the view may invoke through the host bridge. Every name must appear in `contributions.tools[].name` — the Rust deserializer rejects a dangling one.",
+                "description": "Names of this extension's own contributed tools the view may invoke through the host bridge. Every name must appear in `contributions.tools[].name` \u2014 the Rust deserializer rejects a dangling one.",
                 "type": "array",
-                "items": { "type": "string" }
+                "items": {
+                  "type": "string"
+                }
               }
             }
           }
@@ -187,7 +210,14 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "family", "display_name", "description", "config_schema", "desired_state_schema"],
+            "required": [
+              "id",
+              "family",
+              "display_name",
+              "description",
+              "config_schema",
+              "desired_state_schema"
+            ],
             "properties": {
               "id": {
                 "description": "Unique within the extension. The platform namespaces it as `<extension_id>/<id>`.",
@@ -198,8 +228,12 @@
                 "description": "What kind of thing this is - `vector-db`, `cache`, `sql`. A catalogue grouping label a flow author can browse or filter by - not a substitutability guarantee: two addons sharing a family are not promised compatible outputs, so this field alone is not a basis for automatically swapping one for the other. An open string on purpose: describe.json is signed and immutable once published, so a closed enum in it rots. `gtdx lint` warns on an unfamiliar family instead.",
                 "type": "string"
               },
-              "display_name": { "type": "string" },
-              "description": { "type": "string" },
+              "display_name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
               "icon": {
                 "description": "Host-resolved icon name.",
                 "type": "string"
@@ -218,7 +252,10 @@
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["name", "type"],
+                  "required": [
+                    "name",
+                    "type"
+                  ],
                   "properties": {
                     "name": {
                       "description": "Referenced as `${resources.<id>.outputs.<name>}`. `gtdx lint` constrains this to characters that survive becoming an environment variable, because that is what the platform does with it.",
@@ -227,13 +264,19 @@
                     },
                     "type": {
                       "description": "Scalar only. An output is interpolated into another resource's configuration, where a structured value has no meaningful rendering; an addon wanting structure exposes several outputs.",
-                      "enum": ["text", "number", "boolean"]
+                      "enum": [
+                        "text",
+                        "number",
+                        "boolean"
+                      ]
                     },
                     "sensitive": {
                       "description": "A sensitive output never becomes a literal value - the platform resolves it to a secret reference, so it never passes through a plan document, a plan UI, or a support bundle. Getting this wrong is how a password ends up in a log.",
                       "type": "boolean"
                     },
-                    "description": { "type": "string" }
+                    "description": {
+                      "type": "string"
+                    }
                   }
                 }
               },
@@ -253,7 +296,9 @@
           "description": "Optional self-test the extension declares so a consumer (designer, gtdx, store) can verify a live connection or credential by invoking one of the extension's own tools. Snake-case on the wire, unlike the camelCase siblings in this block - that spelling matches how extensions and the designer already read `contributions.connection_test`.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["tool"],
+          "required": [
+            "tool"
+          ],
           "properties": {
             "tool": {
               "description": "Name of the contributed tool (matching a `contributions.tools[].name`) to invoke to exercise the connection.",
@@ -269,7 +314,10 @@
           "description": "The messaging channel a provider extension offers, so a consumer can present it for selection and, when a deployment is built, bake the right provider pack into the bundle. Snake-case on the wire for the same reason as `connection_test` above. Absent means the extension offers no channel, which is the normal state and never an error.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "ref"],
+          "required": [
+            "id",
+            "ref"
+          ],
           "properties": {
             "id": {
               "description": "Stable channel id, e.g. `messaging-3aigent-gui`. This is the identity a consumer stores against a deployment and later resolves back to `ref`, so renaming it orphans every deployment that already selected the channel.",
@@ -582,7 +630,9 @@
                 "fetchHosts": {
                   "description": "Hosts a view may reach through the host's server-side proxy. The view never issues these itself: an iframe without `allow-same-origin` sends `Origin: null`, which most third-party APIs reject at CORS. Same address rules as `network` - https only, loopback and link-local rejected.",
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "platformApi": {
                   "description": "Platform REST endpoints a view may call through the bridge. The host intersects this with the calling user's own RBAC, so it can only narrow what that user could already do by hand - never widen it.",
@@ -590,11 +640,20 @@
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["method", "path_pattern"],
+                    "required": [
+                      "method",
+                      "path_pattern"
+                    ],
                     "properties": {
                       "method": {
                         "description": "HTTP method of the grant. Constrained here rather than by a Rust enum so a describe naming a method the current SDK does not know still round-trips instead of failing the whole parse.",
-                        "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE"
+                        ]
                       },
                       "path_pattern": {
                         "description": "The platform endpoint path this grant covers, e.g. `/api/flows` or `/api/admin/tenants/*`. The host intersects the grant with the calling user's own RBAC, so it can only narrow what that user could already do by hand, never widen it.",

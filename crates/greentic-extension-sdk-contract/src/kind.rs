@@ -37,6 +37,16 @@ pub enum ExtensionKind {
     /// `wit/extension-addon.wit`.
     #[serde(rename = "AddonExtension")]
     Addon,
+    /// A packaged agentic worker. Not an extension that a host installs under
+    /// `~/.greentic/extensions/<kind>/` — it is published to, and installed
+    /// from, the Store as its own artifact class. It is modelled here because
+    /// its descriptor IS a describe-v2 document: greentic-store-server
+    /// validates it against the v2 schema and only then asserts the kind
+    /// (`handlers/agentic_workers/publish.rs`). Leaving it unmodelled is what
+    /// forced that server to keep its own copy of the schema, which then drifted
+    /// six contributions behind this crate.
+    #[serde(rename = "AgenticWorker")]
+    AgenticWorker,
 }
 
 impl ExtensionKind {
@@ -58,6 +68,7 @@ impl ExtensionKind {
         Self::Provider,
         Self::WasixMcpRouter,
         Self::Addon,
+        Self::AgenticWorker,
     ];
 
     /// A variant added without a matching entry in `ALL` compiles fine —
@@ -70,7 +81,7 @@ impl ExtensionKind {
     /// (omitted `Provider`, so provider extensions could not be removed at
     /// all while the command still reported success). Bump this alongside
     /// adding a variant to `ALL`.
-    const _ASSERT_ALL_COVERS_EVERY_VARIANT: () = assert!(Self::ALL.len() == 6);
+    const _ASSERT_ALL_COVERS_EVERY_VARIANT: () = assert!(Self::ALL.len() == 7);
 
     #[must_use]
     pub const fn dir_name(self) -> &'static str {
@@ -81,6 +92,9 @@ impl ExtensionKind {
             Self::Provider => "provider",
             Self::WasixMcpRouter => "mcp",
             Self::Addon => "addon",
+            // Never an install directory — see the variant's doc. It is still a
+            // real value: `store::browse` sends `dir_name` as its `kind` query.
+            Self::AgenticWorker => "agentic-worker",
         }
     }
 
@@ -100,6 +114,7 @@ impl ExtensionKind {
             Self::Provider => "ProviderExtension",
             Self::WasixMcpRouter => "wasix:mcp/router",
             Self::Addon => "AddonExtension",
+            Self::AgenticWorker => "AgenticWorker",
         }
     }
 
@@ -139,7 +154,8 @@ mod tests {
                 | ExtensionKind::Deploy
                 | ExtensionKind::Provider
                 | ExtensionKind::WasixMcpRouter
-                | ExtensionKind::Addon => {}
+                | ExtensionKind::Addon
+                | ExtensionKind::AgenticWorker => {}
             }
         }
         let mut dirs: Vec<_> = ExtensionKind::ALL.iter().map(|k| k.dir_name()).collect();
