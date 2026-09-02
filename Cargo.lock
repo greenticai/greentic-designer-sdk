@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-cli"
-version = "1.2.21"
+version = "1.2.22"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-contract"
-version = "1.2.21"
+version = "1.2.22"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-registry"
-version = "1.2.21"
+version = "1.2.22"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-state"
-version = "1.2.21"
+version = "1.2.22"
 dependencies = [
  "fs2",
  "semver",
@@ -1176,7 +1176,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-extension-sdk-testing"
-version = "1.2.21"
+version = "1.2.22"
 dependencies = [
  "anyhow",
  "ciborium",
