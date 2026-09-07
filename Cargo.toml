@@ -10,13 +10,36 @@ members = [
 
 [workspace.package]
 edition = "2024"
-version = "1.2.22"
+version = "1.2.23"
 license = "MIT"
 repository = "https://github.com/greenticai/greentic-designer-sdk"
 rust-version = "1.95"
 
 [workspace.dependencies]
-greentic-types = { version = "=1.3.0-research.1", default-features = false, features = ["std", "serde"] }
+# A RANGE, not an `=` pin, and deliberately the same range greentic-runner-host
+# declares (`>=1.2.0-dev, <1.3.0-0`) so this crate adds no new constraint to a
+# consumer's resolution.
+#
+# It was `=1.3.0-research.1`, which was a workspace lane pin rather than a
+# requirement: this workspace touches greentic-types in exactly three places —
+# two `use greentic_types::secrets::SecretRequirement;` lines in the contract
+# (describe/mod.rs:1, describe/contributions/tool.rs:5) for a serde-transparent,
+# `#[non_exhaustive]` field type that is never constructed, plus the CLI's pack
+# manifest codec. `src/secrets.rs` is byte-identical across 1.2.0-dev.30553518006,
+# 1.3.0-research.1 and 1.3.0-research.2, and the pin oscillated BACKWARDS across
+# releases (1.1.3 -> 1.1.4 went `=1.2.0-research.1` -> `=1.1.2`) while the same
+# two use-lines stood — which a semantic requirement cannot do.
+#
+# The `=` pin was load-bearing in the wrong direction: it forced every consumer
+# of this crate onto the 1.3 types line, which the crates.io runner lane cannot
+# admit, so no published sdk-contract carrying `capabilities` was installable
+# there and deployed runners loaded zero design extensions.
+#
+# `<1.4.0-0` was measured and rejected: cargo only lets a prerelease satisfy a
+# comparator carrying a prerelease on the SAME major.minor.patch, so `<1.4.0-0`
+# admits no 1.3.0-research.* either and resolves identically today, while
+# widening the CLI's exposure to a future stable 1.3 codec change for nothing.
+greentic-types = { version = ">=1.2.0-dev, <1.3.0-0", default-features = false, features = ["std", "serde"] }
 anstyle = "1"
 anyhow = "1"
 async-trait = "0.1"
