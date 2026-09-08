@@ -86,11 +86,109 @@ async fn install_provider_extracts_gtpack_to_providers_gtdx_dir() {
         "describe.json should be in extension dir"
     );
 
-    // The gtpack must NOT remain inside the extension dir.
+    // The gtpack must REMAIN inside the extension dir: manifest.json lists it,
+    // and the runtime refuses to load an extension whose manifest names a path
+    // that is not on disk.
     assert!(
-        !ext_dir.join("runtime/provider.gtpack").exists(),
-        "gtpack must not be left in the extensions tree"
+        ext_dir.join("runtime/provider.gtpack").exists(),
+        "gtpack must stay in the extensions tree — manifest.json lists it"
     );
+}
+
+/// The whole-archive ledger is the runtime's load gate: greentic-ext-runtime's
+/// `verify_dir_manifest` walks every `manifest.json` entry and refuses the
+/// extension if any listed path is absent from the installed directory.
+///
+/// This pins the invariant end-to-end — install a provider through the real
+/// registry path, then assert the installed tree satisfies exactly what the
+/// runtime checks. It regresses the defect where `post_install_provider`
+/// deleted `runtime/provider.gtpack` after verifying it, leaving every
+/// gtdx-installed provider extension unloadable with
+/// `manifest lists missing file: runtime/provider.gtpack`.
+#[tokio::test]
+async fn installed_provider_tree_satisfies_its_own_manifest() {
+    let tmp = TempDir::new().unwrap();
+    let tmp_home = TempDir::new().unwrap();
+
+    let gtpack_bytes = b"fake-gtpack-content".to_vec();
+    let sha = support::sha256_hex(&gtpack_bytes);
+
+    let gtxpack_path = support::build_provider_fixture_gtxpack(
+        tmp.path(),
+        "greentic.provider.fixture",
+        "0.1.0",
+        &gtpack_bytes,
+        &sha,
+    )
+    .unwrap();
+
+    let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fixture", "0.1.0");
+
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp.path());
+    let installer = Installer::new(storage, &reg);
+
+    installer
+        .install_artifact(
+            &artifact,
+            InstallOptions {
+                trust_policy: TrustPolicy::Loose,
+                accept_permissions: true,
+                force: false,
+            },
+        )
+        .unwrap();
+
+    let ext_dir = tmp_home
+        .path()
+        .join("extensions/provider/greentic.provider.fixture-0.1.0");
+
+    // Mirror `verify_dir_manifest`: read the installed ledger, then require
+    // every entry to exist on disk and hash to the recorded digest.
+    let manifest_path = ext_dir.join(greentic_extension_sdk_contract::MANIFEST_ENTRY_NAME);
+    let raw = std::fs::read(&manifest_path).unwrap_or_else(|e| {
+        panic!(
+            "installed extension must carry a manifest at {}: {e}",
+            manifest_path.display()
+        )
+    });
+    let manifest: greentic_extension_sdk_contract::Manifest = serde_json::from_slice(&raw).unwrap();
+
+    assert!(
+        manifest
+            .entries
+            .iter()
+            .any(|e| e.path == "runtime/provider.gtpack"),
+        "fixture must exercise the provider gtpack path; entries: {:?}",
+        manifest.entries.iter().map(|e| &e.path).collect::<Vec<_>>()
+    );
+
+    for entry in &manifest.entries {
+        let path = ext_dir.join(&entry.path);
+        assert!(
+            path.exists(),
+            "manifest lists missing file: {} (the runtime refuses to load this)",
+            entry.path
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(
+            support::sha256_hex(&bytes),
+            entry.sha256,
+            "manifest sha256 mismatch for {}",
+            entry.path
+        );
+    }
+
+    // The runner-side copy must still be written — the fix keeps both.
+    let runtime_copy = tmp_home
+        .path()
+        .join("runtime/packs/providers/gtdx/greentic.provider.fixture-0.1.0.gtpack");
+    assert!(
+        runtime_copy.exists(),
+        "runner-side gtpack copy should exist at {}",
+        runtime_copy.display()
+    );
+    assert_eq!(std::fs::read(&runtime_copy).unwrap(), gtpack_bytes);
 }
 
 #[test]

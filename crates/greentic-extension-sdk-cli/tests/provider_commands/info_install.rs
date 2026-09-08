@@ -170,14 +170,59 @@ fn gtdx_install_provider_from_gtxpack_places_files() {
         .join("describe.json");
     assert!(describe.exists(), "expected describe.json at {describe:?}");
 
-    // Gtpack MUST NOT be in final extensions dir
-    let gtpack_in_ext = home
-        .join("extensions/provider/greentic.provider.fixture-0.1.0")
-        .join("runtime/provider.gtpack");
+    // The gtpack MUST remain in the final extensions dir.
+    //
+    // This assertion used to require the opposite, and that requirement was the
+    // defect. `build_gtxpack_with_manifest` lists every non-directory archive
+    // entry in `manifest.json` — `runtime/provider.gtpack` included — and the
+    // describe commits to that ledger via `manifest_sha256`. Stripping the file
+    // after verifying it left the signed ledger naming a path that was not on
+    // disk, and greentic-ext-runtime's `verify_dir_manifest` walks every
+    // manifest entry and hard-errors on the first one missing:
+    //     manifest lists missing file: runtime/provider.gtpack
+    // So no gtdx-installed provider extension could load at all.
+    //
+    // Note the runtime does NOT reject files present on disk but absent from
+    // the manifest — `verify_dir_manifest` iterates manifest entries only and
+    // never walks the directory (checked against the published
+    // greentic-ext-runtime 1.2.34077794832). The reason the file must stay is
+    // simply that the manifest LISTS it. The exactness in the other direction
+    // is an SDK-side, archive-level rule: `verify_archive_against_manifest`
+    // refuses an archive entry the manifest does not name, which is what makes
+    // "just drop runtime/** from the manifest" a non-fix.
+    let ext_dir = home.join("extensions/provider/greentic.provider.fixture-0.1.0");
     assert!(
-        !gtpack_in_ext.exists(),
-        "gtpack must not be left in extensions dir"
+        ext_dir.join("runtime/provider.gtpack").exists(),
+        "gtpack must stay in extensions dir — manifest.json lists it"
     );
+
+    // Pin the invariant the runtime actually enforces, not just this one path:
+    // every entry the installed ledger names must exist and hash correctly.
+    let raw = std::fs::read(ext_dir.join(greentic_extension_sdk_contract::MANIFEST_ENTRY_NAME))
+        .expect("installed extension must carry manifest.json");
+    let manifest: greentic_extension_sdk_contract::Manifest = serde_json::from_slice(&raw).unwrap();
+    assert!(
+        manifest
+            .entries
+            .iter()
+            .any(|e| e.path == "runtime/provider.gtpack"),
+        "fixture must exercise the provider gtpack path; entries: {:?}",
+        manifest.entries.iter().map(|e| &e.path).collect::<Vec<_>>()
+    );
+    for entry in &manifest.entries {
+        let path = ext_dir.join(&entry.path);
+        assert!(
+            path.exists(),
+            "manifest lists missing file: {} (the runtime refuses to load this)",
+            entry.path
+        );
+        assert_eq!(
+            sha256_hex(&std::fs::read(&path).unwrap()),
+            entry.sha256,
+            "manifest sha256 mismatch for {}",
+            entry.path
+        );
+    }
 }
 
 #[test]
