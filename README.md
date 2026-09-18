@@ -29,13 +29,74 @@ crates.io. **Research** is the active integration line: it ships tagged
 binaries to GitHub Releases but is deliberately never published to
 crates.io (`release.yml` skips any tag containing `research`).
 
-**Use 1.2.1 or newer.** It is the first release whose `gtdx new` scaffolds
-build: every earlier one, `1.2.0` included, rendered `wit/world.wit` with a
-single contract version for packages that are versioned independently, so a
-fresh scaffold failed its first `cargo component build` for every kind except
-`mcp` with `package 'greentic:extension-host@0.2.0' not found`. 1.2.1 also
-fixed the `provider` and `--kind llm` stubs and made `--kind wasm-component`
-emit a node the runner can execute.
+**Use 1.2.10 or newer.** Two things landed in it.
+
+It is the first release where an extension can contribute a page, not just
+parts of one: `contributions.views[]` ships an author's own HTML, JS and CSS
+inside the pack, and `gtdx new --with-view` scaffolds a working example. No
+host renders views yet — the Designer and the Admin console land separately —
+so a view-bearing extension declares, lints, validates and packs today, and
+displays once the hosts catch up. Read
+[docs/authoring-views.md](docs/authoring-views.md) before publishing one:
+`Contributions` is `deny_unknown_fields`, so a `views` key makes the whole
+describe unparseable to every designer released so far, and
+`min_designer_version` cannot yet say so.
+
+That is the same mechanism behind the release's second change. It is also the
+first release where a decode failure says what actually went wrong. `gtdx
+install` against a store serving a newer describe used to fail with reqwest's
+`error decoding response body` — no field, no position, no endpoint — which
+reads as a network fault. The real
+cause is a version skew: `DescribeJson`'s nested types are
+`deny_unknown_fields`, so one unrecognised field fails the whole parse. The
+message now names the endpoint, the field, and the fix.
+
+1.2.9 before it gave every kind example tests, not just four — `ci/local_check.sh`
+has always run `cargo test`, and on `llm` and `mcp` there was still nothing
+for it to run.
+
+1.2.8 before it gave `design`, `bundle`, `deploy` and `provider` their tests,
+and added a Testing section to the scaffolded `AGENTS.md` — including the one
+prerequisite that otherwise reads as a broken project: `cargo test` needs the
+generated `src/bindings.rs`, so a fresh clone must build once first.
+
+1.2.7 before it gave `design`, `bundle`, `deploy` and `provider` a working
+example. Before that they implemented every export as an empty stub, so a
+fresh extension built, packed and installed cleanly — and contributed
+nothing.
+
+1.2.6 before it settled `gtdx dev` watch mode: a `cargo component build`
+re-touched the very paths the watcher watches — `src/bindings.rs`,
+`wit/deps/`, `Cargo.toml` — so every build queued the next, roughly three
+rebuilds a second on an untouched scaffold, forever. `gtdx dev --once` was
+never affected.
+
+1.2.5 before it made `gtdx doctor` see the whole machine: the diagnostic had
+skipped `provider` extensions entirely, so a whole kind was invisible to the
+command meant to find broken ones. It also stopped `doctor` printing a line
+per installed extension — failures group by reason and passing extensions
+collapse to a count, with `--verbose` for the full listing.
+
+1.2.4 before it made the whole lifecycle work for every extension kind:
+`gtdx uninstall` could not remove a `provider` extension and reported success
+anyway; `gtdx enable` / `disable` could not see an `mcp` extension at all; a
+`--kind wasm-component` scaffold failed `gtdx lint --publish` even with a
+digest-pinned `--component-ref`; `gtdx install` failed on any
+`GREENTIC_HOME` containing `..`, blaming the pack; and `gtdx outdated`
+reported the built-in store as "not configured".
+
+1.2.3 before it fixed the two defects that could only reach authors as a
+release: `cargo binstall` pointed at the wrong path inside the release
+archive and silently fell back to a full source build, and `gtdx publish`
+shipped all-zero `sha256` placeholders so `gtdx lint --publish` failed on a
+freshly scaffolded project and kept failing after a successful publish.
+
+Below 1.2.1 a fresh scaffold does not build at all: `wit/world.wit` rendered
+a single contract version for packages that are versioned independently, so
+the first `cargo component build` failed for every kind except `mcp` with
+`package 'greentic:extension-host@0.2.0' not found`. 1.2.1 also fixed the
+`provider` and `--kind llm` stubs and made `--kind wasm-component` emit a
+node the runner can execute.
 
 **Recommended — `cargo binstall` (no compile, fetches the release binary):**
 
@@ -45,7 +106,8 @@ cargo binstall greentic-extension-sdk-cli
 
 Resolves to the latest stable release from crates.io; binstall reads
 `[package.metadata.binstall]` to find the matching GitHub Release asset.
-Add `--version <x.y.z>` to pin.
+Add `--version <x.y.z>` to pin — but pinning `1.2.2` or older re-enters the
+broken binstall metadata, so it compiles from source instead of downloading.
 
 **Build from source (slowest, needs the full toolchain):**
 
@@ -60,12 +122,15 @@ Grab the asset for your platform from the
 — the tag is embedded in the filename:
 
 ```bash
-# macOS Apple Silicon example — swap TAG and target for your platform
-TAG=v1.2.1
+# macOS Apple Silicon example — swap TAG and TARGET for your platform
+TAG=v1.2.10
+TARGET=aarch64-apple-darwin
 curl -L -o gtdx.tgz \
-  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-aarch64-apple-darwin.tgz"
+  "https://github.com/greenticai/greentic-designer-sdk/releases/download/$TAG/gtdx-$TAG-$TARGET.tgz"
+# every archive holds the binary inside a directory named after the asset
 tar -xzf gtdx.tgz
-chmod +x gtdx && mv gtdx ~/.cargo/bin/
+chmod +x "gtdx-$TAG-$TARGET/gtdx"
+mv "gtdx-$TAG-$TARGET/gtdx" ~/.cargo/bin/
 ```
 
 **Research line** — not on crates.io, so install it from the repo at a
@@ -79,9 +144,10 @@ cargo install --git https://github.com/greenticai/greentic-designer-sdk \
 ```
 
 Older `-research` versions do sit on crates.io from before the skip rule
-landed. Avoid opting into pre-releases there: `1.2.3-research` is a
-pre-release of a *higher* patch, so it sorts above the 1.2.1 stable while
-containing older code. `1.3.0-research.1` is the same trap one minor up.
+landed. Avoid opting into pre-releases there: a pre-release of a *higher*
+version sorts above the current stable while carrying older code, so
+`1.3.0-research.1` outranks the 1.2.10 stable. (A pre-release of the same
+version is not a trap — `1.2.10-research` would sort *below* `1.2.10`.)
 
 Available targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`,
@@ -109,7 +175,8 @@ gtdx new my-node --kind wasm-component \
     --component-ref oci://ghcr.io/greenticai/component/component-my-node@sha256:461c6a68…
 
 # 2) Interactive wizard — just run `gtdx new` with no name on a terminal
-gtdx new                          # prompts for name, kind, id, version, author, license
+gtdx new                          # prompts for name, kind, id, version, author,
+                                  # license, then capabilities and permissions
 gtdx new --wizard                 # force the wizard even when flags are given
 
 cd my-ext
@@ -120,9 +187,65 @@ The wizard uses any flags you pass as prompt defaults, so `gtdx new my-ext --wiz
 pre-fills the name. Pass `--yes` to skip the wizard and resolve everything from
 flags/defaults (useful in scripts and CI, where there is no terminal).
 
+#### Declare what the extension needs, offers and shows
+
+Everything an extension declares about itself — the hosts it may reach, the
+secrets it may read, the capability contracts it provides, its memory ceiling,
+its UI page, its icon — is settable both interactively and from flags. The
+wizard asks once which of these apply and only drills into those; the flags do
+the same thing without a terminal:
+
+```bash
+gtdx new my-ext --kind design -y \
+    --memory-mb 128 \
+    --permit-network 'https://api.acme.com/*' \
+    --permit-secret 'secret://acme/' \
+    --permit-llm-role sorla_composer \
+    --permit-oauth hubspot \
+    --offer-capability 'greentic:guardrail/topic@1.0.0' \
+    --require-capability 'greentic:llm/chat@^1' \
+    --tool-capability flow --tool-capability agentic_worker \
+    --with-view --view-id usage --view-surface admin \
+    --view-api 'GET /api/flows' \
+    --icon ./logo.svg \
+    --summary 'Acme connector.' --keyword crm
+```
+
+Every value is checked against the rule `gtdx lint` or `gtdx publish` would
+apply later, so a scaffold these flags accept passes its own first lint:
+plain `http://` to a public host, a credential field name in `--permit-secret`,
+a version range in `--offer-capability`, and a capability that is both offered
+and required are all refused up front, each naming the lint code it pre-empts.
+
+See [`docs/authoring-capabilities.md`](./docs/authoring-capabilities.md) for
+the full flag reference and for what "capability" means in each of the five
+places `describe.json` uses the word.
+
 This rebuilds, packs, and produces `dist/<name>-<version>.gtxpack`. The
 pack includes a `manifest.json` integrity ledger (sha256 of every entry)
 since 1.2.0-research; runtime install verifies it.
+
+#### Contribute a view (a UI page in the Designer or Admin console)
+
+> **Phase 1 (SDK-only):** you can declare, scaffold, lint, validate and pack a
+> view today — no host renders one yet, and a view-bearing `describe.json` is
+> unloadable on every designer released so far (see
+> [`docs/authoring-views.md`](./docs/authoring-views.md#authoring-views) for
+> why). Treat `--with-view` as local development, not something to publish.
+
+```bash
+gtdx new my-ext --kind design --with-view   # adds a working example page
+```
+
+Scaffolds an example `assets/views/hello/` page (HTML/JS/CSS) wired through
+the host's `postMessage` bridge, plus the matching `contributions.views[]`
+and `runtime.permissions.ui` entries in `describe.json`. `--view-id`,
+`--view-surface`, `--view-slot`, `--view-title`, `--view-min-visibility`,
+`--view-fetch-host` and `--view-api` configure all of that; the page is
+scaffolded under the id you choose. See
+[`docs/authoring-views.md`](./docs/authoring-views.md) for the full authoring
+guide — what ships, what the sandboxed page can and can't reach, and the
+`E_VIEW_*` / `W_VIEW_SLOT_UNKNOWN` lint codes.
 
 #### MCP kinds: `wasix:mcp/router` vs agent-only design-extension MCPs
 
@@ -159,7 +282,7 @@ Install the generator once with `cargo binstall greentic-mcp-generator` (set
 The result is publish-ready:
 
 ```bash
-gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml ./weatherapi
+gtdx publish --wasm ./weatherapi/weatherapi.component.wasm --manifest ./weatherapi/Cargo.toml
 ```
 
 Running `gtdx new` with no flags starts an interactive wizard; for `--kind mcp`
@@ -189,7 +312,7 @@ locally, or `gtdx lint --publish --dir <ext>` to also enforce
 | `E_EXPORT_FORM` | `tools[].export` must be a fully-qualified `greentic:extension-design/<interface>.<member>` reference (e.g. `tools.invoke-tool`, `validation.validate-content`, `knowledge.get-entry`) | Replace bare names like `"invoke-tool"` with the fully-qualified form. |
 | `E_ENGINE_DEPRECATED` | the `engine` block is forbidden | Move version constraints into `compat.min_designer_version` / `compat.min_runner_version` and delete `engine`. Templates stopped emitting it in 1.2.1, so this no longer fires on a fresh scaffold. |
 | `E_SHA256_ZERO` | (`--publish` only) no placeholder `0000…` hashes | Let the build/publish step fill real `sha256` values before publishing. |
-| `E_ID_PATTERN` | `metadata.id` must match `^greentic\.[a-z0-9][a-z0-9-]*$` | Use a lowercase-kebab id under the `greentic.` namespace. |
+| `E_ID_PATTERN` | `metadata.id` must match `^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*(\.[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*)+$` | Use a reverse-DNS id in a namespace you control: `greentic.my-ext`, `com.acme.my-ext`. Any namespace is accepted (the `greentic.` prefix stopped being mandatory in 1.2.16). Each segment is a WIT kebab-name, because `gtdx new` turns the id into the WIT package name — so every dash-separated word must start with a letter: `greentic.aigent3-designer` is valid, `greentic.3aigent-designer` and `greentic.provider-3aigent` are not. 1.2.16 accepted those two and produced scaffolds `cargo component build` refused; 1.2.17 rejects them at `gtdx new`. |
 | `E_TOOL_NAMING` | tool names must be `snake_case` with no near-duplicate prefixes | Rename camelCase tools; disambiguate pairs like `generate_gtpack` / `generate_gtpack_from_sorla_yaml`. |
 
 ### Quick dev-loop install
@@ -317,7 +440,7 @@ still drives the pack, signing, and registry metadata — only the build step is
 skipped:
 
 ```bash
-gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml ./
+gtdx publish --wasm ./out/my-mcp.component.wasm --manifest ./describe-dir/Cargo.toml
 ```
 
 ### Verify a pack

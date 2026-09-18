@@ -352,7 +352,12 @@ fn id_pattern_rejects_bad_id() {
         "greentic.",
         "greentic.Sorla",
         "greentic.-x",
-        "com.example.x",
+        "3aigent.designer",
+        "greentic.telco_x",
+        // A digit-led word becomes an invalid WIT label: 1.2.16 let these
+        // through and they scaffolded projects `cargo component build` refused.
+        "greentic.3aigent-designer",
+        "greentic.provider-3aigent",
     ] {
         let d = json!({ "metadata": { "id": bad } });
         let v = check_id_pattern(&d);
@@ -367,6 +372,12 @@ fn id_pattern_accepts_good_id() {
         "greentic.sorla",
         "greentic.telco-x-tools",
         "greentic.operala",
+        // The namespace is the author's to choose — this was rejected before
+        // 1.2.16, in disagreement with `describe-v2.json`.
+        "com.acme.my-ext",
+        // Digits are fine once a word has started.
+        "greentic.aigent3-designer",
+        "io.github.someone.viewer3d",
     ] {
         let d = json!({ "metadata": { "id": good } });
         assert!(
@@ -604,6 +615,17 @@ fn secret_key_canonical_rejects_uri_scheme() {
     assert_eq!(v[0].code, "E_SECRET_KEY_NOT_CANONICAL");
 }
 
+/// `E_ID_PATTERN` used to print only the regex, leaving the author to diff
+/// their id against it by eye.
+#[test]
+fn id_pattern_message_names_the_offending_part() {
+    let d = json!({ "metadata": { "id": "greentic.Sorla" } });
+    let v = check_id_pattern(&d);
+    assert_eq!(v.len(), 1);
+    assert!(v[0].message.contains("Sorla"), "{}", v[0].message);
+    assert!(v[0].message.contains("lowercase"), "{}", v[0].message);
+}
+
 #[test]
 fn secret_key_canonical_rejects_star_wildcard() {
     let d = json!({ "requiredSecrets": [{ "key": "*" }] });
@@ -614,17 +636,20 @@ fn secret_key_canonical_rejects_star_wildcard() {
 
 /// The scaffold's default id must satisfy the linter shipped beside it.
 ///
-/// `gtdx new` defaulted to `com.example.<name>` while `E_ID_PATTERN` requires
+/// `gtdx new` defaulted to `com.example.<name>` while `E_ID_PATTERN` required
 /// the `greentic.` namespace, so an untouched scaffold failed `gtdx lint` with
 /// exit 1 for every kind — the tool's own output rejected by its own governance
 /// rule, with nothing anywhere connecting the two. Both sides were deliberate
 /// and neither knew about the other.
 ///
-/// This asserts the pair rather than either half: change the namespace the rule
-/// enforces, or the namespace the scaffold defaults to, and this fails.
+/// The namespace requirement is gone, but the pairing still needs asserting:
+/// the scaffold default must satisfy the linter shipped beside it, whatever
+/// either one becomes. `a1` and `viewer3d` cover the digits that the pre-1.2.16
+/// rule choked on — a name whose *word* starts with a digit is rejected as a
+/// name, so it never reaches the id rule.
 #[test]
 fn the_scaffold_default_id_passes_the_id_rule() {
-    for name in ["demo", "telco-x", "a1"] {
+    for name in ["demo", "telco-x", "a1", "viewer3d", "aigent3-designer"] {
         let id = crate::commands::new::default_id(name);
         let d = json!({ "metadata": { "id": id } });
         let v = check_id_pattern(&d);
@@ -634,4 +659,187 @@ fn the_scaffold_default_id_passes_the_id_rule() {
             crate::commands::new::default_id(name)
         );
     }
+}
+
+// --- contributions.views[] (August 2026) ---
+
+use rules_views::check_views;
+
+fn view_project(entry: &str, html: Option<&str>) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    if let Some(body) = html {
+        let asset_dir = dir.path().join("assets/views/hello");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+        std::fs::write(asset_dir.join(entry), body).unwrap();
+    }
+    dir
+}
+
+fn describe_with_view(entry: &str, slot: &str) -> serde_json::Value {
+    json!({
+        "contributions": {
+            "views": [{
+                "id": "hello",
+                "surface": "designer",
+                "title_key": "k",
+                "title_fallback": "Hello",
+                "entry": entry,
+                "placement": { "slot": slot }
+            }]
+        }
+    })
+}
+
+#[test]
+fn view_entry_present_is_clean() {
+    let dir = view_project(
+        "index.html",
+        Some("<h1>hi</h1><script src=\"app.js\"></script>"),
+    );
+    let d = describe_with_view("index.html", "designer.sidebar");
+    assert!(check_views(&d, dir.path()).is_empty());
+}
+
+#[test]
+fn view_entry_missing_is_an_error() {
+    let dir = view_project("index.html", None);
+    let d = describe_with_view("index.html", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "E_VIEW_ENTRY_MISSING");
+}
+
+#[test]
+fn view_entry_escaping_its_directory_is_an_error() {
+    let dir = view_project("index.html", Some("<h1>hi</h1>"));
+    let d = describe_with_view("../../../etc/passwd", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_VIEW_ENTRY_PATH"),
+        "traversal must be reported before the file is looked up: {v:?}"
+    );
+}
+
+#[test]
+fn remote_script_in_the_entry_is_an_error() {
+    let dir = view_project(
+        "index.html",
+        Some("<script src=\"https://cdn.example.com/x.js\"></script>"),
+    );
+    let d = describe_with_view("index.html", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_VIEW_REMOTE_ASSET"),
+        "manifest integrity is theatre if the page pulls unverified code: {v:?}"
+    );
+}
+
+#[test]
+fn unknown_slot_is_a_warning_not_an_error() {
+    let dir = view_project("index.html", Some("<h1>hi</h1>"));
+    let d = describe_with_view("index.html", "admin.notARealSlot");
+    let v = check_views(&d, dir.path());
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].code, "W_VIEW_SLOT_UNKNOWN");
+    assert_eq!(
+        v[0].severity,
+        Severity::Warning,
+        "the SDK's slot list is a snapshot and goes stale by construction — a \
+         stale snapshot must never fail a build"
+    );
+}
+
+#[test]
+fn describe_without_views_is_clean() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let d = json!({ "contributions": {} });
+    assert!(check_views(&d, dir.path()).is_empty());
+}
+
+// --- E_VIEW_REMOTE_ASSET is scoped to the tag that owns the attribute ---
+
+#[test]
+fn an_ordinary_anchor_with_a_remote_href_lints_clean() {
+    let dir = view_project(
+        "index.html",
+        Some(r#"<a href="https://docs.example.com">Docs</a>"#),
+    );
+    let d = describe_with_view("index.html", "designer.sidebar");
+    assert!(
+        check_views(&d, dir.path()).is_empty(),
+        "a hyperlink is not a fetched asset the manifest needs to vouch for"
+    );
+}
+
+#[test]
+fn a_remote_stylesheet_link_is_still_an_error() {
+    let dir = view_project(
+        "index.html",
+        Some(r#"<link rel="stylesheet" href="https://cdn.example.com/x.css">"#),
+    );
+    let d = describe_with_view("index.html", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_VIEW_REMOTE_ASSET"),
+        "a remote <link> stylesheet must still be caught: {v:?}"
+    );
+}
+
+#[test]
+fn a_protocol_relative_single_quoted_script_src_is_still_an_error() {
+    let dir = view_project(
+        "index.html",
+        Some(r"<script src='//cdn.example.com/x.js'></script>"),
+    );
+    let d = describe_with_view("index.html", "designer.sidebar");
+    let v = check_views(&d, dir.path());
+    assert!(
+        v.iter().any(|x| x.code == "E_VIEW_REMOTE_ASSET"),
+        "single-quote protocol-relative src must be as covered as its double-quote twin: {v:?}"
+    );
+}
+
+// --- E_VIEW_ID_PATTERN ---
+
+fn describe_with_view_id(id: &str) -> serde_json::Value {
+    json!({
+        "contributions": {
+            "views": [{
+                "id": id,
+                "surface": "designer",
+                "title_key": "k",
+                "title_fallback": "Hello",
+                "entry": "index.html",
+                "placement": { "slot": "designer.sidebar" }
+            }]
+        }
+    })
+}
+
+#[test]
+fn a_valid_view_id_lints_clean() {
+    let dir = view_project("index.html", Some("<h1>hi</h1>"));
+    // `view_project` writes assets under `assets/views/hello`, matching the
+    // id used below, so a clean pass here also exercises the id check
+    // running ahead of a real entry lookup rather than short-circuiting it.
+    let d = describe_with_view_id("hello");
+    assert!(check_views(&d, dir.path()).is_empty());
+}
+
+#[test]
+fn a_traversal_id_is_rejected_as_an_invalid_id_not_a_missing_entry() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let d = describe_with_view_id("../../etc");
+    let v = check_views(&d, dir.path());
+    assert_eq!(v.len(), 1);
+    assert_eq!(
+        v[0].code, "E_VIEW_ID_PATTERN",
+        "an id that would steer the asset path off the view's own directory \
+         must be caught as an invalid id before it is ever joined into a \
+         path, not surfaced as E_VIEW_ENTRY_MISSING once the damage is done: {v:?}"
+    );
+    assert!(
+        v.iter().all(|x| x.code != "E_VIEW_ENTRY_MISSING"),
+        "must not also report the wrong error: {v:?}"
+    );
 }

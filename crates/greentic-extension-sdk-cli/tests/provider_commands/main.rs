@@ -4,3 +4,4 @@
 mod fixtures;
 mod info_install;
 mod list;
+mod uninstall;

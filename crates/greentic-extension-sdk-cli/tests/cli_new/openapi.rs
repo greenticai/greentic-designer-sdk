@@ -44,25 +44,23 @@ fn from_openapi_requires_kind_mcp() {
     );
 }
 
+/// Stub `greentic-mcp-gen`: mimics the real generator's side-effects.
+///
+/// It:
+///   1. Parses --spec and --output-dir from its argument list.
+///   2. Creates input/done/error/uploaded dirs in its OWN cwd (as the real
+///      generator does), then moves the --spec file into done/.
+///   3. Writes <stem>.component.wasm + <stem>.component-meta.json to
+///      --output-dir so the caller can locate the artifacts.
+///
+/// Before the hermetic fix, steps 1-2 polluted the user's cwd and destroyed
+/// the original spec file. After the fix, those side-effects are confined to a
+/// scratch directory inside the process's own temp space.
 #[cfg(unix)]
-#[test]
-fn from_openapi_generates_and_authors_describe() {
+fn write_stub_generator(dir: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
-    let tmp = tempfile::tempdir().unwrap();
 
-    // Stub greentic-mcp-gen: mimics the real generator's side-effects.
-    //
-    // It:
-    //   1. Parses --spec and --output-dir from its argument list.
-    //   2. Creates input/done/error/uploaded dirs in its OWN cwd (as the real
-    //      generator does), then moves the --spec file into done/.
-    //   3. Writes <stem>.component.wasm + <stem>.component-meta.json to
-    //      --output-dir so the caller can locate the artifacts.
-    //
-    // Before the hermetic fix, steps 1-2 polluted the user's cwd and destroyed
-    // the original spec file.  After the fix, those side-effects are confined
-    // to a scratch directory inside the process's own temp space.
-    let stub = tmp.path().join("greentic-mcp-gen");
+    let stub = dir.join("greentic-mcp-gen");
     std::fs::write(
         &stub,
         r#"#!/bin/sh
@@ -95,6 +93,14 @@ JSON
     let mut perms = std::fs::metadata(&stub).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&stub, perms).unwrap();
+    stub
+}
+
+#[cfg(unix)]
+#[test]
+fn from_openapi_generates_and_authors_describe() {
+    let tmp = tempfile::tempdir().unwrap();
+    let stub = write_stub_generator(tmp.path());
 
     // Create the spec in a separate "user cwd" dir so we can verify it is
     // untouched and that no junk dirs appear there.
@@ -159,4 +165,56 @@ JSON
             "junk dir '{junk}' appeared in project dir"
         );
     }
+}
+
+/// `--permit-network` on a seeded scaffold must **widen** the allowlist the
+/// generator derived from the spec's `servers` block, not replace it.
+///
+/// Replacing it would drop every host the `OpenAPI` spec named while leaving an
+/// allowlist that looks deliberate — the extension would then fail at runtime
+/// against a list its author never wrote.
+#[cfg(unix)]
+#[test]
+fn capability_flags_widen_the_generated_network_allowlist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let stub = write_stub_generator(tmp.path());
+
+    let user_cwd = tempfile::tempdir().unwrap();
+    let spec = user_cwd.path().join("petstore.yaml");
+    std::fs::write(&spec, "openapi: 3.0.0\n").unwrap();
+    let proj = tmp.path().join("petstore-ext");
+
+    let (ok, _o, e) = run(Command::new(gtdx_bin())
+        .env("GTDX_MCP_GEN_BIN", &stub)
+        .current_dir(user_cwd.path())
+        .arg("new")
+        .arg("petstore-ext")
+        .arg("--kind")
+        .arg("mcp")
+        .arg("--from-openapi")
+        .arg(&spec)
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git")
+        .arg("--memory-mb")
+        .arg("256")
+        .arg("--permit-network")
+        .arg("https://api.acme.com/*")
+        .arg("--permit-oauth")
+        .arg("petstore"));
+    assert!(ok, "stderr:\n{e}");
+
+    let describe: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
+    assert_eq!(
+        describe["runtime"]["permissions"]["network"],
+        serde_json::json!(["https://petstore.example.com", "https://api.acme.com/*"]),
+        "the spec-derived host must survive alongside the flag-supplied one"
+    );
+    assert_eq!(describe["runtime"]["memoryLimitMB"], 256);
+    assert_eq!(
+        describe["runtime"]["permissions"]["oauthProviders"][0],
+        "petstore"
+    );
 }

@@ -1,0 +1,39 @@
+// Example view for {{name}}. Replace this with your own page.
+(async function () {
+  const status = document.getElementById("status");
+  const output = document.getElementById("output");
+  const TOOL = "{{view_tool}}";
+  // Placeholders bound at scaffold time from TOOL's own `input_schema` (see
+  // contributions.tools in describe.json): one type-matched value per
+  // required field, just enough to pass validation on the first click.
+  // Replace these with real values, or with a form that collects them.
+  const ARGS = {{view_tool_args}};
+
+  let init;
+  try {
+    init = await window.greentic.ready;
+  } catch (err) {
+    status.textContent = "Could not connect to the host: " + err.message;
+    return;
+  }
+  status.textContent =
+    "Connected — surface " + init.surface + ", locale " + init.locale + ".";
+  window.greentic.resize(document.body.scrollHeight);
+
+  document.getElementById("ping").addEventListener("click", async () => {
+    if (!TOOL) {
+      output.textContent =
+        "This extension contributes no tools yet. Add one under contributions.tools in describe.json, then call it from here.";
+      window.greentic.resize(document.body.scrollHeight);
+      return;
+    }
+    try {
+      const result = await window.greentic.invokeTool(TOOL, ARGS);
+      output.textContent = JSON.stringify(result, null, 2);
+    } catch (err) {
+      output.textContent = "Tool call failed: " + err.message;
+      window.greentic.toast("error", err.message);
+    }
+    window.greentic.resize(document.body.scrollHeight);
+  });
+})();

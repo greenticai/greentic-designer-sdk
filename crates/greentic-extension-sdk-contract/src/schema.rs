@@ -35,7 +35,10 @@ static VALIDATOR_MCP_V1: LazyLock<Validator> = LazyLock::new(|| {
 /// deserialize the document into the v2-only [`crate::describe::DescribeJson`]
 /// struct, so down-validating a `greentic.ai/v1` document against the looser v1
 /// schema reports a false success and then dies with a confusing serde error.
-/// Authors of legacy documents must run the v1->v2 migration first.
+/// There is no in-place migration to point authors at: `gtdx` ships no
+/// `migrate` command, so the only routes to a v2 document are installing a v2
+/// build of the extension or re-scaffolding and re-publishing it. The error
+/// text says exactly that rather than naming a command that does not exist.
 pub fn validate_describe_json(value: &serde_json::Value) -> Result<(), ContractError> {
     // `wasix:mcp/router` artifacts share `apiVersion: greentic.ai/v2` with
     // designer extensions but are a distinct artifact shape, so they are
@@ -50,7 +53,9 @@ pub fn validate_describe_json(value: &serde_json::Value) -> Result<(), ContractE
     match value.get("apiVersion").and_then(|v| v.as_str()) {
         Some("greentic.ai/v2") => validate_describe_v2(value),
         Some(other) => Err(ContractError::UnsupportedApiVersion(format!(
-            "{other} (expected greentic.ai/v2; run the v1->v2 migration first)"
+            "{other} (expected greentic.ai/v2; there is no in-place migration — \
+             install a v2 build of the extension, or re-scaffold and re-publish \
+             it with a current gtdx)"
         ))),
         None => Err(ContractError::SchemaInvalid(
             "missing apiVersion (expected greentic.ai/v2)".into(),

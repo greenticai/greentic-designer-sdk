@@ -13,6 +13,14 @@ pub struct Args {
     /// Skip network probes (offline mode).
     #[arg(long)]
     pub offline: bool,
+
+    /// List every installed extension, not just the ones with problems.
+    ///
+    /// The default collapses passing extensions to a count: a machine that has
+    /// accumulated a few hundred installs otherwise buries its handful of real
+    /// failures under a wall of ✓ lines.
+    #[arg(short = 'v', long)]
+    pub verbose: bool,
 }
 
 pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
@@ -27,10 +35,10 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
     failures += check_credentials(home);
     println!();
     println!("installed extensions");
-    failures += check_installed(home)?;
+    failures += check_installed(home, args.verbose)?;
     println!();
     println!("designer compatibility");
-    failures += check_designer_compat(home)?;
+    failures += check_designer_compat(home, args.verbose)?;
     println!();
     if failures > 0 {
         println!("{failures} problem(s) found");
@@ -193,12 +201,11 @@ fn jwt_exp(token: &str) -> Option<DateTime<Utc>> {
 fn installed_extension_dirs(home: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let storage = Storage::new(home);
     let mut dirs = Vec::new();
-    for kind in [
-        ExtensionKind::Design,
-        ExtensionKind::Bundle,
-        ExtensionKind::Deploy,
-        ExtensionKind::WasixMcpRouter,
-    ] {
+    // Every kind. This list used to omit `Provider`, so `doctor` silently
+    // never checked a provider extension's describe or its designer
+    // compatibility — the machine looked healthy because a whole kind was
+    // invisible to the diagnostic meant to find problems.
+    for kind in ExtensionKind::ALL {
         let kind_dir = storage.kind_dir(kind);
         if !kind_dir.exists() {
             continue;
@@ -216,39 +223,84 @@ fn installed_extension_dirs(home: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(dirs)
 }
 
-fn check_installed(home: &Path) -> anyhow::Result<usize> {
+fn check_installed(home: &Path, verbose: bool) -> anyhow::Result<usize> {
     let dirs = installed_extension_dirs(home)?;
     let total = dirs.len();
-    let mut bad = 0usize;
+    // (label, reason). Collected rather than printed as we go so the default
+    // view can group by reason — a machine carrying a generation of legacy
+    // installs hits the same reason dozens of times, and repeating a long
+    // remedy sentence per extension buries how few distinct problems there are.
+    let mut failures: Vec<(String, String)> = Vec::new();
     for ext_dir in dirs {
+        let dir_label = ext_dir.file_name().map_or_else(
+            || ext_dir.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         let describe_path = ext_dir.join("describe.json");
         if !describe_path.exists() {
-            println!("  \u{2717} {} (no describe.json)", ext_dir.display());
-            bad += 1;
+            failures.push((dir_label, "no describe.json".to_string()));
             continue;
         }
         let bytes = std::fs::read(&describe_path)?;
         let value: serde_json::Value = match serde_json::from_slice(&bytes) {
             Ok(v) => v,
             Err(e) => {
-                println!("  \u{2717} {}: invalid JSON: {e}", describe_path.display());
-                bad += 1;
+                failures.push((dir_label, format!("invalid JSON: {e}")));
                 continue;
             }
         };
+        let label = extension_label(&ext_dir, &value);
         if let Err(e) = greentic_extension_sdk_contract::schema::validate_describe_json(&value) {
-            println!("  \u{2717} {}: {e}", describe_path.display());
-            bad += 1;
-        } else {
+            failures.push((label, e.to_string()));
+        } else if verbose {
             println!("  \u{2713} {}", describe_path.display());
         }
     }
+    let bad = failures.len();
+    if verbose {
+        for (label, reason) in &failures {
+            println!("  \u{2717} {label}: {reason}");
+        }
+    } else {
+        print_grouped_failures(&failures);
+    }
     if total == 0 {
         println!("  \u{25C9} no installed extensions");
+    } else if bad == 0 {
+        println!("  \u{2713} {total} installed, all readable");
     } else {
         println!("  {total} total, {bad} bad");
     }
     Ok(bad)
+}
+
+/// Print failures grouped by reason: the reason once, then the extensions it
+/// applies to. Order follows first appearance so the output is stable.
+///
+/// The alternative — one full line per extension — turns a single systemic
+/// problem ("these all predate contract v2") into dozens of near-identical
+/// lines, which is how a real machine's `doctor` output reached 339 lines with
+/// the actual finding invisible inside it.
+fn print_grouped_failures(failures: &[(String, String)]) {
+    let mut order: Vec<&str> = Vec::new();
+    let mut by_reason: std::collections::HashMap<&str, Vec<&str>> =
+        std::collections::HashMap::new();
+    for (label, reason) in failures {
+        let entry = by_reason.entry(reason.as_str()).or_default();
+        if entry.is_empty() {
+            order.push(reason.as_str());
+        }
+        entry.push(label.as_str());
+    }
+    for reason in order {
+        let labels = &by_reason[reason];
+        if labels.len() == 1 {
+            println!("  \u{2717} {}: {reason}", labels[0]);
+        } else {
+            println!("  \u{2717} {} extensions: {reason}", labels.len());
+            println!("      {}", labels.join(", "));
+        }
+    }
 }
 
 /// Human label for an extension directory: `<id> <version>` from the describe,
@@ -276,7 +328,7 @@ fn extension_label(ext_dir: &Path, describe: &serde_json::Value) -> String {
 /// describe, which a pre-1.2 designer skips at boot with no actionable hint —
 /// so it never appears in `/api/extensions` and the author has nothing to go
 /// on. Naming the mismatch here is the whole point of the check.
-fn check_designer_compat(home: &Path) -> anyhow::Result<usize> {
+fn check_designer_compat(home: &Path, verbose: bool) -> anyhow::Result<usize> {
     let Some(binary) = designer_compat::designer_binary() else {
         println!(
             "  \u{25C9} greentic-designer not found on PATH — skipping \
@@ -303,6 +355,7 @@ fn check_designer_compat(home: &Path) -> anyhow::Result<usize> {
     }
 
     let mut problems = 0usize;
+    let mut checked = 0usize;
     for ext_dir in dirs {
         let Ok(bytes) = std::fs::read(ext_dir.join("describe.json")) else {
             // Already reported by `check_installed`; not a compat problem.
@@ -313,13 +366,18 @@ fn check_designer_compat(home: &Path) -> anyhow::Result<usize> {
         };
         let label = extension_label(&ext_dir, &describe);
         let verdict = designer_compat::evaluate(&version, &describe);
+        checked += 1;
         match verdict.remedy(&version) {
             Some(remedy) => {
                 println!("  \u{2717} {label}: {remedy}");
                 problems += 1;
             }
-            None => println!("  \u{2713} {label}"),
+            None if verbose => println!("  \u{2713} {label}"),
+            None => {}
         }
+    }
+    if !verbose && problems == 0 && checked > 0 {
+        println!("  \u{2713} {checked} installed, all loadable by this designer");
     }
     Ok(problems)
 }

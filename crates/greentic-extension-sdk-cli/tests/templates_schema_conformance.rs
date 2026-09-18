@@ -47,6 +47,13 @@ fn substitutions() -> BTreeMap<&'static str, &'static str> {
             "component_ref",
             "oci://ghcr.io/greenticai/component/component-my-ext@sha256:461c6a68db12b1148465010589c7a8447bf5da9b9de358e4ae0758178801b959",
         ),
+        // The digest read back out of `component_ref` — the scaffold writes it
+        // into the node component's `sha256` so a digest-pinned ref does not
+        // leave a placeholder for `E_SHA256_ZERO` to reject.
+        (
+            "component_digest",
+            "461c6a68db12b1148465010589c7a8447bf5da9b9de358e4ae0758178801b959",
+        ),
         // `openapi-connector`-only placeholders: `network_json`/`secrets_json`/
         // `tools_contrib_json` are substituted as raw JSON (no surrounding
         // quotes in the template), so their values must themselves be valid

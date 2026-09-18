@@ -243,3 +243,69 @@ fn scaffolded_describes_carry_no_deprecated_engine_block() {
         );
     }
 }
+
+/// The `--component-ref` a `wasm-component` scaffold requires is digest-pinned,
+/// so the node component's `sha256` is knowable at scaffold time — it is in the
+/// reference. Leaving it as the all-zero placeholder made `gtdx lint --publish`
+/// refuse a scaffold that supplied everything the README asks for.
+#[test]
+fn new_wasm_component_takes_node_digest_from_the_component_ref() {
+    let digest = "461c6a68b1c0d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccdd";
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("greentic.digest-test");
+    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("greentic.digest-test")
+        .arg("--kind")
+        .arg("wasm-component")
+        .arg("--component-ref")
+        .arg(format!(
+            "oci://ghcr.io/greenticai/component/component-demo@sha256:{digest}"
+        ))
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new failed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+
+    let describe: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
+    let node = describe["runtime"]["components"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .find(|(k, _)| k.ends_with("-node"))
+        .map(|(_, v)| v)
+        .expect("wasm-component scaffolds a -node component");
+    assert_eq!(node["sha256"].as_str().unwrap(), digest);
+}
+
+/// Omitting `--component-ref` must still leave the placeholder in place: the
+/// digest genuinely is unknown, and `gtdx lint --publish` refusing it is the
+/// documented behaviour, not a bug to paper over.
+#[test]
+fn new_wasm_component_without_ref_keeps_the_placeholder_digest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("greentic.noref-test");
+    let (ok, stdout, stderr) = run(Command::new(gtdx_bin())
+        .arg("new")
+        .arg("greentic.noref-test")
+        .arg("--kind")
+        .arg("wasm-component")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("-y")
+        .arg("--no-git"));
+    assert!(ok, "gtdx new failed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+
+    let describe: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(proj.join("describe.json")).unwrap()).unwrap();
+    let node = describe["runtime"]["components"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .find(|(k, _)| k.ends_with("-node"))
+        .map(|(_, v)| v)
+        .expect("wasm-component scaffolds a -node component");
+    assert_eq!(node["sha256"].as_str().unwrap(), "0".repeat(64));
+}

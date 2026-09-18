@@ -77,6 +77,9 @@ fn build_context(model: &ConnectorModel, slug: &str) -> Context {
     let mut ctx = Context::new();
     let id = crate::commands::new::default_id(slug);
     ctx.set("name", slug.to_string());
+    // Same fold as `commands::new::build_context`: cargo rejects '.' in a
+    // package name, so every template that renders one uses `name_cargo`.
+    ctx.set("name_cargo", slug.replace('.', "-"));
     ctx.set("name_underscore", slug.replace('-', "_"));
     ctx.set("id", id.clone());
     ctx.set("id_wit", id_to_wit_package(&id));

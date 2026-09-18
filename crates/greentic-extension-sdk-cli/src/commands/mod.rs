@@ -99,14 +99,6 @@ pub struct InstalledExt {
 }
 
 /// All extension kinds, in display order.
-pub const ALL_KINDS: [ExtensionKind; 5] = [
-    ExtensionKind::Design,
-    ExtensionKind::Bundle,
-    ExtensionKind::Deploy,
-    ExtensionKind::Provider,
-    ExtensionKind::WasixMcpRouter,
-];
-
 /// Enumerate installed extensions under the given kinds by reading each
 /// `<kind>/<name>-<version>/describe.json`.
 pub fn scan_installed(storage: &Storage, kinds: &[ExtensionKind]) -> Result<Vec<InstalledExt>> {
