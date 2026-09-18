@@ -158,6 +158,17 @@ pub async fn run_publish(cfg: &PublishConfig) -> Result<PublishOutcome, PublishE
     .map_err(|e| PublishError::Other(anyhow::anyhow!("{e}")))?;
     let pack_bytes = std::fs::read(&staging_pack).map_err(io_err)?;
 
+    // `build_pack_with_key` may have persisted freshly-computed sha256 digests
+    // back into the project's describe.json on disk (`fill_self_contained_hashes`
+    // in dev/packer/mod.rs) — real, wanted behavior for `gtdx dev` / a real
+    // `gtdx publish`. But `--dry-run` is documented as "skip registry write" and
+    // must not leave the working tree dirty either: restore describe.json to
+    // exactly the bytes it had before this run so a dry run never mutates the
+    // project. The pack + reported sha256 above are still computed for real.
+    if cfg.dry_run {
+        std::fs::write(&describe_path, &describe_bytes).map_err(io_err)?;
+    }
+
     // The pack's describe.json is now authoritative (bound + signed); use it for
     // the registry metadata so the two match exactly.
     describe = serde_json::from_slice(&info.describe_bytes)

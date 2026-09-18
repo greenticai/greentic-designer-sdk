@@ -7,7 +7,9 @@ use greentic_extension_sdk_registry::storage::Storage;
 use greentic_extension_sdk_registry::update::{UpdateStatus, check_updates, upgrade};
 use greentic_extension_sdk_state::ExtensionState;
 
-use super::{ALL_KINDS, scan_installed};
+use greentic_extension_sdk_contract::ExtensionKind;
+
+use super::scan_installed;
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
@@ -31,7 +33,7 @@ pub async fn run(args: Args, home: &Path) -> anyhow::Result<()> {
 
     let cfg = super::load_config(home)?;
     let storage = Storage::new(home);
-    let installed = scan_installed(&storage, &ALL_KINDS)?;
+    let installed = scan_installed(&storage, &ExtensionKind::ALL)?;
 
     if installed.is_empty() {
         println!("Nothing to update: no extensions installed.");

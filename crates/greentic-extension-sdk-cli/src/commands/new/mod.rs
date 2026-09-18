@@ -1,3 +1,5 @@
+mod capabilities;
+mod view_addon;
 mod wizard;
 
 use std::{
@@ -9,6 +11,7 @@ use std::{
 };
 
 use clap::Args as ClapArgs;
+use greentic_extension_sdk_contract::extension_id::validate_extension_id;
 
 use crate::scaffold::{
     Kind,
@@ -91,10 +94,171 @@ pub struct Args {
     #[arg(long, value_name = "SPEC")]
     pub from_openapi: Option<PathBuf>,
 
+    // --- runtime limits -----------------------------------------------------
+    /// Memory ceiling for the extension's components (`runtime.memoryLimitMB`),
+    /// 1..=1024. Omitted, the scaffold keeps the contract default of 64.
+    #[arg(long, value_name = "MB", help_heading = "Capabilities")]
+    pub memory_mb: Option<u32>,
+
+    // --- host permissions ---------------------------------------------------
+    /// URL pattern the guest may reach, e.g. `https://api.acme.com/*`. Repeat
+    /// for more. https only; plain http is accepted for loopback hosts only.
+    #[arg(long, value_name = "PATTERN", help_heading = "Capabilities")]
+    pub permit_network: Vec<String>,
+
+    /// Secret read *grant* the guest may use — `*`, a `secret://…/` URI, or a
+    /// path prefix ending in `/`. Repeat for more. Credential field names an
+    /// operator supplies belong in `requiredSecrets`, not here.
+    #[arg(long, value_name = "GRANT", help_heading = "Capabilities")]
+    pub permit_secret: Vec<String>,
+
+    /// Extension kind this extension may call into (`runtime.permissions.
+    /// callExtensionKinds`), e.g. `ProviderExtension`. Repeat for more.
+    #[arg(long, value_name = "KIND", help_heading = "Capabilities")]
+    pub permit_call_kind: Vec<String>,
+
+    /// LLM role the extension may request from the host `llm` import, e.g.
+    /// `sorla_composer`. Repeat for more.
+    #[arg(long, value_name = "ROLE", help_heading = "Capabilities")]
+    pub permit_llm_role: Vec<String>,
+
+    /// OAuth provider id the extension may request tokens for, e.g. `hubspot`.
+    /// Repeat for more.
+    #[arg(long, value_name = "PROVIDER", help_heading = "Capabilities")]
+    pub permit_oauth: Vec<String>,
+
+    // --- capability contracts ----------------------------------------------
+    /// Capability contract this extension provides, as `<id>@<exact-version>`
+    /// (e.g. `greentic:guardrail/topic@1.0.0`). Repeat for more.
+    #[arg(long, value_name = "ID@VERSION", help_heading = "Capabilities")]
+    pub offer_capability: Vec<String>,
+
+    /// Capability contract this extension needs, as `<id>@<version-req>`
+    /// (e.g. `greentic:llm/chat@^1`). Repeat for more.
+    #[arg(long, value_name = "ID@REQ", help_heading = "Capabilities")]
+    pub require_capability: Vec<String>,
+
+    // --- contributed view ---------------------------------------------------
+    /// Scaffold an example contributed view (a UI page) alongside the extension.
+    #[arg(long, default_value_t = false, help_heading = "Capabilities")]
+    pub with_view: bool,
+
+    /// Id of the scaffolded view. Requires `--with-view`. Default: `hello`.
+    #[arg(long, value_name = "ID", help_heading = "Capabilities")]
+    pub view_id: Option<String>,
+
+    /// Host application the view targets. Requires `--with-view`.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "SURFACE",
+        default_value_t,
+        help_heading = "Capabilities"
+    )]
+    pub view_surface: capabilities::ViewSurfaceArg,
+
+    /// Placement slot for the view. Requires `--with-view`. Default:
+    /// `designer.sidebar` / `admin.sidebar`, following `--view-surface`.
+    #[arg(long, value_name = "SLOT", help_heading = "Capabilities")]
+    pub view_slot: Option<String>,
+
+    /// Literal title shown when the view's `title_key` has no translation.
+    /// Requires `--with-view`. Defaults to the view id, humanised.
+    #[arg(long, value_name = "TEXT", help_heading = "Capabilities")]
+    pub view_title: Option<String>,
+
+    /// Floor on who may see the view. Requires `--with-view`.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "VISIBILITY",
+        default_value_t,
+        help_heading = "Capabilities"
+    )]
+    pub view_min_visibility: capabilities::ViewVisibilityArg,
+
+    /// Host the view may reach through the host's server-side proxy
+    /// (`permissions.ui.fetchHosts`). Requires `--with-view`. Repeat for more.
+    #[arg(long, value_name = "PATTERN", help_heading = "Capabilities")]
+    pub view_fetch_host: Vec<String>,
+
+    /// Platform REST endpoint the view may call through the bridge, as
+    /// `"<METHOD> <path-pattern>"` (e.g. `"GET /api/flows"`). Requires
+    /// `--with-view`. Repeat for more.
+    #[arg(long, value_name = "METHOD PATH", help_heading = "Capabilities")]
+    pub view_api: Vec<String>,
+
+    // --- tool surfaces ------------------------------------------------------
+    /// Runtime context a contributed tool may be invoked from. Repeat to
+    /// declare both. Only valid for a kind that contributes tools.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "SURFACE",
+        help_heading = "Capabilities"
+    )]
+    pub tool_capability: Vec<capabilities::ToolSurfaceArg>,
+
+    // --- icon + catalogue metadata ------------------------------------------
     /// Path to an icon file (svg/png/jpg/webp, <= 1 MiB) to attach as the
     /// extension's `metadata.icon`. Copied into the scaffold's `assets/` dir.
-    #[arg(long)]
+    #[arg(long, value_name = "PATH", help_heading = "Capabilities")]
     pub icon: Option<PathBuf>,
+
+    /// One-line summary shown in catalogue listings (`metadata.summary`).
+    #[arg(long, value_name = "TEXT", help_heading = "Capabilities")]
+    pub summary: Option<String>,
+
+    /// Long-form description (`metadata.description`).
+    #[arg(long, value_name = "TEXT", help_heading = "Capabilities")]
+    pub description: Option<String>,
+
+    /// Project homepage URL (`metadata.homepage`).
+    #[arg(long, value_name = "URL", help_heading = "Capabilities")]
+    pub homepage: Option<String>,
+
+    /// Source repository URL (`metadata.repository`).
+    #[arg(long, value_name = "URL", help_heading = "Capabilities")]
+    pub repository: Option<String>,
+
+    /// Catalogue keyword (`metadata.keywords`). Repeat for more.
+    #[arg(long, value_name = "KEYWORD", help_heading = "Capabilities")]
+    pub keyword: Vec<String>,
+}
+
+impl Args {
+    /// The capability inputs exactly as the command line supplied them.
+    ///
+    /// Both resolution paths start here: the flag path validates this as-is,
+    /// and the wizard uses it for prompt defaults before overriding what the
+    /// author changes. One constructor means the two cannot drift into
+    /// carrying different fields.
+    fn raw_capabilities(&self) -> capabilities::RawCapabilities {
+        capabilities::RawCapabilities {
+            memory_mb: self.memory_mb,
+            network: self.permit_network.clone(),
+            secrets: self.permit_secret.clone(),
+            call_extension_kinds: self.permit_call_kind.clone(),
+            llm_roles: self.permit_llm_role.clone(),
+            oauth_providers: self.permit_oauth.clone(),
+            offered: self.offer_capability.clone(),
+            required: self.require_capability.clone(),
+            tool_surfaces: self.tool_capability.clone(),
+            summary: self.summary.clone(),
+            description: self.description.clone(),
+            homepage: self.homepage.clone(),
+            repository: self.repository.clone(),
+            keywords: self.keyword.clone(),
+            with_view: self.with_view,
+            view_id: self.view_id.clone(),
+            view_surface: self.view_surface,
+            view_slot: self.view_slot.clone(),
+            view_title: self.view_title.clone(),
+            view_min_visibility: self.view_min_visibility,
+            view_fetch_hosts: self.view_fetch_host.clone(),
+            view_apis: self.view_api.clone(),
+        }
+    }
 }
 
 /// Fully-resolved scaffold inputs, produced either from CLI flags
@@ -114,6 +278,36 @@ pub(super) struct Resolved {
     component_ref: Option<String>,
     /// `OpenAPI` spec path for `--kind mcp` seeded scaffolds.
     from_openapi: Option<PathBuf>,
+    /// Icon to copy into `assets/` and record as `metadata.icon`.
+    ///
+    /// Held here rather than read straight off `Args` in `run`, so the wizard
+    /// can set it — while it lived only on `Args` the interactive path had no
+    /// way to reach the field at all.
+    icon: Option<PathBuf>,
+    /// Validated capability, permission and catalogue-metadata declarations.
+    capabilities: capabilities::CapabilitySpec,
+    /// The contributed view, when `--with-view` was asked for. `Some` is what
+    /// drives scaffolding `assets/views/<id>/`, so there is no separate bool
+    /// that could disagree with it.
+    view: Option<capabilities::ViewSpec>,
+    /// Advisory notes from capability resolution, printed before scaffolding.
+    capability_notes: Vec<String>,
+}
+
+/// Pull the digest out of a digest-pinned OCI reference.
+///
+/// `oci://host/ns/name@sha256:<64 lowercase hex>` yields the hex. Anything
+/// else — a tag-only ref, a different algorithm, a truncated or uppercase
+/// digest — yields `None`, because writing a digest the reference did not
+/// actually pin would be worse than the placeholder it replaces. Lowercase
+/// only, matching the v2 schema pattern and the `Sha256` newtype.
+fn oci_ref_digest(reference: &str) -> Option<&str> {
+    let (_, digest) = reference.rsplit_once("@sha256:")?;
+    let well_formed = digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    well_formed.then_some(digest)
 }
 
 pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
@@ -125,21 +319,26 @@ pub fn run(args: &Args, _home: &Path) -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from(&resolved.name));
 
     validate_from_openapi(resolved.kind, resolved.from_openapi.as_deref())?;
+    validate_with_view(resolved.kind, resolved.view.is_some())?;
+
+    for note in &resolved.capability_notes {
+        println!("  ! {note}");
+    }
 
     run_preflight(&target, resolved.force)?;
     prepare_target(&target, resolved.force)?;
 
-    let ctx = build_context(&resolved);
+    let mut ctx = build_context(&resolved);
 
     let files_written = if let Some(spec) = resolved.from_openapi.as_deref() {
-        scaffold_from_openapi(&ctx, spec, &target)?
+        scaffold_from_openapi(&ctx, &resolved, spec, &target)?
     } else {
-        let mut n = render_templates(&ctx, resolved.kind.as_str(), &target)?;
+        let mut n = render_templates(&mut ctx, &resolved, &target)?;
         n += write_wit_and_lock(resolved.kind.as_str(), &target)?;
         n
     };
 
-    if let Some(icon) = args.icon.as_deref() {
+    if let Some(icon) = resolved.icon.as_deref() {
         let rel = crate::icon::apply_icon(&target, icon)?;
         println!("  icon: {rel}");
     }
@@ -177,8 +376,23 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
     })?;
     let id = args.id.clone().unwrap_or_else(|| default_id(&name));
     let author = args.author.clone().unwrap_or_else(detect_git_author);
-    validate_id(&id)?;
+    validate_name(&name)?;
+    // A derived id that fails is really a complaint about the project name, and
+    // saying so is the difference between a fixable error and a baffling one:
+    // `provider-3aigent` is a perfectly good crate name, so nothing about
+    // "invalid extension id" points back at what the author typed.
+    validate_id(&id).map_err(|e| {
+        if args.id.is_some() {
+            e
+        } else {
+            e.context(format!(
+                "the id was derived from the project name {name:?}; rename the project \
+                 or pass --id <reverse-dns>"
+            ))
+        }
+    })?;
     validate_version(&args.version)?;
+    let caps = capabilities::resolve(&args.raw_capabilities())?;
     Ok(Resolved {
         name,
         kind: args.kind,
@@ -193,6 +407,10 @@ fn resolve_from_flags(args: &Args) -> anyhow::Result<Resolved> {
         label: args.label.clone(),
         component_ref: args.component_ref.clone(),
         from_openapi: args.from_openapi.clone(),
+        icon: args.icon.clone(),
+        capabilities: caps.spec,
+        view: caps.view,
+        capability_notes: caps.notes,
     })
 }
 
@@ -286,15 +504,19 @@ fn build_context(resolved: &Resolved) -> Context {
     // emit `"oci_ref": ""`, which deserializes fine and resolves to nothing at
     // compile time. `example.invalid` is reserved by RFC 2606, so a scaffold
     // that reaches a registry fails loudly instead of hitting a real host.
-    ctx.set(
-        "component_ref",
-        resolved.component_ref.clone().unwrap_or_else(|| {
-            format!(
-                "oci://example.invalid/REPLACE-ME/{node_type_id}@sha256:{}",
-                "0".repeat(64)
-            )
-        }),
-    );
+    let placeholder_digest = "0".repeat(64);
+    let component_ref = resolved.component_ref.clone().unwrap_or_else(|| {
+        format!("oci://example.invalid/REPLACE-ME/{node_type_id}@sha256:{placeholder_digest}")
+    });
+    // The reference is digest-pinned, so the node component's `sha256` is
+    // already known here — reading it back out of the ref is the difference
+    // between a scaffold that passes `gtdx lint --publish` and one that trips
+    // `E_SHA256_ZERO` despite the author having supplied everything asked of
+    // them. A ref without a usable digest keeps the placeholder, and that
+    // refusal is the documented behaviour rather than something to paper over.
+    let component_digest = oci_ref_digest(&component_ref).unwrap_or(&placeholder_digest);
+    ctx.set("component_digest", component_digest);
+    ctx.set("component_ref", component_ref.clone());
     ctx.set("label", &label);
     let id = resolved.id.as_str();
     ctx.set("id", id);
@@ -344,7 +566,12 @@ fn build_context(resolved: &Resolved) -> Context {
     ctx
 }
 
-fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::Result<usize> {
+fn scaffold_from_openapi(
+    ctx: &Context,
+    resolved: &Resolved,
+    spec: &Path,
+    target: &Path,
+) -> anyhow::Result<usize> {
     use crate::scaffold::openapi;
 
     let bin = openapi::resolve_mcp_gen()?;
@@ -358,6 +585,18 @@ fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::R
         .ok_or_else(|| anyhow::anyhow!("mcp describe.json template missing"))?;
     let rendered = ctx.render(std::str::from_utf8(describe_tmpl.src_bytes)?)?;
     let authored = openapi::author_describe_json(&rendered, artifacts.meta.as_deref())?;
+    // The capability flags apply here too. `author_describe_json` has already
+    // filled `runtime.permissions.network` from the spec's `servers` block, and
+    // `capabilities::apply` appends rather than replaces, so a `--permit-network`
+    // on top of a seeded scaffold widens the allowlist instead of erasing it.
+    let authored = if resolved.capabilities.is_empty() {
+        authored
+    } else {
+        let mut describe: serde_json::Value = serde_json::from_str(&authored)
+            .map_err(|e| anyhow::anyhow!("parse authored describe.json: {e}"))?;
+        capabilities::apply(&mut describe, &resolved.capabilities)?;
+        serde_json::to_string_pretty(&describe)? + "\n"
+    };
     template::write_file(&target.join("describe.json"), authored.as_bytes())?;
     files += 1;
 
@@ -382,7 +621,11 @@ fn scaffold_from_openapi(ctx: &Context, spec: &Path, target: &Path) -> anyhow::R
     Ok(files)
 }
 
-fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<usize> {
+fn render_templates(
+    ctx: &mut Context,
+    resolved: &Resolved,
+    target: &Path,
+) -> anyhow::Result<usize> {
     let mut files_written = 0usize;
     for entry in template::load_templates_common() {
         let dst = target.join(&entry.dst_rel);
@@ -390,11 +633,56 @@ fn render_templates(ctx: &Context, kind: &str, target: &Path) -> anyhow::Result<
         template::write_file(&dst, rendered.as_bytes())?;
         files_written += 1;
     }
-    for entry in template::load_templates_kind(kind) {
+    for entry in template::load_templates_kind(resolved.kind.as_str()) {
         let dst = target.join(&entry.dst_rel);
         let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;
         template::write_file(&dst, rendered.as_bytes())?;
         files_written += 1;
+    }
+
+    // The describe is read, patched and written once — and only when there is
+    // something to patch, so an unconfigured scaffold keeps the template's own
+    // bytes rather than a round-trip through serde_json.
+    //
+    // The view patch in particular must land *before* the view-addon templates
+    // render: the example page's `{{view_tool}}` placeholder needs the tool
+    // name this kind actually contributes (or none), and that is only known
+    // once `contributions.tools` has been inspected.
+    let mut chosen_tool = None;
+    if !resolved.capabilities.is_empty() || resolved.view.is_some() {
+        let describe_path = target.join("describe.json");
+        let current = std::fs::read_to_string(&describe_path)
+            .map_err(|e| anyhow::anyhow!("read {}: {e}", describe_path.display()))?;
+        let mut describe: serde_json::Value = serde_json::from_str(&current)
+            .map_err(|e| anyhow::anyhow!("parse rendered {}: {e}", describe_path.display()))?;
+
+        capabilities::apply(&mut describe, &resolved.capabilities)?;
+        if let Some(view) = &resolved.view {
+            chosen_tool = view_addon::add_view_to_describe(&mut describe, view)?;
+        }
+        template::write_file(
+            &describe_path,
+            (serde_json::to_string_pretty(&describe)? + "\n").as_bytes(),
+        )?;
+    }
+
+    if let Some(view) = &resolved.view {
+        let (tool_name, tool_args) = match chosen_tool {
+            Some(tool) => (tool.name, tool.args),
+            None => (String::new(), serde_json::json!({})),
+        };
+        ctx.set("view_tool", tool_name);
+        ctx.set(
+            "view_tool_args",
+            serde_json::to_string(&tool_args)
+                .map_err(|e| anyhow::anyhow!("serialize placeholder tool args: {e}"))?,
+        );
+        for entry in template::load_templates_view_addon(&view.id) {
+            let dst = target.join(&entry.dst_rel);
+            let rendered = ctx.render(std::str::from_utf8(entry.src_bytes)?)?;
+            template::write_file(&dst, rendered.as_bytes())?;
+            files_written += 1;
+        }
     }
     Ok(files_written)
 }
@@ -495,44 +783,89 @@ fn detect_git_author() -> String {
 
 /// The `metadata.id` a scaffold gets when the author passes no `--id`.
 ///
-/// Deliberately under the `greentic.` namespace. `gtdx lint`'s `E_ID_PATTERN`
-/// requires `^greentic\.[a-z0-9][a-z0-9-]*$`, so any other default ships a
-/// scaffold that fails the linter shipped beside it — which is exactly what
-/// `com.example.<name>` did for every kind, on an untouched `gtdx new`.
+/// `greentic.` is a default, not a requirement — `E_ID_PATTERN` accepts any
+/// reverse-DNS namespace. It stays the default because a scaffold has no way to
+/// know which namespace its author owns, and `com.example.<name>` (the previous
+/// default) shipped a placeholder namespace nobody controls.
 ///
-/// `validate_id` already constrains each reverse-DNS segment to
-/// `^[a-z][a-z0-9-]*$`, so a name that scaffolds at all is lint-clean here.
+/// A name that scaffolds at all is `<lowercase-kebab>`, and the id rule allows a
+/// later segment to start with a digit, so `greentic.<name>` is always valid
+/// here — including `greentic.3aigent-designer`, which the old rule rejected.
 pub(crate) fn default_id(name: &str) -> String {
     format!("greentic.{name}")
 }
 
-fn validate_id(id: &str) -> anyhow::Result<()> {
-    if !is_reverse_dns(id) {
-        anyhow::bail!("id must match reverse-DNS (got {id:?})");
+/// What a project name must match once its dots are folded to dashes.
+const PROJECT_NAME_PATTERN: &str = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
+
+/// The project name must be a valid cargo package name.
+///
+/// It is spent as `[package] name`, with `.` folded to `-` the way
+/// `build_context` derives `name_cargo`, so cargo's rules are the ones that
+/// bind here — not WIT's, which apply to the id instead (see
+/// [`greentic_extension_sdk_contract::extension_id`]). The two differ in
+/// exactly one place that matters: cargo allows a digit-led word after the
+/// first (`provider-3aigent` is a fine crate), WIT does not.
+///
+/// Checked here rather than left to the build, because cargo's own refusal
+/// (`invalid character `3` in package name`) arrives only once the author runs
+/// `gtdx build`, from a file they did not write.
+///
+/// # Errors
+///
+/// Returns an error naming the offending part when `name` would not be a valid
+/// cargo package name.
+pub(super) fn validate_name(name: &str) -> anyhow::Result<()> {
+    let cargo_name = name.replace('.', "-");
+    let fail = |why: String| -> anyhow::Result<()> {
+        anyhow::bail!(
+            "project name {name:?} is invalid: {why}. It becomes the cargo package \
+             name {cargo_name:?}, so it must match {PROJECT_NAME_PATTERN}"
+        )
+    };
+
+    if cargo_name.is_empty() {
+        return fail("it is empty".to_string());
+    }
+    for (index, word) in cargo_name.split('-').enumerate() {
+        let mut chars = word.chars();
+        let Some(first) = chars.next() else {
+            return fail(
+                "it has an empty word — '-' and '.' must each sit between two words, so no                  leading, trailing or doubled separator"
+                    .to_string(),
+            );
+        };
+        // Only the very first character is barred from being a digit; cargo is
+        // happy with `provider-3aigent`.
+        if index == 0 && !first.is_ascii_lowercase() {
+            return fail(if first.is_ascii_digit() {
+                format!(
+                    "it starts with {first:?} — a cargo package name may not start with a digit"
+                )
+            } else {
+                format!("it starts with {first:?} — it must start with a lowercase letter a-z")
+            });
+        }
+        if let Some(ch) = word
+            .chars()
+            .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit()))
+        {
+            return fail(if ch.is_whitespace() {
+                format!("the word {word:?} contains whitespace")
+            } else if ch == '_' {
+                format!("the word {word:?} contains {ch:?} — use '-' instead of '_'")
+            } else {
+                format!(
+                    "the word {word:?} contains {ch:?} — only lowercase letters a-z, digits                      0-9, '-' and '.' are allowed"
+                )
+            });
+        }
     }
     Ok(())
 }
 
-pub(super) fn is_reverse_dns(id: &str) -> bool {
-    // Reverse-DNS: [a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+
-    let parts: Vec<&str> = id.split('.').collect();
-    if parts.len() < 2 {
-        return false;
-    }
-    for p in parts {
-        if p.is_empty() {
-            return false;
-        }
-        let mut chars = p.chars();
-        let first = chars.next().unwrap();
-        if !first.is_ascii_lowercase() {
-            return false;
-        }
-        if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-            return false;
-        }
-    }
-    true
+fn validate_id(id: &str) -> anyhow::Result<()> {
+    validate_extension_id(id).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn validate_version(version: &str) -> anyhow::Result<()> {
@@ -544,6 +877,18 @@ fn validate_version(version: &str) -> anyhow::Result<()> {
 fn validate_from_openapi(kind: Kind, from_openapi: Option<&Path>) -> anyhow::Result<()> {
     if from_openapi.is_some() && kind != Kind::Mcp {
         anyhow::bail!("--from-openapi is only valid with --kind mcp");
+    }
+    Ok(())
+}
+
+/// `mcp` (`wasix:mcp/router`) artifacts carry no `contributions` block at
+/// all, so there is nowhere for `--with-view` to patch a view in.
+fn validate_with_view(kind: Kind, with_view: bool) -> anyhow::Result<()> {
+    if with_view && kind == Kind::Mcp {
+        anyhow::bail!(
+            "--with-view is not valid with --kind mcp: `wasix:mcp/router` artifacts \
+             carry no contributions block at all"
+        );
     }
     Ok(())
 }
@@ -636,6 +981,41 @@ fn print_checks(checks: &[Check]) {
             Check::Pass { name, detail } => println!("  ✓ {name}: {detail}"),
             Check::Warn { name, hint } => println!("  ! {name}: {hint}"),
             Check::Fail { name, hint } => eprintln!("  ✗ {name}: {hint}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::oci_ref_digest;
+
+    const HEX: &str = "461c6a68b1c0d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccdd";
+
+    #[test]
+    fn extracts_a_pinned_digest() {
+        assert_eq!(
+            oci_ref_digest(&format!("oci://ghcr.io/org/component-x@sha256:{HEX}")),
+            Some(HEX)
+        );
+    }
+
+    #[test]
+    fn rejects_references_that_pin_nothing_usable() {
+        // A tag is not a digest, a different algorithm is not sha256, and a
+        // truncated or uppercase hex string would not survive schema
+        // validation — each must fall back to the placeholder rather than be
+        // written out as if the reference had pinned it.
+        for reference in [
+            "oci://ghcr.io/org/component-x:1.2.3",
+            "oci://ghcr.io/org/component-x",
+            &format!("oci://ghcr.io/org/component-x@sha512:{HEX}"),
+            &format!("oci://ghcr.io/org/component-x@sha256:{}", &HEX[..40]),
+            &format!(
+                "oci://ghcr.io/org/component-x@sha256:{}",
+                HEX.to_uppercase()
+            ),
+        ] {
+            assert_eq!(oci_ref_digest(reference), None, "should reject {reference}");
         }
     }
 }

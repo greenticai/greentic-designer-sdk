@@ -669,3 +669,217 @@ fn provider_pack_handles_absent_gtpack_field() {
     );
     let _ = info;
 }
+
+/// A scaffold-shaped project: one self-contained component whose `gtpack.file`
+/// is the wasm the build itself produces, with the all-zero digests
+/// `gtdx new` writes because the wasm does not exist yet.
+fn make_self_contained_project(root: &Path) -> PathBuf {
+    let desc = br#"{
+  "apiVersion": "greentic.ai/v2",
+  "kind": "DesignExtension",
+  "compat": {"min_designer_version": ">=1.2.0", "min_runner_version": "^0.12.0", "contract_version": "1.2.4-research"},
+  "metadata": {"id": "greentic.demo", "name": "demo", "version": "0.1.0", "summary": "x", "author": {"name": "a"}, "license": "Apache-2.0"},
+  "capabilities": {"offered": [], "required": []},
+  "runtime": {"components": {"demo": {"gtpack": {"file": "extension.wasm", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "pack_id": "greentic.demo", "component_version": "0.1.0"}, "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "world": "greentic:demo/extension@1.0.0"}}, "permissions": {"network": [], "secrets": [], "callExtensionKinds": []}},
+  "contributions": {}
+}"#;
+    std::fs::write(root.join("describe.json"), desc).unwrap();
+    let wasm_dir = root.join("target/wasm32-wasip2/debug");
+    std::fs::create_dir_all(&wasm_dir).unwrap();
+    let wasm = wasm_dir.join("demo.wasm");
+    std::fs::write(&wasm, b"\0asm\x01\x00\x00\x00payload").unwrap();
+    wasm
+}
+
+/// Read `describe.json` back out of a built pack — the bytes a consumer sees.
+fn describe_from_pack(pack: &Path) -> serde_json::Value {
+    use std::io::Read as _;
+    let file = File::open(pack).unwrap();
+    let mut zip = zip::ZipArchive::new(file).unwrap();
+    let mut entry = zip.by_name("describe.json").unwrap();
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf).unwrap();
+    serde_json::from_slice(&buf).unwrap()
+}
+
+#[test]
+fn build_pack_fills_self_contained_component_hashes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_self_contained_project(tmp.path());
+    let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    let expected = sha256_hex(&std::fs::read(&wasm).unwrap());
+    let shipped = describe_from_pack(&out);
+    let comp = &shipped["runtime"]["components"]["demo"];
+    assert_eq!(comp["sha256"].as_str().unwrap(), expected);
+    assert_eq!(comp["gtpack"]["sha256"].as_str().unwrap(), expected);
+}
+
+#[test]
+fn build_pack_fills_hashes_on_disk_describe_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_self_contained_project(tmp.path());
+    let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    // `gtdx lint --publish` reads the project's describe.json, not the pack,
+    // so the placeholders have to clear there as well or E_SHA256_ZERO keeps
+    // firing after a successful publish.
+    let on_disk: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(tmp.path().join("describe.json")).unwrap()).unwrap();
+    let expected = sha256_hex(&std::fs::read(&wasm).unwrap());
+    assert_eq!(
+        on_disk["runtime"]["components"]["demo"]["sha256"]
+            .as_str()
+            .unwrap(),
+        expected
+    );
+    assert_eq!(
+        on_disk["runtime"]["components"]["demo"]["gtpack"]["sha256"]
+            .as_str()
+            .unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn build_pack_leaves_externally_supplied_hashes_alone() {
+    // The `stub` component is OCI-referenced: its digest describes an artifact
+    // this build never produced, so filling it would be a lie.
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_project(tmp.path());
+    let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    let shipped = describe_from_pack(&out);
+    assert_eq!(
+        shipped["runtime"]["components"]["stub"]["sha256"]
+            .as_str()
+            .unwrap(),
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+}
+
+#[test]
+fn signed_self_contained_pack_still_verifies_with_filled_hashes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_self_contained_project(tmp.path());
+    let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+    let sk = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+
+    let info = build_pack_with_key(tmp.path(), &wasm, &out, Some(&sk)).unwrap();
+    let zip_bytes = std::fs::read(&out).unwrap();
+    let manifest_bytes = read_manifest_from_zip(&zip_bytes).unwrap();
+    let describe: DescribeJson = serde_json::from_slice(&info.describe_bytes).unwrap();
+
+    // Hashes are filled before signing, so the signature must cover them.
+    greentic_extension_sdk_contract::verify_archive_against_manifest(&zip_bytes).unwrap();
+    greentic_extension_sdk_contract::verify_manifest_binding(&describe, &manifest_bytes).unwrap();
+    greentic_extension_sdk_contract::verify_describe_with_key(&describe, &sk.verifying_key())
+        .unwrap();
+}
+
+#[test]
+fn filling_already_correct_hashes_reports_no_change() {
+    // `describe.json` is a watched path, so a write during `gtdx dev` queues
+    // another rebuild. Reporting "unchanged" once the digests are already right
+    // is what makes the watch loop settle instead of rebuilding forever.
+    let mut describe = serde_json::json!({
+        "runtime": {"components": {"demo": {
+            "gtpack": {"file": "extension.wasm", "sha256": "ab".repeat(32)},
+            "sha256": "ab".repeat(32)
+        }}}
+    });
+    assert!(!fill_self_contained_hashes(&mut describe, &"ab".repeat(32)));
+    assert!(fill_self_contained_hashes(&mut describe, &"cd".repeat(32)));
+}
+
+#[test]
+fn rebuilding_identical_wasm_leaves_describe_untouched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_self_contained_project(tmp.path());
+    let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+    let describe_path = tmp.path().join("describe.json");
+
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+    let after_first = std::fs::metadata(&describe_path)
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    // Same source, same wasm — the second pack must not touch describe.json, or
+    // every `gtdx dev` rebuild would trip the watcher into one more rebuild.
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+    let after_second = std::fs::metadata(&describe_path)
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    assert_eq!(after_first, after_second);
+}
+
+/// The packer already walks `assets/` and `manifest.json` already records a
+/// sha256 for every entry, which is why contributed views need no packer
+/// change at all. Nothing pinned that until now. If someone narrows the asset
+/// walk later, this fails here instead of every published view silently losing
+/// its HTML somewhere downstream.
+#[test]
+fn view_assets_round_trip_into_the_pack_and_the_manifest() {
+    use std::io::Read as _;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let wasm = make_project(tmp.path());
+
+    let view_dir = tmp.path().join("assets/views/hello");
+    std::fs::create_dir_all(&view_dir).unwrap();
+    let html: &[u8] = b"<!doctype html><h1>hi</h1>\n";
+    std::fs::write(view_dir.join("index.html"), html).unwrap();
+    std::fs::write(view_dir.join("app.js"), b"console.log(1);\n").unwrap();
+
+    let out = tmp.path().join("dist/demo-0.1.0.gtxpack");
+    build_pack(tmp.path(), &wasm, &out).unwrap();
+
+    let zip_bytes = std::fs::read(&out).unwrap();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).unwrap();
+
+    let names: Vec<String> = (0..zip.len())
+        .map(|i| zip.by_index(i).unwrap().name().to_string())
+        .collect();
+    for expected in ["assets/views/hello/index.html", "assets/views/hello/app.js"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "{expected} must be in the pack, got {names:?}"
+        );
+    }
+
+    let mut packed = Vec::new();
+    zip.by_name("assets/views/hello/index.html")
+        .unwrap()
+        .read_to_end(&mut packed)
+        .unwrap();
+    assert_eq!(
+        packed, html,
+        "asset bytes must round-trip unmodified — the host verifies them \
+         against the manifest sha256 before serving"
+    );
+
+    let mut manifest_bytes = Vec::new();
+    zip.by_name("manifest.json")
+        .unwrap()
+        .read_to_end(&mut manifest_bytes)
+        .unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+    let entries = manifest["entries"].as_array().unwrap();
+    for expected in ["assets/views/hello/index.html", "assets/views/hello/app.js"] {
+        let row = entries
+            .iter()
+            .find(|e| e["path"] == expected)
+            .unwrap_or_else(|| panic!("{expected} missing from manifest.json"));
+        let sha = row["sha256"].as_str().unwrap();
+        assert_eq!(sha.len(), 64, "sha256 must be 64 hex chars, got {sha:?}");
+    }
+}

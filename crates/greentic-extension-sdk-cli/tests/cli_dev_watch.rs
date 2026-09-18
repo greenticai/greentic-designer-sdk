@@ -8,6 +8,7 @@
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 fn gtdx_bin() -> PathBuf {
@@ -58,20 +59,30 @@ fn dev_watch_rebuilds_and_reinstalls_on_source_edit() {
         .spawn()
         .unwrap();
 
+    // Drain stdout for the whole run. Reading only until "ready." leaves the
+    // pipe undrained, and the child then blocks on a full pipe part-way
+    // through a build — which looks exactly like "the rebuild never happened".
     let stdout = child.stdout.take().unwrap();
-    let reader = BufReader::new(stdout);
+    let seen = Arc::new(Mutex::new(String::new()));
+    let sink = Arc::clone(&seen);
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            eprintln!("child: {line}");
+            if let Ok(mut buf) = sink.lock() {
+                buf.push_str(&line);
+                buf.push('\n');
+            }
+        }
+    });
+
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut saw_ready = false;
-    for line in reader.lines() {
-        let line = line.unwrap_or_default();
-        eprintln!("child: {line}");
-        if line.contains("ready.") {
+    while Instant::now() < deadline {
+        if seen.lock().is_ok_and(|b| b.contains("ready.")) {
             saw_ready = true;
             break;
         }
-        if Instant::now() > deadline {
-            break;
-        }
+        std::thread::sleep(Duration::from_millis(100));
     }
     assert!(saw_ready, "gtdx dev never emitted ready within 30s");
 
@@ -83,8 +94,12 @@ fn dev_watch_rebuilds_and_reinstalls_on_source_edit() {
     // the rebuild should land within 15s (generous)
     std::thread::sleep(Duration::from_secs(15));
 
-    // Storage path uses describe.metadata.id ("com.example.demo"), not name.
-    let installed = home.join("extensions/design/com.example.demo-0.1.0");
+    // Storage path uses describe.metadata.id ("greentic.demo"), not name. The
+    // default id namespace moved from `com.example.` to `greentic.` when the
+    // scaffold stopped emitting an id its own linter rejected (E_ID_PATTERN);
+    // this assertion kept the old path and had been failing ever since —
+    // invisibly, because the whole file is gated behind GTDX_RUN_SMOKE.
+    let installed = home.join("extensions/design/greentic.demo-0.1.0");
     let _ = child.kill();
     let _ = child.wait();
     assert!(
@@ -138,4 +153,73 @@ fn dev_watch_survives_build_failure() {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// `gtdx dev` used to feed itself: a build re-touches `src/bindings.rs`,
+/// `wit/deps/` and `Cargo.toml`, the watcher fired on those, and the next
+/// build did it again — roughly three builds a second on an untouched
+/// scaffold, forever, each reporting "pack sha256 unchanged".
+///
+/// Left alone, the watcher must stay quiet.
+#[test]
+fn dev_watch_does_not_rebuild_itself() {
+    if !gate() {
+        eprintln!("skipped: set GTDX_RUN_SMOKE=1 to enable");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let proj = tmp.path().join("quiet");
+    let home = tmp.path().join("home");
+
+    let status = Command::new(gtdx_bin())
+        .arg("new")
+        .arg("quiet")
+        .arg("--dir")
+        .arg(&proj)
+        .arg("--author")
+        .arg("tester")
+        .arg("-y")
+        .arg("--no-git")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let mut child = Command::new(gtdx_bin())
+        .env("GREENTIC_HOME", &home)
+        .arg("dev")
+        .arg("--watch")
+        .arg("--manifest")
+        .arg(proj.join("Cargo.toml"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    // Count builds while it runs, not from the pipe afterwards: a regressed
+    // watcher floods stdout, blocks on a full pipe, and would then report
+    // *fewer* builds than it performed — this test has to fail closed.
+    let stdout = child.stdout.take().unwrap();
+    let builds = Arc::new(Mutex::new(0usize));
+    let counter = Arc::clone(&builds);
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if line.contains("building (")
+                && let Ok(mut n) = counter.lock()
+            {
+                *n += 1;
+            }
+        }
+    });
+
+    // Let it settle, touching nothing.
+    std::thread::sleep(Duration::from_secs(20));
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let builds = *builds.lock().unwrap();
+
+    assert!(
+        builds <= 2,
+        "watcher rebuilt {builds} times without any edit — it is retriggering on its own output"
+    );
 }

@@ -9,7 +9,8 @@ pub mod localization_block;
 pub mod provider;
 
 pub use contributions::{
-    Contributions, DwProvider, Knowledge, NodeType, OutputPort, Prompt, Recipe, Schema, Tool,
+    Contributions, DwProvider, Knowledge, NodeType, OutputPort, Placement, Prompt, Recipe, Schema,
+    Surface, Tool, View, Visibility,
 };
 pub use localization_block::Localization;
 
@@ -155,6 +156,38 @@ impl TryFrom<DescribeJsonRaw> for DescribeJson {
             }
         }
 
+        // View ids namespace to `<extension_id>/<view_id>` on the host, so a
+        // duplicate would make two different pages collide on one route.
+        let mut seen_views = std::collections::BTreeSet::new();
+        for view in &raw.contributions.views {
+            if !seen_views.insert(view.id.as_str()) {
+                return Err(format!(
+                    "contributions.views[] declares duplicate id {:?}",
+                    view.id
+                ));
+            }
+        }
+
+        // A view may only invoke tools this same extension contributes. A
+        // dangling name would fail at the bridge, at runtime, in the browser —
+        // the worst place to discover it.
+        let tool_names: std::collections::BTreeSet<&str> = raw
+            .contributions
+            .tools
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        for view in &raw.contributions.views {
+            for wanted in &view.tools {
+                if !tool_names.contains(wanted.as_str()) {
+                    return Err(format!(
+                        "view {:?} lists tool {:?}, which is not in contributions.tools",
+                        view.id, wanted
+                    ));
+                }
+            }
+        }
+
         Ok(DescribeJson {
             schema_ref: raw.schema_ref,
             api_version: raw.api_version,
@@ -285,6 +318,40 @@ pub struct Permissions {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub oauth_providers: Vec<String>,
+    /// What a contributed `contributions.views[]` page may reach. Absent means
+    /// the extension contributes no view, or contributes one that only renders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<UiPermissions>,
+}
+
+/// Grants that apply to browser-executed view code, not to the WASM guest.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiPermissions {
+    /// Hosts a view may reach through the host's server-side proxy. The view
+    /// never issues these itself: an iframe without `allow-same-origin` sends
+    /// `Origin: null`, which most third-party APIs reject at CORS, and
+    /// proxying keeps any credential on the server. Validated exactly like
+    /// `permissions.network` — https only, loopback and link-local rejected.
+    #[serde(rename = "fetchHosts", default, skip_serializing_if = "Vec::is_empty")]
+    pub fetch_hosts: Vec<String>,
+    /// Platform REST endpoints a view may call through the bridge. The host
+    /// intersects this with the calling user's own RBAC, so the list can only
+    /// ever narrow what that user could already do by hand.
+    #[serde(rename = "platformApi", default, skip_serializing_if = "Vec::is_empty")]
+    pub platform_api: Vec<ApiGrant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApiGrant {
+    /// `GET`, `POST`, `PUT`, `PATCH` or `DELETE`. Constrained by the JSON
+    /// Schema rather than by a Rust enum, so a describe naming a method this
+    /// crate version does not know still round-trips instead of failing the
+    /// whole parse.
+    pub method: String,
+    /// Path pattern, e.g. `/api/flows` or `/api/admin/tenants/*`.
+    pub path_pattern: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

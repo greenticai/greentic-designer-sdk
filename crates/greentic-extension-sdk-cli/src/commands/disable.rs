@@ -7,6 +7,7 @@
 
 use anyhow::{Context, Result};
 use clap::Args;
+use greentic_extension_sdk_contract::ExtensionKind;
 use greentic_extension_sdk_state::ExtensionState;
 use std::path::Path;
 
@@ -38,7 +39,7 @@ fn warn_dependents(home: &Path, target_id: &str) -> Result<()> {
         return Ok(());
     }
 
-    for kind in ["design", "deploy", "bundle", "provider"] {
+    for kind in ExtensionKind::ALL.map(ExtensionKind::dir_name) {
         let kind_dir = home.join("extensions").join(kind);
         if !kind_dir.exists() {
             continue;
@@ -83,7 +84,7 @@ fn read_offered_capabilities(home: &Path, target_id: &str) -> Result<Vec<String>
     if versions.is_empty() {
         return Ok(vec![]);
     }
-    for kind in ["design", "deploy", "bundle", "provider"] {
+    for kind in ExtensionKind::ALL.map(ExtensionKind::dir_name) {
         for v in &versions {
             let path = home
                 .join("extensions")
