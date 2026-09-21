@@ -8,6 +8,7 @@ pub mod digest;
 pub mod error;
 mod extract;
 pub mod hex;
+mod installed_ledger;
 pub mod lifecycle;
 pub mod local;
 pub mod local_publish;

@@ -86,10 +86,60 @@ async fn install_provider_extracts_gtpack_to_providers_gtdx_dir() {
         "describe.json should be in extension dir"
     );
 
-    // The gtpack must NOT remain inside the extension dir.
+    // The gtpack MUST remain inside the extension dir: it is a manifest.json
+    // ledger entry, and the designer refuses to load an install whose ledger
+    // lists a file that is not on disk ("manifest lists missing file:
+    // runtime/provider.gtpack"). Removing it here was partner blocker #7.
+    let kept = ext_dir.join("runtime/provider.gtpack");
     assert!(
-        !ext_dir.join("runtime/provider.gtpack").exists(),
-        "gtpack must not be left in the extensions tree"
+        kept.exists(),
+        "gtpack listed in manifest.json must stay in the extensions tree"
+    );
+    assert_eq!(std::fs::read(&kept).unwrap(), gtpack_bytes);
+}
+
+/// An install left without `runtime/provider.gtpack` (by a gtdx that removed
+/// it) must be repaired by installing the same version again — not answered
+/// with "already installed", and not left half-broken.
+#[test]
+fn reinstalling_the_same_version_repairs_an_install_missing_its_gtpack() {
+    let tmp = TempDir::new().unwrap();
+    let tmp_home = TempDir::new().unwrap();
+
+    let gtpack_bytes = b"fake-gtpack-content".to_vec();
+    let sha = support::sha256_hex(&gtpack_bytes);
+    let gtxpack_path = support::build_provider_fixture_gtxpack(
+        tmp.path(),
+        "greentic.provider.fixture",
+        "0.1.0",
+        &gtpack_bytes,
+        &sha,
+    )
+    .unwrap();
+    let artifact = load_artifact_from_gtxpack(&gtxpack_path, "greentic.provider.fixture", "0.1.0");
+
+    let storage = Storage::new(tmp_home.path());
+    let reg = LocalFilesystemRegistry::new("local", tmp.path());
+    let installer = Installer::new(storage, &reg);
+    let opts = InstallOptions {
+        trust_policy: TrustPolicy::Loose,
+        accept_permissions: true,
+        force: false,
+    };
+    installer.install_artifact(&artifact, opts).unwrap();
+
+    // Reproduce the broken state an older gtdx left behind.
+    let ext_dir = tmp_home
+        .path()
+        .join("extensions/provider/greentic.provider.fixture-0.1.0");
+    std::fs::remove_file(ext_dir.join("runtime/provider.gtpack")).unwrap();
+
+    installer.install_artifact(&artifact, opts).unwrap();
+
+    assert_eq!(
+        std::fs::read(ext_dir.join("runtime/provider.gtpack")).unwrap(),
+        gtpack_bytes,
+        "re-install must restore the manifest-listed gtpack"
     );
 }
 

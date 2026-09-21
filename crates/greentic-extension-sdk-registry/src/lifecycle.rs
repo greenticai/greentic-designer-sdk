@@ -131,19 +131,25 @@ impl<'a, R: ExtensionRegistry + ?Sized> Installer<'a, R> {
             }
         }
 
-        if let Err(e) = self.storage.commit_install(&staging, &final_dir) {
+        // Refuse to commit a tree missing any file its own `manifest.json`
+        // lists: the designer's runtime stats every ledger path and will not
+        // load such an install, so reporting success here would hand the
+        // operator an extension that can never run.
+        let committed = crate::installed_ledger::verify_staged_tree(&staging)
+            .and_then(|()| self.storage.commit_install(&staging, &final_dir));
+        if let Err(e) = committed {
             // Roll back the provider gtpack copied into the gtdx dir so a failed
-            // commit does not leave a half-installed provider behind.
+            // install does not leave a half-installed provider behind.
             self.storage.abort_install(&staging);
             if let Some(dest) = provider_gtpack_dest
                 && let Err(cleanup_err) = std::fs::remove_file(&dest)
             {
-                // Don't mask the commit error, but never fail silently: an
+                // Don't mask the install error, but never fail silently: an
                 // orphaned gtpack accumulates across repeated failed installs.
                 tracing::warn!(
                     path = %dest.display(),
                     error = %cleanup_err,
-                    "failed to remove provider gtpack while rolling back a failed commit"
+                    "failed to remove provider gtpack while rolling back a failed install"
                 );
             }
             return Err(e);

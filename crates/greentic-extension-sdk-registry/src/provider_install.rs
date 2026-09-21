@@ -3,6 +3,13 @@
 //! After the `.gtxpack` archive is extracted to a staging directory, this
 //! module verifies the embedded `.gtpack` file and copies it to the runner's
 //! provider pack directory before the staging tree is committed.
+//!
+//! The staged `.gtpack` is deliberately LEFT in the extension tree. It is an
+//! entry of the archive's `manifest.json` ledger, and the designer's runtime
+//! stats every ledger path in the installed directory before it loads an
+//! extension — an install missing it is refused with "manifest lists missing
+//! file: runtime/provider.gtpack". Removing it here is what made every
+//! provider extension installed through gtdx unloadable by the designer.
 
 use std::io::Read as _;
 use std::path::Path;
@@ -36,8 +43,10 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 /// 2. Read the staged `.gtpack` bytes and verify the SHA-256 digest.
 /// 3. Conflict-check against packs in `storage_root/runtime/packs/providers/manual/`.
 /// 4. Copy verified bytes to `storage_root/runtime/packs/providers/gtdx/`.
-/// 5. Remove the `.gtpack` file (and empty parent dirs) from staging so it
-///    does not end up in the final `extensions/provider/{id}-{version}/` tree.
+///
+/// The staged `.gtpack` stays where it is: it is a `manifest.json` ledger
+/// entry, and the committed `extensions/provider/{id}-{version}/` tree must
+/// contain every one of those (see the module docs).
 ///
 /// Caller must invoke `Storage::abort_install` on the staging dir if this
 /// returns `Err` — staging will be left populated.
@@ -107,29 +116,7 @@ pub(crate) fn post_install_provider(
     ));
     std::fs::write(&dest, &bytes)?;
 
-    // Step 5: Remove the gtpack from staging so it is not committed to
-    //         the extensions tree.
-    std::fs::remove_file(&staged_path)?;
-    // Remove now-empty parent directories (best-effort; ignore errors).
-    remove_empty_ancestors(&staged_path, staging);
-
     Ok(dest)
-}
-
-/// Walk upward from `removed_file`'s parent toward (but not including) `stop`
-/// and remove any empty directories encountered.
-fn remove_empty_ancestors(removed_file: &Path, stop: &Path) {
-    let mut current = removed_file.parent();
-    while let Some(dir) = current {
-        if dir == stop {
-            break;
-        }
-        // `remove_dir` succeeds only if the directory is empty.
-        if std::fs::remove_dir(dir).is_err() {
-            break;
-        }
-        current = dir.parent();
-    }
 }
 
 /// Scan `manual_dir` for `*.gtpack` files and error if any share `pack_id`.
