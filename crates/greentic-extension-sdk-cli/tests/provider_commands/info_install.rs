@@ -169,13 +169,15 @@ fn gtdx_install_provider_from_gtxpack_places_files() {
         .join("describe.json");
     assert!(describe.exists(), "expected describe.json at {describe:?}");
 
-    // Gtpack MUST NOT be in final extensions dir
+    // Gtpack MUST stay in the extensions dir: manifest.json lists it, and the
+    // designer refuses an install missing any ledger file.
     let gtpack_in_ext = home
         .join("extensions/provider/greentic.provider.fixture-0.1.0")
         .join("runtime/provider.gtpack");
-    assert!(
-        !gtpack_in_ext.exists(),
-        "gtpack must not be left in extensions dir"
+    assert_eq!(
+        std::fs::read(&gtpack_in_ext).unwrap(),
+        gtpack_bytes,
+        "gtpack listed in manifest.json must stay in the extensions dir"
     );
 }
 
