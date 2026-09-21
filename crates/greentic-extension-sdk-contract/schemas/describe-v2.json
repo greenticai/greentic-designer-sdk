@@ -215,6 +215,11 @@
             "label": {
               "description": "Display name for the channel. Absent means a consumer should fall back to `metadata.name`. The field exists for the case where the channel's name and the extension's name legitimately differ.",
               "type": "string"
+            },
+            "surface": {
+              "description": "What a person reaches the worker through on this channel. The one value consumers act on today is `browser`; absent means not stated, which a consumer must read as not a browser channel. A consumer that guarantees an environment a way in from a browser uses this to avoid adding a second, redundant web-chat channel. Deliberately an open string rather than an enum: this object is `additionalProperties: false`, and an enum would turn every future value into a describe that older consumers refuse outright. A provider must not declare this field until the consumers that load it know the field.",
+              "type": "string",
+              "minLength": 1
             }
           }
         }
