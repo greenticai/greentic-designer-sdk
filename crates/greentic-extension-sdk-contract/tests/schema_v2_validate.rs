@@ -245,6 +245,67 @@ fn messaging_channel_contribution_passes_schema_and_roundtrips() {
     assert!(serialized.contains("\"ref\":\"oci://ghcr.io/greenticai/"));
 }
 
+/// The schema and the typed struct must agree about `surface`, or the field is
+/// unusable in exactly one direction: accepted by the type and refused by
+/// `gtdx validate`, a publisher cannot ship it; refused by the type and
+/// accepted by the schema, every consumer unloads the extension. Both halves
+/// are asserted here, against the same document.
+#[test]
+fn a_messaging_channel_surface_passes_schema_and_parses_typed() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["messaging_channel"] = serde_json::json!({
+        "id": "messaging-3aigent-gui",
+        "ref": "oci://ghcr.io/greenticai/packs/messaging/messaging-3aigent-gui@sha256:36a0c547",
+        "surface": "browser"
+    });
+
+    validate_describe_v2(&v).expect("a browser surface should pass describe-v2 schema");
+    let parsed: DescribeJson =
+        serde_json::from_value(v).expect("a browser surface should parse typed");
+    assert!(
+        parsed
+            .contributions
+            .messaging_channel
+            .as_ref()
+            .expect("messaging_channel should be Some")
+            .serves_browser()
+    );
+}
+
+/// A value this build does not act on is still a VALID describe — the whole
+/// reason the field is an open string. Refusing it at the schema would make a
+/// future surface unpublishable through any `gtdx` built before it.
+#[test]
+fn an_unrecognised_surface_is_still_a_valid_describe() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["messaging_channel"] = serde_json::json!({
+        "id": "messaging-x",
+        "ref": "oci://ghcr.io/greenticai/packs/messaging/messaging-x@sha256:ab",
+        "surface": "voice"
+    });
+    validate_describe_v2(&v).expect("an unrecognised surface must still validate");
+    let parsed: DescribeJson = serde_json::from_value(v).expect("and still parse");
+    assert!(
+        !parsed
+            .contributions
+            .messaging_channel
+            .unwrap()
+            .serves_browser()
+    );
+}
+
+/// An empty token says nothing, and would otherwise read as "stated".
+#[test]
+fn an_empty_surface_is_refused_by_the_schema() {
+    let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+    v["contributions"]["messaging_channel"] = serde_json::json!({
+        "id": "messaging-x",
+        "ref": "oci://ghcr.io/greenticai/packs/messaging/messaging-x@sha256:ab",
+        "surface": ""
+    });
+    assert!(validate_describe_v2(&v).is_err());
+}
+
 /// `label` is the only optional member; a channel without one is the common
 /// case, since `metadata.name` is already a display name.
 #[test]
