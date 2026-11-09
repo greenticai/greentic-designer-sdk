@@ -35,7 +35,7 @@ pub fn validate_for_publish(describe: &DescribeJson) -> Result<(), Vec<Validatio
         }
     }
     for (i, url) in describe.runtime.permissions.network.iter().enumerate() {
-        if network_pattern_allowed(url) {
+        if network_pattern_allowed(url) || infra_token_allowed(url) {
             continue;
         }
         errors.push(ValidationError::new(
@@ -56,6 +56,39 @@ pub fn validate_for_publish(describe: &DescribeJson) -> Result<(), Vec<Validatio
 /// same rule in the same words.
 pub(crate) const NETWORK_PATTERN_RULE: &str =
     "must be https:// (plain http allowed only for loopback hosts)";
+
+/// Scheme of an infra network grant token.
+const INFRA_SCHEME: &str = "infra://";
+
+/// Whether `pattern` is a well-formed `infra://<family>/<name>` grant token,
+/// accepted in `runtime.permissions.network` ONLY (never in `fetchHosts`).
+///
+/// The token names no host: the runtime derives one `https://host:port/*`
+/// pattern per dispatch from the connected infra resource. CROSS-REFERENCE:
+/// this mirrors `parse_grant` / `valid_segment` in
+/// `greentic-designer-extensions/crates/greentic-ext-runtime/src/infra_grant.rs`:
+/// exactly two segments separated by one `/`, each non-empty, starting and
+/// ending with an ASCII alphanumeric and containing only alphanumerics or `-`.
+/// The runtime lowercases the segments, so upper case is accepted here too.
+/// Stricter than the runtime in one way: surrounding whitespace is rejected
+/// (the runtime trims it) because a describe should not carry it.
+pub(crate) fn infra_token_allowed(pattern: &str) -> bool {
+    let Some(rest) = pattern.strip_prefix(INFRA_SCHEME) else {
+        return false;
+    };
+    let Some((family, name)) = rest.split_once('/') else {
+        return false;
+    };
+    infra_segment_valid(family) && infra_segment_valid(name)
+}
+
+fn infra_segment_valid(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && b.first().is_some_and(u8::is_ascii_alphanumeric)
+        && b.last().is_some_and(u8::is_ascii_alphanumeric)
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'-')
+}
 
 /// Whether a `runtime.permissions.network` / `permissions.ui.fetchHosts`
 /// pattern is one the extension runtime will actually honour.
@@ -367,6 +400,71 @@ mod tests {
                 .any(|e| e.field == "runtime.permissions.network[0]"),
             "loopback-prefixed public host must be rejected (exact host match only)"
         );
+    }
+
+    fn with_network(tokens: &[&str]) -> Result<(), Vec<ValidationError>> {
+        let mut d = sample_describe();
+        d.runtime.permissions.network = tokens.iter().map(|t| (*t).to_string()).collect();
+        validate_for_publish(&d)
+    }
+
+    #[test]
+    fn well_formed_infra_tokens_are_allowed() {
+        for t in [
+            "infra://vector-store/qdrant",
+            "infra://cache/redis",
+            "infra://a/b",
+            "infra://Cache/Redis",
+            "infra://db2/pg-16",
+        ] {
+            assert!(with_network(&[t]).is_ok(), "{t} should be accepted");
+        }
+        assert!(with_network(&["https://api.example.com/*", "infra://cache/redis"]).is_ok());
+    }
+
+    #[test]
+    fn malformed_infra_tokens_are_rejected() {
+        for t in [
+            "infra://",
+            "infra:///redis",
+            "infra://cache/",
+            "infra://cache",
+            "infra://cache/redis/extra",
+            "infra://cache/redis/",
+            "infra://x/y/z",
+            "infra:/cache/redis",
+            "infra:cache/redis",
+            "INFRA://cache/redis",
+            " infra://cache/redis",
+            "infra://cache/redis ",
+            "infra://ca che/redis",
+            "infra://cache_x/redis",
+            "infra://cache/re_dis",
+            "infra://-cache/redis",
+            "infra://cache/redis-",
+            "infra://cache/redis*",
+            "infra://*/redis",
+            "infra://cache@evil.com/redis",
+            "infra://cache/redis?x=1",
+            "infra://cache/redis#f",
+            "https+infra://cache/redis",
+            "http://infra://cache/redis",
+        ] {
+            let errs = with_network(&[t]).expect_err(t);
+            assert!(
+                errs.iter()
+                    .any(|e| e.field == "runtime.permissions.network[0]"),
+                "{t} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn infra_token_helper_matches_the_validator() {
+        assert!(infra_token_allowed("infra://cache/redis"));
+        assert!(!infra_token_allowed("https://cache/redis"));
+        // Not an address pattern: the loopback/https rule must not accept it.
+        assert!(!network_pattern_allowed("infra://cache/redis"));
     }
 
     #[test]

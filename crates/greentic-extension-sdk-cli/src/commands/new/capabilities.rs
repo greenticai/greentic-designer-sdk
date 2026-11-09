@@ -32,7 +32,9 @@ use greentic_extension_sdk_contract::{
 use semver::{Version, VersionReq};
 
 use crate::commands::lint::{rules::looks_like_grant, rules_views};
-use crate::publish::validator::{NETWORK_PATTERN_RULE, network_pattern_allowed};
+use crate::publish::validator::{
+    NETWORK_PATTERN_RULE, infra_token_allowed, network_pattern_allowed,
+};
 
 /// HTTP methods `permissions.ui.platformApi[].method` accepts.
 const API_METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
@@ -230,6 +232,9 @@ pub(super) fn resolve(raw: &RawCapabilities) -> Result<Resolved> {
     }
 
     for pattern in &raw.network {
+        if infra_token_allowed(pattern) {
+            continue;
+        }
         check_network_pattern("--permit-network", pattern)?;
     }
     for grant in &raw.secrets {
