@@ -35,7 +35,8 @@ pub fn validate_for_publish(describe: &DescribeJson) -> Result<(), Vec<Validatio
         }
     }
     for (i, url) in describe.runtime.permissions.network.iter().enumerate() {
-        if network_pattern_allowed(url) || infra_token_allowed(url) {
+        if network_pattern_allowed(url) || infra_token_allowed(url) || knowledge_token_allowed(url)
+        {
             continue;
         }
         errors.push(ValidationError::new(
@@ -80,6 +81,21 @@ pub(crate) fn infra_token_allowed(pattern: &str) -> bool {
         return false;
     };
     infra_segment_valid(family) && infra_segment_valid(name)
+}
+
+/// The four `knowledge://` capability tokens the runtime strips from
+/// `runtime.permissions.network` before building the URL allow-list.
+/// Case-sensitive, no path or query.
+const KNOWLEDGE_TOKENS: [&str; 4] = [
+    "knowledge://create",
+    "knowledge://read",
+    "knowledge://list",
+    "knowledge://remove",
+];
+
+/// Whether `pattern` is exactly one of the four knowledge capability tokens.
+pub(crate) fn knowledge_token_allowed(pattern: &str) -> bool {
+    KNOWLEDGE_TOKENS.contains(&pattern)
 }
 
 fn infra_segment_valid(s: &str) -> bool {
@@ -448,6 +464,51 @@ mod tests {
             "infra://cache/redis#f",
             "https+infra://cache/redis",
             "http://infra://cache/redis",
+        ] {
+            let errs = with_network(&[t]).expect_err(t);
+            assert!(
+                errs.iter()
+                    .any(|e| e.field == "runtime.permissions.network[0]"),
+                "{t} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn the_four_knowledge_tokens_are_allowed() {
+        for t in [
+            "knowledge://create",
+            "knowledge://read",
+            "knowledge://list",
+            "knowledge://remove",
+        ] {
+            assert!(with_network(&[t]).is_ok(), "{t} should be accepted");
+        }
+        assert!(
+            with_network(&[
+                "https://api.example.com/*",
+                "knowledge://create",
+                "infra://cache/redis"
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn other_knowledge_tokens_are_rejected() {
+        for t in [
+            "knowledge://delete-all",
+            "knowledge://",
+            "knowledge://create/extra",
+            "knowledge://create/",
+            "knowledge://create?x=1",
+            "knowledge://create#f",
+            "knowledge://Create",
+            "KNOWLEDGE://create",
+            "knowledge:/create",
+            "knowledge://*",
+            " knowledge://create",
+            "knowledge://create ",
         ] {
             let errs = with_network(&[t]).expect_err(t);
             assert!(

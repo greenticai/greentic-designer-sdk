@@ -33,7 +33,7 @@ use semver::{Version, VersionReq};
 
 use crate::commands::lint::{rules::looks_like_grant, rules_views};
 use crate::publish::validator::{
-    NETWORK_PATTERN_RULE, infra_token_allowed, network_pattern_allowed,
+    NETWORK_PATTERN_RULE, infra_token_allowed, knowledge_token_allowed, network_pattern_allowed,
 };
 
 /// HTTP methods `permissions.ui.platformApi[].method` accepts.
@@ -232,7 +232,7 @@ pub(super) fn resolve(raw: &RawCapabilities) -> Result<Resolved> {
     }
 
     for pattern in &raw.network {
-        if infra_token_allowed(pattern) {
+        if infra_token_allowed(pattern) || knowledge_token_allowed(pattern) {
             continue;
         }
         check_network_pattern("--permit-network", pattern)?;
