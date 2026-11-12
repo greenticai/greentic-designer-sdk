@@ -83,14 +83,17 @@ pub(crate) fn infra_token_allowed(pattern: &str) -> bool {
     infra_segment_valid(family) && infra_segment_valid(name)
 }
 
-/// The four `knowledge://` capability tokens the runtime strips from
+/// The seven `knowledge://` capability tokens the runtime strips from
 /// `runtime.permissions.network` before building the URL allow-list.
 /// Case-sensitive, no path or query.
-const KNOWLEDGE_TOKENS: [&str; 4] = [
+const KNOWLEDGE_TOKENS: [&str; 7] = [
     "knowledge://create",
     "knowledge://read",
     "knowledge://list",
     "knowledge://remove",
+    "knowledge://list-bases",
+    "knowledge://search",
+    "knowledge://update",
 ];
 
 /// Whether `pattern` is exactly one of the four knowledge capability tokens.
@@ -475,12 +478,15 @@ mod tests {
     }
 
     #[test]
-    fn the_four_knowledge_tokens_are_allowed() {
+    fn the_seven_knowledge_tokens_are_allowed() {
         for t in [
             "knowledge://create",
             "knowledge://read",
             "knowledge://list",
             "knowledge://remove",
+            "knowledge://list-bases",
+            "knowledge://search",
+            "knowledge://update",
         ] {
             assert!(with_network(&[t]).is_ok(), "{t} should be accepted");
         }
@@ -498,6 +504,9 @@ mod tests {
     fn other_knowledge_tokens_are_rejected() {
         for t in [
             "knowledge://delete-all",
+            "knowledge://list_bases",
+            "knowledge://Search",
+            "knowledge://search/x",
             "knowledge://",
             "knowledge://create/extra",
             "knowledge://create/",
