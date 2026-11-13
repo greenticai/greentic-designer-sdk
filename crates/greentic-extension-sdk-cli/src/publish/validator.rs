@@ -35,7 +35,8 @@ pub fn validate_for_publish(describe: &DescribeJson) -> Result<(), Vec<Validatio
         }
     }
     for (i, url) in describe.runtime.permissions.network.iter().enumerate() {
-        if network_pattern_allowed(url) || infra_token_allowed(url) {
+        if network_pattern_allowed(url) || infra_token_allowed(url) || knowledge_token_allowed(url)
+        {
             continue;
         }
         errors.push(ValidationError::new(
@@ -88,6 +89,33 @@ fn infra_segment_valid(s: &str) -> bool {
         && b.first().is_some_and(u8::is_ascii_alphanumeric)
         && b.last().is_some_and(u8::is_ascii_alphanumeric)
         && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'-')
+}
+
+/// Scheme of a host knowledge port grant token.
+const KNOWLEDGE_SCHEME: &str = "knowledge://";
+
+/// The operations of the host knowledge port. CROSS-REFERENCE: mirrors the
+/// `knowledge://<op>` tokens `greentic-ext-runtime` checks per call
+/// (`host_state_knowledge`): an op outside this list is never honoured, so a
+/// describe must not declare one.
+const KNOWLEDGE_OPS: [&str; 7] = [
+    "create",
+    "read",
+    "list",
+    "remove",
+    "list-bases",
+    "search",
+    "update",
+];
+
+/// Whether `pattern` is a `knowledge://<op>` grant token for one of the host
+/// knowledge port operations, accepted in `runtime.permissions.network` ONLY
+/// (never in `fetchHosts`). The token names no host: the host serves the call
+/// from the worker's own knowledge bases.
+pub(crate) fn knowledge_token_allowed(pattern: &str) -> bool {
+    pattern
+        .strip_prefix(KNOWLEDGE_SCHEME)
+        .is_some_and(|op| KNOWLEDGE_OPS.contains(&op))
 }
 
 /// Whether a `runtime.permissions.network` / `permissions.ui.fetchHosts`
@@ -457,6 +485,36 @@ mod tests {
                 "{t} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn knowledge_tokens_are_allowed_for_known_ops_only() {
+        for op in KNOWLEDGE_OPS {
+            let t = format!("knowledge://{op}");
+            assert!(
+                with_network(&[t.as_str()]).is_ok(),
+                "{t} should be accepted"
+            );
+        }
+        for t in [
+            "knowledge://",
+            "knowledge://delete",
+            "knowledge://Search",
+            "knowledge://search/",
+            "knowledge://search ",
+            " knowledge://search",
+            "KNOWLEDGE://search",
+            "knowledge:/search",
+            "knowledge://list-bases/x",
+        ] {
+            let errs = with_network(&[t]).expect_err(t);
+            assert!(
+                errs.iter()
+                    .any(|e| e.field == "runtime.permissions.network[0]"),
+                "{t} should be rejected"
+            );
+        }
+        assert!(!network_pattern_allowed("knowledge://search"));
     }
 
     #[test]
